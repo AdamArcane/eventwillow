@@ -1,22 +1,22 @@
 <?php
 
 return [
-    'pricing_title' => 'Prețuri Event Schedule: gratuit, fără comision de platformă',
+    'pricing_title' => 'Prețuri EventWillow: gratuit, fără comision de platformă',
     'pricing_description' => 'Începe gratuit: evenimente și înscrieri nelimitate. Pro adaugă vânzarea biletelor cu plată, Enterprise locuri numerotate. Fără comision de platformă.',
 
     'features_title' => 'Software de gestionare a evenimentelor: toate funcțiile, fără comisioane de platformă',
     'features_description' => 'Toate funcțiile în cinci capitole: bilete prin Stripe sau PayPal fără comision de platformă, sincronizare bidirecțională a calendarului, buletine informative, import cu AI și statistici.',
 
-    'about_title' => 'Despre Event Schedule | Platformă open source pentru gestionarea evenimentelor',
-    'about_description' => 'Cine dezvoltă Event Schedule, sub ce licență este distribuit, unde se află codul sursă și o listă cu ce nu face. Open source, fără comisioane de platformă.',
+    'about_title' => 'Despre EventWillow | Platformă open source pentru gestionarea evenimentelor',
+    'about_description' => 'Cine dezvoltă EventWillow, sub ce licență este distribuit, unde se află codul sursă și o listă cu ce nu face. Open source, fără comisioane de platformă.',
 
     'selfhost_title' => 'Calendar de evenimente găzduit de tine | Toate funcțiile gratuit pe serverul tău',
-    'selfhost_description' => 'Găzduiește Event Schedule pe propriul server și toate funcțiile Pro și Enterprise sunt incluse gratuit. Open source, instalare dintr-un clic, fără comisioane de platformă, iar datele tale nu îți părăsesc niciodată infrastructura.',
+    'selfhost_description' => 'Găzduiește EventWillow pe propriul server și toate funcțiile Pro și Enterprise sunt incluse gratuit. Open source, instalare dintr-un clic, fără comisioane de platformă, iar datele tale nu îți părăsesc niciodată infrastructura.',
 
-    'ticketing_title' => 'Software de ticketing pentru evenimente, fără taxe de platformă - Event Schedule',
+    'ticketing_title' => 'Software de ticketing pentru evenimente, fără taxe de platformă - EventWillow',
     'ticketing_description' => 'Vinde bilete din pagina evenimentului tău fără taxe de platformă. Plată prin Stripe sau PayPal, rambursări totale sau parțiale și înregistrare cu cod QR pe telefon.',
 
-    'ai_title' => 'Import de evenimente cu AI: de la afiș la eveniment | Event Schedule',
+    'ai_title' => 'Import de evenimente cu AI: de la afiș la eveniment | EventWillow',
     'ai_description' => 'Lipește textul sau trage un afiș și AI completează detaliile evenimentului: dată, loc, artiști, preț. Gratuit în toate planurile, cu traducere în 12 limbi.',
 
     'calendar_sync_title' => 'Sincronizare bidirecțională a calendarului cu Google, Outlook și CalDAV',

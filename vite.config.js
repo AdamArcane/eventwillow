@@ -2,8 +2,15 @@ import { defineConfig } from 'vite';
 import laravel from 'laravel-vite-plugin';
 import vue from '@vitejs/plugin-vue';
 
+// Under DDEV the dev server runs in the container, so the browser must reach it
+// through the project's HTTPS URL and the port exposed in .ddev/config.yaml.
+const ddevUrl = process.env.IS_DDEV_PROJECT === 'true' && process.env.DDEV_PRIMARY_URL
+    ? process.env.DDEV_PRIMARY_URL.replace(/:\d+$/, '')
+    : null;
+
 export default defineConfig({
     server: {
+        ...(ddevUrl ? { host: '0.0.0.0', port: 5173, strictPort: true, origin: `${ddevUrl}:5173` } : {}),
         /*
         hmr: {
             host: "192.168.10.10",

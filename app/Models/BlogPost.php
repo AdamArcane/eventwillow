@@ -318,7 +318,7 @@ class BlogPost extends Model
     public function pageTitle(): string
     {
         $title = trim((string) $this->meta_title);
-        $suffix = ' | Event Schedule';
+        $suffix = ' | '.config('app.name');
 
         if (mb_strlen($title.$suffix) <= 60) {
             return $title.$suffix;

@@ -10,8 +10,8 @@
 <a href="{{ marketing_url() }}">
     <div class="flex h-16 pt-2 shrink-0 items-center">
         <picture>
-            <source srcset="{{ url('images/light_logo.webp') }}" type="image/webp">
-            <img class="h-10 w-auto" src="{{ url('images/light_logo.png') }}" alt="Event Schedule">
+            <!-- <source srcset="{{ url('images/light_logo.webp') }}" type="image/webp"> -->
+            <img src="{{ config('app.logo_light') }}" alt="EventWillow">
         </picture>
     </div>
 </a>

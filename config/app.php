@@ -13,7 +13,7 @@ return [
     |
     */
 
-    'name' => 'Event Schedule',
+    'name' => env('APP_NAME', 'EventWillow'),
 
     /*
     |--------------------------------------------------------------------------
@@ -42,7 +42,7 @@ return [
     'growth_data_token' => trim((string) env('GROWTH_DATA_TOKEN', '')),
 
     // Where app:pull-growth fetches from. `?:` so a present-but-blank variable still gets the default.
-    'growth_data_url' => env('GROWTH_DATA_URL') ?: 'https://eventschedule.com',
+    'growth_data_url' => env('GROWTH_DATA_URL') ?: 'https://eventwillow.com',
 
     /*
      * How stale the scheduler heartbeat may get before /admin raises "scheduler stalled".
@@ -255,19 +255,23 @@ return [
         'store' => env('APP_MAINTENANCE_STORE', 'database'),
     ],
 
+
     'event_categories' => [
-        1 => 'Art & Culture',
-        2 => 'Business Networking',
-        3 => 'Community',
-        4 => 'Concerts',
-        5 => 'Education',
-        6 => 'Food & Drink',
-        7 => 'Health & Fitness',
-        8 => 'Parties & Festivals',
-        9 => 'Personal Growth',
-        10 => 'Sports',
-        11 => 'Spirituality',
-        12 => 'Tech',
+        1 => 'Arts & Culture',
+        2 => 'Classes & Workshops',
+        3 => 'Community Events',
+        4 => 'Concerts & Performances',
+        5 => 'Conferences',
+        6 => 'Festivals & Fairs',
+        7 => 'Food & Drink',
+        8 => 'Markets & Pop-Ups',
+        9 => 'Meetups & Socials',
+        10 => 'Outdoor Adventures',
+        11 => 'Parties & Celebrations',
+        12 => 'Retreats',
+        13 => 'Spiritual Gatherings',
+        14 => 'Sports & Recreation',
+        15 => 'Tours & Experiences',
     ],
 
     /*

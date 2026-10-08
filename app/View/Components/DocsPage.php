@@ -74,7 +74,7 @@ class DocsPage extends Component
 
     public function pageTitle(): string
     {
-        return $this->title ?? $this->page['title'].' - Event Schedule';
+        return $this->title ?? $this->page['title'].' - '.config('app.name');
     }
 
     public function metaDescription(): string
@@ -143,7 +143,7 @@ class DocsPage extends Component
 
         $title = $this->pageTitle();
 
-        return preg_replace('/\s+[-|]\s+Event Schedule$/u', '', $title) ?: $title;
+        return preg_replace('/\s+[-|]\s+'.preg_quote(config('app.name'), '/').'$/u', '', $title) ?: $title;
     }
 
     /**

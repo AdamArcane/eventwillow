@@ -8,22 +8,22 @@
  */
 
 return [
-    'pricing_title' => 'Event Schedule Pricing: Free Plan, Zero Platform Fees',
-    'pricing_description' => 'Start free with unlimited events and unlimited free registration. Pro adds paid ticketing, Enterprise adds reserved seating. Zero platform fees on every plan.',
+    'pricing_title' => 'EventWillow Pricing - Simple Tools for Better Events',
+    'pricing_description' => 'Everything you need to plan, publish, and manage your event, with straightforward pricing built for gatherings of all sizes.',
 
-    'features_title' => 'Event Management Software: Every Feature, No Platform Fees',
-    'features_description' => 'Every feature in five chapters: tickets through Stripe or PayPal with no platform fee, two-way calendar sync, newsletters, AI import and analytics.',
+    'features_title' => 'Everything You Need to Bring People Together',
+    'features_description' => 'Manage tickets, registrations, channels, attendees, communications, payments, and more from one connected event platform.',
 
-    'about_title' => 'About Event Schedule | Open Source Event Management Platform',
-    'about_description' => 'Who builds Event Schedule, the license it ships under, where the source lives, and a list of what it does not do. Open source, with zero platform fees.',
+    'about_title' => 'About EventWillow | Technology for Meaningful Gatherings',
+    'about_description' => 'EventWillow helps organizers spend less time wrestling with technology and more time creating gatherings that matter.',
 
-    'selfhost_title' => 'Selfhosted Event Calendar: Every Feature Free on Your Server',
-    'selfhost_description' => 'Selfhost Event Schedule on your own server and every Pro and Enterprise feature is included free. Open source, one-click installs, no platform fees.',
+    'selfhost_title' => 'Event Technology Without the Headaches',
+    'selfhost_description' => 'EventWillow provides the technology behind your event, with the tools and support you need to keep everything running smoothly.',
 
-    'ticketing_title' => 'Event Ticketing Software, No Platform Fees - Event Schedule',
+    'ticketing_title' => 'Event Ticketing Software, No Platform Fees - EventWillow',
     'ticketing_description' => 'Sell tickets from your own event page with zero platform fees. Stripe or PayPal checkout, full or partial refunds, and QR check-in from any phone.',
 
-    'ai_title' => 'AI Event Import: Turn a Flyer into an Event | Event Schedule',
+    'ai_title' => 'AI Event Import: Turn a Flyer into an Event | EventWillow',
     'ai_description' => 'Paste the text or drop a flyer and AI fills in the event: date, venue, performers, price. Free on every plan, with translation into 12 languages.',
 
     'calendar_sync_title' => 'Two-Way Calendar Sync for Google, Outlook & CalDAV',

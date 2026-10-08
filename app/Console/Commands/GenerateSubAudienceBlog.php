@@ -169,7 +169,7 @@ class GenerateSubAudienceBlog extends Command
                     'meta_title' => $result['meta_title'] ?? $result['title'],
                     'meta_description' => $result['meta_description'] ?? ($result['excerpt'] ?? null),
                     'featured_image' => $result['featured_image'] ?? null,
-                    'author_name' => 'Event Schedule Team',
+                    'author_name' => config('app.name').' Team',
                     'is_published' => true,
                     'published_at' => now()->subSeconds(rand(0, 6 * 60 * 60)),
                 ]);

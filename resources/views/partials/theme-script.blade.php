@@ -37,7 +37,7 @@
         var VARIANTS = @json($variants);
         var LIGHT = @json($lightVariants);
         var DARK = @json($darkVariants);
-        var DEFAULT_LIGHT = 'mist', DEFAULT_DARK = 'midnight';
+        var DEFAULT_LIGHT = 'sand', DEFAULT_DARK = 'carbon';
 
         function get(k) { try { return localStorage.getItem(k); } catch (e) { return null; } }
         function set(k, v) { try { localStorage.setItem(k, v); } catch (e) {} }

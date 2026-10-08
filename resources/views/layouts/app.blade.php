@@ -282,6 +282,7 @@
 
     @vite([
     'resources/css/app.css',
+    'resources/css/ew-dashboard.css',
     'resources/js/app.js',
     ])
 
