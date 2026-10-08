@@ -155,7 +155,7 @@
             class="theme-btn js-theme-popover-btn js-sidebar-popover-btn flex-1 rounded-lg py-2.5 transition-all duration-200"
             data-popover="theme" aria-label="{{ __('messages.theme') }}" aria-haspopup="dialog" aria-expanded="false">
             @foreach ($themeModeIcons as $glyph => $iconPath)
-                <svg class="js-theme-glyph h-5 w-5 mx-auto {{ $glyph === 'system' ? '' : 'hidden' }}" data-theme-glyph="{{ $glyph }}"
+                <svg class="js-theme-glyph h-5 w-5 mx-auto {{ $glyph === 'light' ? '' : 'hidden' }}" data-theme-glyph="{{ $glyph }}"
                     fill="none" viewBox="0 0 24 24" stroke="currentColor" aria-hidden="true">
                     <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="{{ $iconPath }}" />
                 </svg>
@@ -286,7 +286,7 @@
     //
     // (Do not name that Blade directive in this comment. Blade compiles directives inside JS
     // comments just the same, and an unbalanced one 500s every admin page.)
-    syncThemeGlyphs(window.getCurrentTheme ? window.getCurrentTheme() : 'system');
+    syncThemeGlyphs(window.getCurrentTheme ? window.getCurrentTheme() : 'light');
 
     // The popover a trigger opens: the .js-sidebar-popover in the same footer with the same
     // data-popover name (theme, or support for an admin).

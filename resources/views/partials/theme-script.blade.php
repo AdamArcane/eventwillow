@@ -46,7 +46,7 @@
             return window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light';
         }
 
-        function mode() { return get(KEY) || 'system'; }
+        function mode() { return get(KEY) || 'light'; }
 
         // The brightness actually rendering: an explicit light/dark, or the OS
         // preference under 'system'. Drives which palette row the picker shows.

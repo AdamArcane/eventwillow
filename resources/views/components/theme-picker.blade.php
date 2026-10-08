@@ -83,11 +83,11 @@
     // the sidebar footer, where it used to: the settings tab renders no JS of its own, so it
     // only ever worked because that unrelated partial happened to ship on the same pages.
     function updateThemeButtons() {
-        var mode = 'system';
+        var mode = 'light';
         if (window.getCurrentTheme) {
             mode = window.getCurrentTheme();
         } else {
-            try { mode = localStorage.getItem('theme') || 'system'; } catch (e) {}
+            try { mode = localStorage.getItem('theme') || 'light'; } catch (e) {}
         }
 
         document.querySelectorAll('.js-theme-mode-btn').forEach(function(button) {
