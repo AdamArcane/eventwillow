@@ -20,6 +20,15 @@ use Tests\TestCase;
  */
 class SecurityHeadersCspTest extends TestCase
 {
+    protected function setUp(): void
+    {
+        parent::setUp();
+        // Keep policy snapshots independent of a developer's running Vite server.
+        \Illuminate\Support\Facades\Vite::swap(
+            (new \Illuminate\Foundation\Vite)->useHotFile(sys_get_temp_dir().'/missing-vite-'.uniqid()),
+        );
+    }
+
     private const EXPECTED_LOCAL = "default-src 'self'; "
         ."script-src 'self' 'unsafe-inline' 'unsafe-eval' 'nonce-NNN' sub.eventschedule.test:* *.googleapis.com *.gstatic.com *.googletagmanager.com *.stripe.com unpkg.com js.sentry-cdn.com *.sentry.io challenges.cloudflare.com cdn.jsdelivr.net cdn.onesignal.com *.onesignal.com; "
         ."style-src 'self' 'unsafe-inline' sub.eventschedule.test:* *.googleapis.com *.gstatic.com *.bootstrapcdn.com cdn.jsdelivr.net; "
@@ -55,6 +64,41 @@ class SecurityHeadersCspTest extends TestCase
         $response = (new SecurityHeaders)->handle($request, fn ($r) => new Response('ok'));
 
         return preg_replace("/'nonce-[^']+'/", "'nonce-NNN'", $response->headers->get('Content-Security-Policy'));
+    }
+
+    public function test_local_channel_policy_allows_the_active_vite_origin_only_locally(): void
+    {
+        config(['services.meta.pixel_id' => null, 'stay22.enabled' => false]);
+        $hotFile = tempnam(sys_get_temp_dir(), 'vite-csp-');
+        file_put_contents($hotFile, 'https://eventwillow.ddev.site:5173');
+        $originalVite = \Illuminate\Support\Facades\Vite::getFacadeRoot();
+        \Illuminate\Support\Facades\Vite::swap((new \Illuminate\Foundation\Vite)->useHotFile($hotFile));
+
+        try {
+            $local = $this->directiveMap($this->cspFor('local'));
+            foreach (['script-src', 'style-src', 'img-src', 'font-src', 'connect-src'] as $directive) {
+                $this->assertContains('https://eventwillow.ddev.site:5173', $local[$directive]);
+            }
+            $this->assertContains('wss://eventwillow.ddev.site:5173', $local['connect-src']);
+            $this->assertStringNotContainsString('eventwillow.ddev.site', $this->cspFor('production'));
+
+            unlink($hotFile);
+            $this->assertSame(self::EXPECTED_LOCAL, $this->cspFor('local'));
+        } finally {
+            \Illuminate\Support\Facades\Vite::swap($originalVite);
+            if (is_file($hotFile)) {
+                unlink($hotFile);
+            }
+        }
+    }
+
+    public function test_debugbar_variable_preview_scripts_carry_the_request_nonce(): void
+    {
+        $dumper = new \App\Support\CspDebugBarVarDumper('preview-nonce');
+        $html = $dumper->renderVar(['example' => 'value']);
+
+        $this->assertStringContainsString('<script nonce="preview-nonce">Sfdump(', $html);
+        $this->assertStringNotContainsString('<script>', $html);
     }
 
     public function test_local_policy_is_unchanged(): void

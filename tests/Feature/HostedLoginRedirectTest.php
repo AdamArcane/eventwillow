@@ -23,6 +23,35 @@ class HostedLoginRedirectTest extends TestCase
         ], $overrides));
     }
 
+    public function test_local_hosted_manage_links_return_to_configured_app_host(): void
+    {
+        $this->configure(['app.env' => 'local', 'app.url' => 'https://eventwillow.ddev.site']);
+        $request = \Illuminate\Http\Request::create('https://ewd.eventwillow.ddev.site/');
+        $this->app->instance('request', $request);
+        \Illuminate\Support\Facades\URL::setRequest($request);
+
+        $this->assertSame('https://eventwillow.ddev.site/ewd/schedule', app_url('/ewd/schedule'));
+    }
+
+    public function test_local_hosted_admin_redirect_preserves_path_and_query(): void
+    {
+        $this->configure(['app.env' => 'local', 'app.url' => 'https://eventwillow.ddev.site']);
+        $middleware = new \App\Http\Middleware\RedirectToAppSubdomain;
+        $next = fn ($request) => new \Illuminate\Http\Response('admin');
+
+        $response = $middleware->handle(
+            \Illuminate\Http\Request::create('https://ewd.eventwillow.ddev.site/ewd/schedule?tab=team'),
+            $next,
+        );
+        $this->assertSame('https://eventwillow.ddev.site/ewd/schedule?tab=team', $response->headers->get('Location'));
+
+        $response = $middleware->handle(
+            \Illuminate\Http\Request::create('https://eventwillow.ddev.site/ewd/schedule'),
+            $next,
+        );
+        $this->assertSame(200, $response->getStatusCode());
+    }
+
     public function test_hosted_login_on_bare_domain_redirects_to_app_subdomain(): void
     {
         $this->configure();

@@ -4,8 +4,10 @@ docroot: public
 php_version: "8.4"
 webserver_type: nginx-fpm
 xdebug_enabled: false
-additional_hostnames: []
+additional_hostnames:
+  - "*.eventwillow"
 additional_fqdns: []
+project_tld: ddev.site
 database:
     type: mysql
     version: "8.0"

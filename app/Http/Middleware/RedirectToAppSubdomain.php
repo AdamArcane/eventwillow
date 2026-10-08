@@ -10,11 +10,11 @@ class RedirectToAppSubdomain
 {
     public function handle(Request $request, Closure $next): Response
     {
-        if (config('app.is_testing') || config('app.env') === 'local' || ! config('app.hosted')) {
+        if (config('app.is_testing') || ! config('app.hosted')) {
             return $next($request);
         }
 
-        if (! str_starts_with($request->getHost(), 'app.')) {
+        if ($request->getHost() !== parse_url(app_url('/'), PHP_URL_HOST)) {
             return redirect(app_url($request->getRequestUri()), 302);
         }
 

@@ -32,6 +32,17 @@ class SecurityHeaders
 
         if (app()->bound('debugbar')) {
             app('debugbar')->getJavascriptRenderer()->setCspNonce($nonce);
+
+            if (app()->environment('local')) {
+                // Debugbar's variable previews inject separate scripts via jQuery.
+                $dumper = new \App\Support\CspDebugBarVarDumper($nonce);
+                \DebugBar\DataCollector\DataCollector::setDefaultVarDumper($dumper);
+                foreach (app('debugbar')->getCollectors() as $collector) {
+                    if (method_exists($collector, 'setVarDumper')) {
+                        $collector->setVarDumper($dumper);
+                    }
+                }
+            }
         }
 
         $response = $next($request);
@@ -85,6 +96,21 @@ class SecurityHeaders
         $host = $request->getHost();
 
         $directives = $this->baseDirectives($isLocal, $host, $nonce);
+
+        // Vite has one asset origin shared by all local channel subdomains.
+        // Trust only the active dev server, and never read its hot file in production.
+        if ($isLocal && \Illuminate\Support\Facades\Vite::isRunningHot()) {
+            $url = parse_url(trim(file_get_contents(\Illuminate\Support\Facades\Vite::hotFile())));
+            if (is_array($url) && isset($url['scheme'], $url['host'])
+                && in_array($url['scheme'], ['http', 'https'], true)) {
+                $authority = $url['host'].(isset($url['port']) ? ':'.$url['port'] : '');
+                $origin = $url['scheme'].'://'.$authority;
+                foreach (['script-src', 'style-src', 'img-src', 'font-src', 'connect-src'] as $directive) {
+                    $directives[$directive][] = $origin;
+                }
+                $directives['connect-src'][] = ($url['scheme'] === 'https' ? 'wss' : 'ws').'://'.$authority;
+            }
+        }
 
         // Opt-in third-party integrations widen the policy only when they are actually
         // configured, so an install that uses none of them keeps the tight default.

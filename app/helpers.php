@@ -914,8 +914,14 @@ if (! function_exists('app_url')) {
      */
     function app_url(string $path = '/'): string
     {
-        if (config('app.is_testing') || config('app.env') === 'local' || ! config('app.hosted')) {
+        if (config('app.is_testing') || ! config('app.hosted')) {
             return url($path);
+        }
+
+        // Hosted local development still has tenant subdomains. App links must
+        // return to the configured app host instead of following the tenant request.
+        if (config('app.env') === 'local') {
+            return rtrim(config('app.url'), '/').'/'.ltrim($path, '/');
         }
 
         return 'https://app.'._base_domain().$path;
