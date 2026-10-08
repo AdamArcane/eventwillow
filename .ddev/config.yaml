@@ -5,21 +5,26 @@ php_version: "8.4"
 webserver_type: nginx-fpm
 xdebug_enabled: false
 additional_hostnames:
-  - "*.eventwillow"
+    - '*.eventwillow'
 additional_fqdns: []
-project_tld: ddev.site
 database:
     type: mysql
     version: "8.0"
+host_db_port: "3306"
 use_dns_when_possible: true
 composer_version: "2"
 web_environment: []
 nodejs_version: "24"
 corepack_enable: false
+web_extra_exposed_ports:
+    - name: vite
+      container_port: 5173
+      http_port: 5172
+      https_port: 5173
 web_extra_daemons:
-  - name: vite
-    command: "npm run dev"
-    directory: /var/www/html
+    - name: vite
+      command: npm run dev
+      directory: /var/www/html
 
 # Key features of DDEV's config.yaml:
 
@@ -308,9 +313,3 @@ web_extra_daemons:
 # information on the commands that can be extended and the tasks you can define
 # for them. Example:
 #hooks:
-
-web_extra_exposed_ports:
-  - name: vite
-    container_port: 5173
-    http_port: 5172
-    https_port: 5173
