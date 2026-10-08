@@ -19,7 +19,7 @@ class HostedLoginRedirectTest extends TestCase
             'app.hosted' => true,
             'app.is_testing' => false,
             'app.env' => 'production',
-            'app.url' => 'https://eventschedule.test',
+            'app.url' => 'https://eventwillow.ddev.site',
         ], $overrides));
     }
 
@@ -56,7 +56,7 @@ class HostedLoginRedirectTest extends TestCase
     {
         $this->configure();
 
-        $this->get('https://eventschedule.test/login')
+        $this->get('https://eventwillow.ddev.site/login')
             ->assertRedirect('https://app.eventschedule.test/login');
 
         // www host and query-string preservation (?pa= pending-action token)

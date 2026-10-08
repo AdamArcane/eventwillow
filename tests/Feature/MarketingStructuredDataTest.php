@@ -63,7 +63,7 @@ class MarketingStructuredDataTest extends TestCase
 
     public function test_a_double_quote_in_the_page_title_does_not_break_the_breadcrumb(): void
     {
-        $this->pinAppUrl('https://eventschedule.test');
+        $this->pinAppUrl('https://eventwillow.ddev.site');
 
         // A real page cannot be relied on to carry a quote in its title, so bind one that does.
         // strip_tags and html_entity_decode are exercised too: the slot arrives already rendered.
@@ -90,7 +90,7 @@ class MarketingStructuredDataTest extends TestCase
 
         // The deepest crumb is this page, so it has to agree with the canonical, which is built
         // from config('app.url') rather than from whatever host served the request.
-        $this->assertSame('https://eventschedule.test'.self::QUOTE_FIXTURE_PATH, $last['item']);
+        $this->assertSame('https://eventwillow.ddev.site'.self::QUOTE_FIXTURE_PATH, $last['item']);
         $this->assertSame(1, $breadcrumb['itemListElement'][0]['position']);
         $this->assertSame('Home', $breadcrumb['itemListElement'][0]['name']);
     }
@@ -106,7 +106,7 @@ class MarketingStructuredDataTest extends TestCase
      */
     public function test_a_closing_script_tag_in_the_page_title_cannot_break_out_of_the_breadcrumb(): void
     {
-        $this->pinAppUrl('https://eventschedule.test');
+        $this->pinAppUrl('https://eventwillow.ddev.site');
 
         // Written as entities so the slot renders the payload as TEXT, which is what a title read
         // out of the database looks like by the time the layout sees it. $crumbName strips tags

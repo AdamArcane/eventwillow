@@ -35,7 +35,7 @@ class MarketingEdgeCacheTest extends TestCase
         // answer. pinAppUrl() rather than config(): config() alone moves _base_domain() and
         // leaves the host $this->get() reaches where APP_URL put it at bootstrap. phpunit.xml
         // pins the same value, so this is belt and braces rather than the only guard.
-        $this->pinAppUrl('https://eventschedule.test');
+        $this->pinAppUrl('https://eventwillow.ddev.site');
     }
 
     /**

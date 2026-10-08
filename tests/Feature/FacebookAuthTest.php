@@ -400,7 +400,7 @@ class FacebookAuthTest extends TestCase
         config([
             'services.google.client_id' => 'google-client-id',
             'services.google.client_secret' => 'google-client-secret',
-            'services.google.redirect' => 'https://eventschedule.test/google-calendar/callback',
+            'services.google.redirect' => 'https://eventwillow.ddev.site/google-calendar/callback',
         ]);
         $this->fakeFacebookUser('fb-sync', 'syncer@example.com');
 

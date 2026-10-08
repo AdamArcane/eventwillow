@@ -260,11 +260,11 @@ class RobotsTxtTest extends TestCase
     {
         config(['app.hosted' => true]);
 
-        $body = $this->robots('https://eventschedule.test/robots.txt')->getContent();
+        $body = $this->robots('https://eventwillow.ddev.site/robots.txt')->getContent();
 
         $this->assertAppRules($body, 'apex');
-        $this->assertStringContainsString("\nSitemap: https://eventschedule.test/sitemap.xml\n", $body);
-        $this->assertStringContainsString('# AI/LLM-friendly docs: https://eventschedule.test/llms.txt', $body);
+        $this->assertStringContainsString("\nSitemap: https://eventwillow.ddev.site/sitemap.xml\n", $body);
+        $this->assertStringContainsString('# AI/LLM-friendly docs: https://eventwillow.ddev.site/llms.txt', $body);
 
         // A hosted install serves a schedule's return pages on the schedule's own host.
         foreach (self::SELFHOST_SCHEDULE_PATHS as $rule) {
@@ -320,7 +320,7 @@ class RobotsTxtTest extends TestCase
         $this->assertNoBarePrefix($disallows, 'tenant');
 
         // The tenant subdomain's line is the cross-submission grant for the global sitemap.
-        $this->assertStringContainsString("\nSitemap: https://eventschedule.test/sitemap.xml\n", $body);
+        $this->assertStringContainsString("\nSitemap: https://eventwillow.ddev.site/sitemap.xml\n", $body);
         // Never /api/: the calendar renders from it.
         $this->assertStringNotContainsString('/api', $body);
     }
@@ -378,7 +378,7 @@ class RobotsTxtTest extends TestCase
     {
         config(['app.hosted' => false]);
 
-        foreach (['https://eventschedule.test/robots.txt', 'https://tenant.eventschedule.test/robots.txt'] as $url) {
+        foreach (['https://eventwillow.ddev.site/robots.txt', 'https://tenant.eventschedule.test/robots.txt'] as $url) {
             $body = $this->robots($url)->getContent();
 
             $this->assertAppRules($body, $url);
@@ -396,7 +396,7 @@ class RobotsTxtTest extends TestCase
     {
         config(['app.hosted' => false]);
 
-        $disallows = $this->disallows($this->robots('https://eventschedule.test/robots.txt')->getContent());
+        $disallows = $this->disallows($this->robots('https://eventwillow.ddev.site/robots.txt')->getContent());
         $role = $this->createRole($this->createOwner(), 'venue');
 
         foreach ($this->secretPaths() + $this->appSecretPaths() + $this->scheduleReturnPaths($role) as $name => $path) {
@@ -417,7 +417,7 @@ class RobotsTxtTest extends TestCase
     {
         config(['app.hosted' => true]);
 
-        $disallows = $this->disallows($this->robots('https://eventschedule.test/robots.txt')->getContent());
+        $disallows = $this->disallows($this->robots('https://eventwillow.ddev.site/robots.txt')->getContent());
 
         foreach ($this->secretPaths() + $this->appSecretPaths() as $name => $path) {
             $this->assertTrue($this->blocks($disallows, $path), "{$name}: {$path}");
@@ -436,7 +436,7 @@ class RobotsTxtTest extends TestCase
     {
         $bodies = [];
 
-        foreach (['hosted apex' => [true, 'https://eventschedule.test/robots.txt'], 'tenant' => [true, 'https://tenant.eventschedule.test/robots.txt'], 'selfhost' => [false, 'https://eventschedule.test/robots.txt']] as $host => [$hosted, $url]) {
+        foreach (['hosted apex' => [true, 'https://eventwillow.ddev.site/robots.txt'], 'tenant' => [true, 'https://tenant.eventschedule.test/robots.txt'], 'selfhost' => [false, 'https://eventwillow.ddev.site/robots.txt']] as $host => [$hosted, $url]) {
             config(['app.hosted' => $hosted]);
             $bodies[$host] = $this->disallows($this->robots($url)->getContent());
         }

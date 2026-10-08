@@ -343,7 +343,7 @@ class VenueMapPageTest extends TestCase
 
     public function test_the_privacy_policy_names_a_map_service_only_where_one_is_used(): void
     {
-        $this->pinAppUrl('https://eventschedule.test');
+        $this->pinAppUrl('https://eventwillow.ddev.site');
 
         config(['services.map.geocoder_url' => 'https://nominatim.openstreetmap.org/search', 'services.map.tile_url' => 'https://tile.openstreetmap.org/{z}/{x}/{y}.png']);
         $both = $this->get('/privacy')->assertOk()->getContent();

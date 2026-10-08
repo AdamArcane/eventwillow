@@ -35,7 +35,7 @@ class SupportChatGuestTest extends TestCase
 
         // The stateless rule compares the request host with _base_domain(); see
         // MarketingEdgeCacheTest::test_the_test_client_reaches_the_base_domain.
-        $this->pinAppUrl('https://eventschedule.test');
+        $this->pinAppUrl('https://eventwillow.ddev.site');
         Cache::flush();
     }
 

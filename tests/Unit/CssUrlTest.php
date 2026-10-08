@@ -20,7 +20,7 @@ class CssUrlTest extends TestCase
     {
         return [
             // What the app itself writes is left exactly as it is.
-            'an asset' => ['https://eventschedule.test/images/backgrounds/Abstract_Sunrise.webp', 'https://eventschedule.test/images/backgrounds/Abstract_Sunrise.webp'],
+            'an asset' => ['https://eventwillow.ddev.site/images/backgrounds/Abstract_Sunrise.webp', 'https://eventwillow.ddev.site/images/backgrounds/Abstract_Sunrise.webp'],
             'a query string' => ['https://cdn.test/a.png?v=2&w=960', 'https://cdn.test/a.png?v=2&w=960'],
             'an encoded path' => ['https://cdn.test/My%20Image%27s.png', 'https://cdn.test/My%20Image%27s.png'],
             'a fragment and a port' => ['http://cdn.test:8080/a.png#x', 'http://cdn.test:8080/a.png#x'],

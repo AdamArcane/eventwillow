@@ -119,7 +119,7 @@ Used whenever Blade output must be proven unchanged (P2 spot checks, F5, O1, and
 - Boots the app and dispatches through the HTTP kernel IN-PROCESS - no live server: `$app = require 'bootstrap/app.php'; $kernel = $app->make(Illuminate\Contracts\Http\Kernel::class); $response = $kernel->handle(Illuminate\Http\Request::create($url, 'GET'));`. CLI dispatch sidesteps the opcache landmine (L7) and allows time freezing.
 - BEFORE bootstrap: `putenv('SESSION_DRIVER=array'); putenv('CACHE_STORE=array'); putenv('MAIL_MAILER=array');` - the dev `.env` uses database sessions, and real env vars beat `.env`, so this prevents snapshot runs from writing session rows anywhere.
 - After bootstrap: `Carbon::setTestNow('2026-07-15 12:00:00')` (any fixed instant) so `now()`-derived output is frozen.
-- URLs are absolute with the local host so host/path routing matches: `Request::create('https://eventschedule.test/for-musicians')`. The URL manifest lives in `storage/refactor/urls.php`: all 34 `/for-*` URIs (derive from `ls resources/views/marketing/for-*.blade.php`), plus per-phase additions (guest schedule/event pages built from known fixture rows).
+- URLs are absolute with the local host so host/path routing matches: `Request::create('https://eventwillow.ddev.site/for-musicians')`. The URL manifest lives in `storage/refactor/urls.php`: all 34 `/for-*` URIs (derive from `ls resources/views/marketing/for-*.blade.php`), plus per-phase additions (guest schedule/event pages built from known fixture rows).
 - Writes `{slug}.html` (normalized body) plus `manifest.txt` lines of `status<TAB>sha256<TAB>slug`.
 - Refuses to run if `bootstrap/cache/config.php` exists (cached config would silently override the putenv values).
 

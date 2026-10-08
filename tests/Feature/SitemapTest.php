@@ -771,7 +771,7 @@ class SitemapTest extends TestCase
     {
         // Pinned: _base_domain() and the robots line both derive from app.url. phpunit.xml now
         // forces the same value, so this restates the dependency rather than supplying it.
-        config(['app.url' => 'https://eventschedule.test', 'app.hosted' => true]);
+        config(['app.url' => 'https://eventwillow.ddev.site', 'app.hosted' => true]);
 
         $owner = $this->createOwner();
         $role = $this->createRole($owner, 'talent', [

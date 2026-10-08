@@ -279,7 +279,7 @@ class FederationWelcomeTest extends TestCase
     public function test_every_link_points_at_this_site_and_the_host_is_not_linkable(): void
     {
         $instance = $this->makeInstance(['status' => FederatedInstance::STATUS_APPROVED]);
-        // With the trailing slash: without it, https://eventschedule.test.evil.example would pass.
+        // With the trailing slash: without it, https://eventwillow.ddev.site.evil.example would pass.
         $base = rtrim(marketing_url('/'), '/').'/';
 
         foreach ([false, true] as $withListings) {

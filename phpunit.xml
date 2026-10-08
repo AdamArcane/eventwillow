@@ -47,7 +47,7 @@
             shell variable can reintroduce the split. tests/TestCase.php::pinAppUrl() is how a test
             moves it deliberately.
         -->
-        <env name="APP_URL" value="https://eventschedule.test" force="true"/>
+        <env name="APP_URL" value="https://eventwillow.ddev.site" force="true"/>
         <env name="APP_MAINTENANCE_DRIVER" value="file"/>
         <env name="BCRYPT_ROUNDS" value="4"/>
         <env name="CACHE_STORE" value="array"/>

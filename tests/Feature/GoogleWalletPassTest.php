@@ -49,7 +49,7 @@ class GoogleWalletPassTest extends TestCase
         $this->privateKey = $privateKey;
         $this->publicKey = openssl_pkey_get_details($resource)['key'];
 
-        $this->pinAppUrl('https://eventschedule.test');
+        $this->pinAppUrl('https://eventwillow.ddev.site');
     }
 
     /*
@@ -233,7 +233,7 @@ class GoogleWalletPassTest extends TestCase
         $this->assertSame('google', $decoded['claims']['aud']);
         $this->assertSame('savetowallet', $decoded['claims']['typ']);
         $this->assertSame('wallet@example-project.iam.gserviceaccount.com', $decoded['claims']['iss']);
-        $this->assertContains('https://eventschedule.test', $decoded['claims']['origins']);
+        $this->assertContains('https://eventwillow.ddev.site', $decoded['claims']['origins']);
     }
 
     public function test_the_barcode_matches_the_on_page_qr_exactly(): void

@@ -340,18 +340,18 @@ class HeroExperimentTest extends TestCase
             'app.hosted' => true,
             'app.is_testing' => false,
             'app.env' => 'production',
-            'app.url' => 'https://eventschedule.test',
+            'app.url' => 'https://eventwillow.ddev.site',
         ]);
 
         $cases = [
-            'https://eventschedule.test/' => 'promote_sell',
+            'https://eventwillow.ddev.site/' => 'promote_sell',
             'https://www.eventschedule.test/' => 'promote_sell',
-            'https://EVENTSCHEDULE.test/' => 'promote_sell',
+            'https://eventwillow.ddev.site/' => 'promote_sell',
             'https://app.eventschedule.test/login?hero=promote_sell' => null,
             'https://someschedule.eventschedule.test/' => null,
             'https://blog.eventschedule.test/' => null,
             'https://noteventschedule.test/' => null,
-            'https://eventschedule.test.example.org/' => null,
+            'https://eventwillow.ddev.site.example.org/' => null,
         ];
 
         foreach ($cases as $referer => $expected) {

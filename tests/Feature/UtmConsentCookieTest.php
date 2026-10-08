@@ -638,7 +638,7 @@ class UtmConsentCookieTest extends TestCase
      */
     public function test_a_cacheable_marketing_page_is_not_seeded(): void
     {
-        $this->pinAppUrl('https://eventschedule.test');
+        $this->pinAppUrl('https://eventwillow.ddev.site');
 
         $response = $this->withUnencryptedCookie('cookie_consent', 'analytics.marketing.'.time())
             ->withUnencryptedCookie('es_attribution', $this->clientAttribution(['landing' => 'for-musicians']))
@@ -656,7 +656,7 @@ class UtmConsentCookieTest extends TestCase
      */
     public function test_the_non_page_routes_never_record_a_landing_page(): void
     {
-        $this->pinAppUrl('https://eventschedule.test');
+        $this->pinAppUrl('https://eventwillow.ddev.site');
 
         $index = $this->withUnencryptedCookie('cookie_consent', 'analytics.marketing.'.time())->get('/docs/search-index.json');
 

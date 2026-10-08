@@ -129,7 +129,7 @@ class NewsletterTest extends TestCase
         config([
             'app.hosted' => true,
             'app.is_testing' => false,
-            'app.url' => 'https://eventschedule.test',
+            'app.url' => 'https://eventwillow.ddev.site',
         ]);
 
         $user = User::factory()->create();

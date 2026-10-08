@@ -25,7 +25,7 @@ class RealtimeBeaconRenderTest extends TestCase
     {
         parent::setUp();
 
-        $this->pinAppUrl('https://eventschedule.test');
+        $this->pinAppUrl('https://eventwillow.ddev.site');
         Cache::flush();
         Setting::set('realtime_enabled', '1');
     }
