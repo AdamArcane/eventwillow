@@ -40,6 +40,7 @@ export default defineConfig({
                 'resources/js/seating-box-office.js',
                 //'resources/js/leaflet.js',
                 'resources/css/app.css',
+                'resources/css/ew-dashboard.css',
                 'resources/css/marketing-app.css',
                 'resources/css/marketing.css',
                 'resources/css/docs.css',
