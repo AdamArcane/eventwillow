@@ -21,7 +21,8 @@ export default defineConfig({
             origin: '*',
         },
         watch: {
-            usePolling: true,
+            // Native file notifications avoid continuously polling the project.
+            usePolling: false,
         },
     },
     plugins: [
