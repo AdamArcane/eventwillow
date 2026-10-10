@@ -17,6 +17,7 @@ final class Serializer
             'slug' => \Illuminate\Support\Str::slug($role->name), 'name' => $role->name,
             'description' => strip_tags($role->description ?? ''), 'summary' => $role->short_description ?? '',
             'type' => $role->type, 'timezone' => $role->timezone ?: config('app.timezone'),
+            'accent_color' => preg_match('/^#[0-9a-f]{3}(?:[0-9a-f]{3})?$/iD', $role->accent_color ?? '') ? $role->accent_color : '#4E81FA',
             'image' => $role->getProfileImageUrl(960), 'header_image' => $role->headerImageUrl(960),
             'location' => self::location($role), 'website' => self::safeUrl($role->website),
             'canonical_url' => $role->getGuestUrl(true), 'hide_past_events' => (bool) $role->hide_past_events,

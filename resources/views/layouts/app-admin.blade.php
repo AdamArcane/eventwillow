@@ -264,7 +264,7 @@
                              announce as its own star count and nothing else - the same trap
                              marketing/partials/header.blade.php documents for its copy of this
                              badge. --}}
-                        <a href="https://github.com/eventschedule/eventschedule" target="_blank" rel="noopener noreferrer"
+                        <a href="https://github.com/AdamArcane/eventwillow" target="_blank" rel="noopener noreferrer"
                             title="{{ __('messages.star_on_github') }}"
                             aria-label="{{ __('messages.star_on_github') }}"
                             class="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-medium text-gray-500 dark:text-gray-400 bg-gray-100 dark:bg-gray-800 border border-gray-200 dark:border-gray-700 hover:bg-gray-200 dark:hover:bg-gray-700 hover:text-gray-700 dark:hover:text-gray-300 transition-all duration-200 no-underline">

@@ -12,6 +12,18 @@ use Tests\TestCase;
 class SiteApiTest extends TestCase {
     use RefreshDatabase, CreatesScheduleData;
     private string $prefix = '/api/eventwillow/v1/';
+    public function test_channel_presentation_fields_are_available_in_details_and_event_associations(): void {
+        [$role, $event] = $this->fixture();
+        $role->update(['description'=>'Full channel description', 'short_description'=>'Short channel description', 'accent_color'=>'#123abc']);
+        $this->getJson($this->prefix.'channels/'.$role->subdomain)
+            ->assertOk()->assertJsonPath('data.description','Full channel description')
+            ->assertJsonPath('data.summary','Short channel description')->assertJsonPath('data.type','venue')
+            ->assertJsonPath('data.accent_color','#123abc');
+        $this->getJson($this->prefix.'events/'.UrlUtils::encodeId($event->id))
+            ->assertOk()->assertJsonPath('data.channels.0.accent_color','#123abc');
+        $role->accent_color = 'invalid';
+        $this->assertSame('#4E81FA', Serializer::channel($role)['accent_color']);
+    }
     protected function setUp(): void {
         parent::setUp();
         config(['eventwillow-public.enforce_ip_allowlist'=>true, 'eventwillow-public.site_key'=>'fixture-site-key','eventwillow-public.allowed_ips'=>['127.0.0.1'], 'eventwillow-public.trusted_proxy_ips'=>[], 'app.search_exclude_country'=>'']);

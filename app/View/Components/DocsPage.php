@@ -231,7 +231,7 @@ class DocsPage extends Component
             return null;
         }
 
-        return 'https://github.com/eventschedule/eventschedule/blob/main/'.$relative;
+        return 'https://github.com/AdamArcane/eventwillow/blob/main/'.$relative;
     }
 
     public function render(): View
