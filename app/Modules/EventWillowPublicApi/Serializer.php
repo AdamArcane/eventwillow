@@ -20,6 +20,12 @@ final class Serializer
             'accent_color' => preg_match('/^#[0-9a-f]{3}(?:[0-9a-f]{3})?$/iD', $role->accent_color ?? '') ? $role->accent_color : '#4E81FA',
             'image' => $role->getProfileImageUrl(960), 'header_image' => $role->headerImageUrl(960),
             'location' => self::location($role), 'website' => self::safeUrl($role->website),
+            'contact' => ['email' => $role->show_email ? ($role->email ?? '') : '',
+                'phone' => $role->showsPhone() ? $role->phone : ''],
+            'social_links' => collect($role->decodeLinks('social_links'))->map(function ($link) {
+                $url = self::safeUrl($link->url ?? null);
+                return $url ? ['label' => strip_tags($link->name ?? ''), 'platform' => UrlUtils::detectPlatform($url), 'url' => $url] : null;
+            })->filter()->values()->all(),
             'canonical_url' => $role->getGuestUrl(true), 'hide_past_events' => (bool) $role->hide_past_events,
             'groups' => $role->groups->map(fn ($g) => ['id' => UrlUtils::encodeId($g->id), 'name' => $g->name])->values()->all(),
             'actions' => [['label' => 'Visit channel', 'url' => $role->getGuestUrl(true), 'type' => 'channel']],
@@ -97,6 +103,8 @@ final class Serializer
                 return ['id'=>UrlUtils::encodeId($r->pivot->group_id),'identifier'=>$group ? $r->subdomain.'/'.$group->slug : '', 'name'=>$group?->name ?? ''];
             })->values()->all(),
             'format' => $event->event_url ? 'online' : 'in-person', 'registration' => $registration,
+            // Meeting access stays on the protected guest page; external registration is public.
+            'registration_url' => self::safeUrl($event->registration_url),
             'price' => $price, 'cost' => $cost, 'custom_fields' => $fields,
             'canonical_url' => $canonical, 'actions' => $actions, 'created_at' => $event->created_at?->toIso8601String(),
         ];

@@ -29,6 +29,23 @@ class SiteApiTest extends TestCase {
         config(['eventwillow-public.enforce_ip_allowlist'=>true, 'eventwillow-public.site_key'=>'fixture-site-key','eventwillow-public.allowed_ips'=>['127.0.0.1'], 'eventwillow-public.trusted_proxy_ips'=>[], 'app.search_exclude_country'=>'']);
         $this->withHeaders(['X-EventWillow-Site-Key'=>'fixture-site-key','Accept'=>'application/json']);
     }
+    public function test_public_contacts_and_safe_social_links_follow_guest_visibility(): void {
+        [$role, $event, $id] = $this->fixture(['event_url'=>'https://private-join.invalid/secret', 'registration_url'=>'https://register.example.org/autumn']);
+        $role->forceFill(['show_email'=>false, 'show_phone'=>false, 'phone'=>'+12025550123', 'phone_verified_at'=>now(),
+            'social_links'=>json_encode([['name'=>'Our community', 'url'=>'https://www.facebook.com/willow'], ['url'=>'javascript:alert(1)']])])->save();
+        $this->getJson($this->prefix.'channels/'.$role->subdomain)->assertOk()
+            ->assertJsonPath('data.contact.email','')->assertJsonPath('data.contact.phone','')
+            ->assertJsonCount(1,'data.social_links')->assertJsonPath('data.social_links.0.platform','facebook');
+        $role->forceFill(['show_email'=>true, 'show_phone'=>true, 'phone_verified_at'=>now()])->save();
+        $this->getJson($this->prefix.'events/'.$id)->assertOk()
+            ->assertJsonPath('data.channels.0.contact.email',$role->email)
+            ->assertJsonPath('data.channels.0.contact.phone','+12025550123')
+            ->assertJsonPath('data.registration_url','https://register.example.org/autumn');
+        $role->phone_verified_at=null;$role->save();
+        $response=$this->getJson($this->prefix.'events/'.$id)->assertOk()->assertJsonPath('data.channels.0.contact.phone','');
+        $this->assertStringNotContainsString('private-join.invalid',$response->getContent());
+        $this->assertStringNotContainsString('javascript:',$response->getContent());
+    }
     private function fixture(array $attrs=[]): array {
         $role=$this->createRole($this->createOwner(),'venue',['name'=>'Willow Studio','subdomain'=>'willow-studio','city'=>'Brooklyn','state'=>'Connecticut','country_code'=>'US','hide_past_events'=>false]);
         $event=$this->createEvent($role, array_merge(['name'=>'Autumn Gathering','creator_role_id'=>$role->id],$attrs));
