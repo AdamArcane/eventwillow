@@ -128,6 +128,18 @@ class PlaceLookupService
         $state = $raw('state');
         $postal = $raw('postal_code');
 
+        // Calendar imports can put the entire US address in address1. Use the same
+        // conservative parser as the public API; never parse a field containing a URL.
+        if (! $link && $street !== '' && ($city === '' || $postal === '')) {
+            require_once app_path('Modules/EventWillowPublicApi/Location.php');
+            $parsed = \App\Modules\EventWillowPublicApi\addressLocation($street, $raw('country_code'));
+            // A complete address already includes these words. Use parsed components
+            // for eligibility only, leaving its cache identity and query unduplicated.
+            $hasParsedLocality = $parsed['city'] !== '' || $parsed['postal'] !== '';
+        } else {
+            $hasParsedLocality = false;
+        }
+
         $none = fn (string $why) => ['hash' => null, 'address' => null, 'country' => null, 'street' => $street !== '', 'why' => $why];
 
         // A meeting link and nothing else: not a place at all, and VenueMap leaves it out.
@@ -139,7 +151,7 @@ class PlaceLookupService
             return $none('no_street');
         }
 
-        if ($city === '' && $postal === '') {
+        if ($city === '' && $postal === '' && ! $hasParsedLocality) {
             return $none('no_street');
         }
 

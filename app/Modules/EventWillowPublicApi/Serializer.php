@@ -40,7 +40,7 @@ final class Serializer
         return ['venue' => $role?->name ?? '', 'venue_id' => $role ? UrlUtils::encodeId($role->id) : '',
             'address' => $address, 'city' => trim($role?->city ?? '') ?: $parsed['city'],
             'state' => stateName(trim($role?->state ?? '') ?: $parsed['state'], $country, $address),
-            'country' => $country, 'postal' => trim($role?->postal_code ?? '') ?: $parsed['postal']];
+            'country' => $country, 'postal' => trim($role?->postal_code ?? '') ?: $parsed['postal']] + Coordinates::location($role);
     }
 
     public static function safeUrl(?string $url): ?string
@@ -94,6 +94,8 @@ final class Serializer
         if ($registration !== 'none') $actions[] = ['label' => match ($registration) {'tickets' => 'Get tickets', 'rsvp' => 'RSVP', default => 'Register'}, 'url' => $url, 'type' => $registration];
         if (!$home->hide_email_signup) $actions[] = ['label' => 'Follow channel', 'url' => $home->getGuestUrl(true), 'type' => 'follow'];
         $cost = $price ? ($price['free'] ? 'free' : 'paid') : ($event->rsvp_enabled ? 'free' : '');
+        $location = self::location($venue);
+        if ($event->event_url) $location = array_replace($location, ['latitude'=>null, 'longitude'=>null, 'geocode_status'=>'online']);
         return [
             'id' => UrlUtils::encodeId($event->id), 'key' => UrlUtils::encodeId($event->id).':'.$date,
             'slug' => \Illuminate\Support\Str::slug($event->name), 'name' => $event->name,
@@ -103,7 +105,7 @@ final class Serializer
             'starts_at' => $start->toIso8601String(), 'ends_at' => $start->copy()->addMinutes($event->durationInMinutes())->toIso8601String(),
             'local_starts_at' => $start->copy()->setTimezone($timezone)->toIso8601String(),
             'occurrence_date' => $date, 'timezone' => $timezone, 'recurring' => (bool) $event->days_of_week,
-            'recurrence' => $event->recurrenceSummary(), 'location' => self::location($venue),
+            'recurrence' => $event->recurrenceSummary(), 'location' => $location,
             'channels' => $roles->map(fn ($r) => self::channel($r))->values()->all(),
             'groups' => $roles->filter(fn ($r) => $r->pivot?->group_id)->map(function ($r) {
                 $group=$r->groups->firstWhere('id',$r->pivot->group_id);

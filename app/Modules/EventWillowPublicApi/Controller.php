@@ -71,6 +71,7 @@ class Controller extends BaseController
             if (!empty($in[$key])) $q->where($column, $in[$key]);
         }
         $p = $q->orderBy('name')->orderBy('id')->paginate($in['per_page'] ?? 24);
+        Coordinates::preload($p->items());
         return $this->response(collect($p->items())->map(fn ($r) => Serializer::channel($r))->all(), ['total' => $p->total(), 'page' => $p->currentPage(), 'per_page' => $p->perPage(), 'last_page' => $p->lastPage()]);
     }
 
@@ -99,6 +100,7 @@ class Controller extends BaseController
         $in = $this->input($request);
         $event = Visibility::events()->find(UrlUtils::decodeId($id));
         abort_unless($event, 404);
+        Coordinates::preloadEvents([$event]);
         $anchor = $event->getStartDateTime(null, true)->format('Y-m-d');
         $date = $in['date'] ?? ($event->days_of_week ? $event->nextOccurrenceFrom() : $anchor);
         abort_if(!$event->days_of_week && $date !== $anchor, 404);
@@ -141,6 +143,7 @@ class Controller extends BaseController
         $items = []; $facets = array_fill_keys(['country', 'state', 'city', 'category', 'venue', 'schedule', 'group', 'timezone'], []); $custom = [];
         $views = $sort === 'popular' ? DB::table('analytics_events_daily')->whereBetween('date', [now('UTC')->subDays(29)->toDateString(), now('UTC')->toDateString()])->selectRaw('event_id, SUM(desktop_views + mobile_views + tablet_views + unknown_views) AS views')->groupBy('event_id')->pluck('views', 'event_id') : collect();
         $query->chunkById(100, function ($events) use (&$items, &$facets, &$custom, $in, $from, $to, $mode, $channel, $views, $sort, $popularFeed) {
+            Coordinates::preloadEvents($events);
             foreach ($events as $event) {
                 if ($popularFeed && ($views[$event->id] ?? 0) <= 0) continue;
                 // Schedule dates, not UTC dates, identify occurrences. Use the application's native matcher.

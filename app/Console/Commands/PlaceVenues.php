@@ -41,9 +41,12 @@ class PlaceVenues extends Command
         }
 
         // 55 seconds, not 60: the next minute's tick must find the key gone.
-        $result = Cache::add(self::MINUTE_KEY, true, now()->addSeconds(55))
-            ? PlaceLookupService::run(PlaceLookupService::TIMER_BATCH)
-            : ['asked' => 0, 'busy' => false, 'paused' => false, 'failed' => false, 'waited' => true];
+        if (Cache::add(self::MINUTE_KEY, true, now()->addSeconds(55))) {
+            \App\Modules\EventWillowPublicApi\Coordinates::registerBatch();
+            $result = PlaceLookupService::run(PlaceLookupService::TIMER_BATCH);
+        } else {
+            $result = ['asked' => 0, 'busy' => false, 'paused' => false, 'failed' => false, 'waited' => true];
+        }
 
         // Few rows and short-lived: a schedule leaves this set the first time its queue is empty.
         // Reading its venues also registers any address nobody has noted yet, so a map switched
