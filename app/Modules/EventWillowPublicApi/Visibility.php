@@ -9,9 +9,15 @@ final class Visibility
 {
     public static function roles($query)
     {
-        $query->where('is_deleted', false)->where('is_unlisted', false)->whereNotNull('user_id')
+        return self::locationRoles($query)->whereNotNull('user_id')
             ->where(fn ($q) => $q->where(fn ($q) => $q->whereNotNull('email')->whereNotNull('email_verified_at'))
-                ->orWhere(fn ($q) => $q->whereNotNull('phone')->whereNotNull('phone_verified_at')))
+                ->orWhere(fn ($q) => $q->whereNotNull('phone')->whereNotNull('phone_verified_at')));
+    }
+
+    // Accepted event locations can be unclaimed without becoming discoverable channels.
+    public static function locationRoles($query)
+    {
+        $query->where('is_deleted', false)->where('is_unlisted', false)
             ->whereNot(fn ($q) => $q->demoContent())
             ->whereRaw('LOWER(TRIM(roles.name)) NOT REGEXP ?', [Event::LIKELY_TEST_NAME_REGEX])
             ->whereRaw('LOWER(TRIM(roles.name)) NOT REGEXP ?', [config('eventwillow-public.test_content_pattern')]);
@@ -33,7 +39,9 @@ final class Visibility
             ->whereRaw('LOWER(TRIM(events.name)) NOT REGEXP ?', [config('eventwillow-public.test_content_pattern')])
             ->whereHas('roles', fn ($q) => self::roles($q)->where('event_role.is_accepted', true))
             ->whereDoesntHave('roles', fn ($q) => $q->demoContent())
-            ->with(['roles' => fn ($q) => self::roles($q)->where('event_role.is_accepted', true)->orderBy('event_role.id'), 'roles.groups', 'creatorRole', 'tickets']);
+            ->with(['roles' => fn ($q) => self::roles($q)->where('event_role.is_accepted', true)->orderBy('event_role.id'),
+                'venue' => fn ($q) => self::locationRoles($q)->where('event_role.is_accepted', true)->orderBy('event_role.id'),
+                'roles.groups', 'creatorRole', 'tickets']);
         $country = strtolower(trim((string) config('app.search_exclude_country', '')));
         if ($country !== '') {
             $query->whereHas('roles', fn ($q) => $q->whereNotNull('country_code')->where('country_code', '!=', ''))

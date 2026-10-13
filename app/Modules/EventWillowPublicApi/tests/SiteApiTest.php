@@ -51,6 +51,54 @@ class SiteApiTest extends TestCase {
         $event=$this->createEvent($role, array_merge(['name'=>'Autumn Gathering','creator_role_id'=>$role->id],$attrs));
         return [$role,$event,UrlUtils::encodeId($event->id)];
     }
+    public function test_unclaimed_venue_location_is_available_without_publishing_its_channel(): void {
+        [$role,$event,$id]=$this->fixture();
+        $role->update(['type'=>'curator']);
+        $venue=$this->createRole($this->createOwner(),'venue',[
+            'name'=>'Riverside Hall','address1'=>'12 River Street','city'=>'Hartford',
+            'state'=>'CT','country_code'=>'US','postal_code'=>'06103',
+        ]);
+        $venue->forceFill(['user_id'=>null,'email'=>null,'email_verified_at'=>null])->save();
+        $event->roles()->attach($venue->id,['is_accepted'=>true]);
+        foreach (['events/'.$id,'events?from='.now()->toDateString().'&to='.now()->addDays(30)->toDateString()] as $path) {
+            $response=$this->getJson($this->prefix.$path)->assertOk();
+            $key=str_contains($path,'?')?'data.0':'data';
+            $response->assertJsonPath($key.'.location.venue','Riverside Hall')
+                ->assertJsonPath($key.'.location.city','Hartford')
+                ->assertJsonPath($key.'.location.state','Connecticut')
+                ->assertJsonPath($key.'.location.address','12 River Street')
+                ->assertJsonPath($key.'.location.postal','06103')
+                ->assertJsonCount(1,$key.'.channels');
+        }
+        $this->getJson($this->prefix.'channels/'.$venue->subdomain)->assertNotFound();
+        $this->getJson($this->prefix.'events?city=Hartford')->assertOk()->assertJsonCount(1,'data');
+        $this->getJson($this->prefix.'facets')->assertOk()->assertJsonPath('data.facets.city.0.label','Hartford');
+        foreach (['is_unlisted','is_deleted'] as $flag) {
+            $venue->forceFill([$flag=>true])->save();
+            $this->getJson($this->prefix.'events/'.$id)->assertOk()->assertJsonPath('data.location.venue','');
+            $venue->forceFill([$flag=>false])->save();
+        }
+        $event->roles()->updateExistingPivot($venue->id,['is_accepted'=>false]);
+        $this->getJson($this->prefix.'events/'.$id)->assertOk()->assertJsonPath('data.location.venue','');
+    }
+    public function test_location_fills_only_missing_fields_from_an_explicit_us_address(): void {
+        [$venue]=$this->fixture();
+        $venue->forceFill(['address1'=>'80 Wooster Street, Bethel, CT 06801','city'=>null,'state'=>null,'postal_code'=>null]);
+        $location=Serializer::location($venue);
+        $this->assertSame('Bethel',$location['city']);
+        $this->assertSame('Connecticut',$location['state']);
+        $this->assertSame('06801',$location['postal']);
+        $venue->forceFill(['city'=>'Saved city','state'=>'NY','postal_code'=>'10001']);
+        $location=Serializer::location($venue);
+        $this->assertSame('Saved city',$location['city']);
+        $this->assertSame('New York',$location['state']);
+        $this->assertSame('10001',$location['postal']);
+        foreach (['80 Wooster Street','80 Wooster Street, Bethel, ZZ 06801','80 Wooster Street, Bethel, CT'] as $address) {
+            $this->assertSame(['city'=>'','postal'=>''],\App\Modules\EventWillowPublicApi\addressLocation($address,'US'));
+        }
+        $this->assertSame(['city'=>'','postal'=>''],\App\Modules\EventWillowPublicApi\addressLocation('80 Wooster Street, Bethel, CT 06801','CA'));
+        $this->assertSame(['city'=>'Bethel','postal'=>'06801-1234'],\App\Modules\EventWillowPublicApi\addressLocation('80 Wooster Street, Bethel, Connecticut 06801-1234, United States','US'));
+    }
     public function test_key_and_source_are_required_on_every_endpoint(): void {
         [$role,$event,$id]=$this->fixture();
         foreach (['events','events/'.$id,'channels','channels/'.$role->subdomain,'channels/'.$role->subdomain.'/events','facets'] as $path) {
