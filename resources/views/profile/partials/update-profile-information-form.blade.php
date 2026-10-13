@@ -42,6 +42,15 @@
                                 {{ __('messages.click_here_to_verify_phone') }}
                             </button>
 
+                            {{-- Consent disclosure for the verification text (A2P 10DLC). Both documents are
+                                 replaceable by the operator, so policy_url() resolves them. --}}
+                            <p class="mt-2 text-xs text-gray-500 dark:text-gray-400">
+                                {!! str_replace([':terms', ':privacy'], [
+                                    '<a href="' . policy_url('terms') . '" target="_blank" class="underline hover:no-underline">' . __('messages.terms_of_service') . '</a>',
+                                    '<a href="' . policy_url('privacy') . '" target="_blank" class="underline hover:no-underline">' . __('messages.privacy_policy') . '</a>'
+                                ], __('messages.phone_verify_sms_disclosure')) !!}
+                            </p>
+
                             <div id="phone-code-input" style="display: none;" class="mt-2 flex items-center gap-2">
                                 <input type="text" id="phone-verification-code" maxlength="6" placeholder="000000" inputmode="numeric" autocomplete="one-time-code"
                                     aria-label="{{ __('messages.verify') }}"
