@@ -353,7 +353,7 @@ Key configuration in `.env`:
 
 ## Upstream sync workflow
 
-Use `python3 tools/upstream-sync.py preview` to inspect missing upstream commits. `prepare` starts an uncommitted merge on a new sync branch; `continue` resumes after reviewed conflicts are staged; `check` validates the committed tree. Only the explicit `draft-pr` action pushes and publishes a draft, and no action merges into main. These user-requested integration branches are an exception to the general main-only workflow above. Read `docs/UPSTREAM_SYNC.md`. Configure each checkout with `setup` so rerere is enabled and automatic staging stays disabled. Run the disposable-repository tool tests when changing this workflow. Focused sync checks are not a full-suite or browser verification claim.
+Use `php artisan upstream:sync preview` to inspect missing upstream commits. `prepare` starts an uncommitted merge on a new sync branch; `continue` resumes after reviewed conflicts are staged; `check` validates the committed tree. Only the explicit `draft-pr` action pushes and publishes a draft, and no action merges into main. These user-requested integration branches are an exception to the general main-only workflow above. Read `docs/UPSTREAM_SYNC.md`. Configure each checkout with `setup` so rerere is enabled and automatic staging stays disabled. Run `php artisan test --filter=UpstreamSyncWorkflowTest` when changing this workflow. The command and workflow live in `app/Modules/EventWillowSync`; use the normal console environment (DDEV here), with no separate Python runner. Focused sync checks are not a full-suite or browser verification claim.
 
 ## Localization
 
