@@ -353,6 +353,8 @@ Key configuration in `.env`:
 
 ## Localization
 
+EventWillow-specific wording and category labels belong in `app/Modules/EventWillowBranding/lang/{locale}/{group}.php`, not in upstream `resources/lang`. Keep the original translation keys and placeholders, and review schedule nouns separately from verbs and timetable references. Upstream catalogs load first, EventWillow defaults second, and administrator overrides last. The module also supplies the defaults shown in the translations editor. See `app/Modules/EventWillowBranding/README.md`; validate changes with the EventWillow branding translation and override tests plus the existing translation tests.
+
 Supported languages are defined in `config('app.supported_languages')`. Each has a corresponding directory in `resources/lang/`.
 
 ```bash
