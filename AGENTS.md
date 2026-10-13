@@ -351,6 +351,10 @@ Key configuration in `.env`:
 - `GEMINI_API_KEY` - For AI event parsing/translation
 - `REPORT_ERRORS` - Enable Sentry error reporting
 
+## Upstream sync workflow
+
+Use `python3 tools/upstream-sync.py preview` to inspect missing upstream commits. `prepare` starts an uncommitted merge on a new sync branch; `continue` resumes after reviewed conflicts are staged; `check` validates the committed tree. Only the explicit `draft-pr` action pushes and publishes a draft, and no action merges into main. These user-requested integration branches are an exception to the general main-only workflow above. Read `docs/UPSTREAM_SYNC.md`. Configure each checkout with `setup` so rerere is enabled and automatic staging stays disabled. Run the disposable-repository tool tests when changing this workflow. Focused sync checks are not a full-suite or browser verification claim.
+
 ## Localization
 
 EventWillow-specific wording and category labels belong in `app/Modules/EventWillowBranding/lang/{locale}/{group}.php`, not in upstream `resources/lang`. Keep the original translation keys and placeholders, and review schedule nouns separately from verbs and timetable references. Upstream catalogs load first, EventWillow defaults second, and administrator overrides last. The module also supplies the defaults shown in the translations editor. See `app/Modules/EventWillowBranding/README.md`; validate changes with the EventWillow branding translation and override tests plus the existing translation tests.
