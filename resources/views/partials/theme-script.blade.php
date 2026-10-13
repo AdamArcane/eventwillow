@@ -37,7 +37,8 @@
         var VARIANTS = @json($variants);
         var LIGHT = @json($lightVariants);
         var DARK = @json($darkVariants);
-        var DEFAULT_LIGHT = 'sand', DEFAULT_DARK = 'carbon';
+        var DEFAULT_LIGHT = @json(config('eventwillow-branding.theme.light_variant')), DEFAULT_DARK = @json(config('eventwillow-branding.theme.dark_variant'));
+        var DEFAULT_MODE = @json(config('eventwillow-branding.theme.mode'));
 
         function get(k) { try { return localStorage.getItem(k); } catch (e) { return null; } }
         function set(k, v) { try { localStorage.setItem(k, v); } catch (e) {} }
@@ -46,7 +47,7 @@
             return window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light';
         }
 
-        function mode() { return get(KEY) || 'light'; }
+        function mode() { return get(KEY) || DEFAULT_MODE; }
 
         // The brightness actually rendering: an explicit light/dark, or the OS
         // preference under 'system'. Drives which palette row the picker shows.

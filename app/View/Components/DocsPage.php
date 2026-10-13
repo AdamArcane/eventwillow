@@ -231,7 +231,7 @@ class DocsPage extends Component
             return null;
         }
 
-        return 'https://github.com/AdamArcane/eventwillow/blob/main/'.$relative;
+        return rtrim(config('eventwillow-branding.repository_url'), '/').'/blob/main/'.$relative;
     }
 
     public function render(): View

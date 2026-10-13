@@ -6,18 +6,10 @@
     $singleScheduleActive = $singleSchedule
         && (request()->is($singleSchedule->subdomain) || request()->is($singleSchedule->subdomain . '/*'));
     $hasScheduleSections = $allNavSchedules->count() > 1;
-    $logoPath = ltrim(config('app.logo_light'), '/');
-    $logoUrl = asset($logoPath);
-    if (is_file(public_path($logoPath))) {
-        $logoUrl .= (str_contains($logoUrl, '?') ? '&' : '?') . 'v=' . substr(hash_file('sha256', public_path($logoPath)), 0, 12);
-    }
 @endphp
 <a href="{{ marketing_url() }}">
     <div class="flex h-16 pt-2 shrink-0 items-center">
-        <picture>
-            <!-- <source srcset="{{ url('images/light_logo.webp') }}" type="image/webp"> -->
-            <img src="{{ $logoUrl }}" alt="EventWillow">
-        </picture>
+        @include('eventwillow-branding::navigation-logo')
     </div>
 </a>
 <nav class="flex flex-1 flex-col mt-4">

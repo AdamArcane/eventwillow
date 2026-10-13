@@ -282,7 +282,7 @@
 
     @vite([
     'resources/css/app.css',
-    'resources/css/ew-dashboard.css',
+    'app/Modules/EventWillowBranding/resources/css/dashboard.css',
     'resources/js/app.js',
     ])
 
