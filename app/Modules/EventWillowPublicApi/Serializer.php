@@ -39,7 +39,7 @@ final class Serializer
         $parsed = addressLocation($address, $country);
         return ['venue' => $role?->name ?? '', 'venue_id' => $role ? UrlUtils::encodeId($role->id) : '',
             'address' => $address, 'city' => trim($role?->city ?? '') ?: $parsed['city'],
-            'state' => stateName($role?->state ?? '', $country, $address),
+            'state' => stateName(trim($role?->state ?? '') ?: $parsed['state'], $country, $address),
             'country' => $country, 'postal' => trim($role?->postal_code ?? '') ?: $parsed['postal']];
     }
 
