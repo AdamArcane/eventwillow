@@ -93,11 +93,16 @@ class SiteApiTest extends TestCase {
         $this->assertSame('Saved city',$location['city']);
         $this->assertSame('New York',$location['state']);
         $this->assertSame('10001',$location['postal']);
-        foreach (['80 Wooster Street','80 Wooster Street, Bethel, ZZ 06801','80 Wooster Street, Bethel, CT'] as $address) {
-            $this->assertSame(['city'=>'','postal'=>''],\App\Modules\EventWillowPublicApi\addressLocation($address,'US'));
+        foreach (['80 Wooster Street','80 Wooster Street, Bethel, ZZ 06801','80 Wooster Street, Bethel'] as $address) {
+            $this->assertSame(['city'=>'','state'=>'','postal'=>''],\App\Modules\EventWillowPublicApi\addressLocation($address,'US'));
         }
-        $this->assertSame(['city'=>'','postal'=>''],\App\Modules\EventWillowPublicApi\addressLocation('80 Wooster Street, Bethel, CT 06801','CA'));
-        $this->assertSame(['city'=>'Bethel','postal'=>'06801-1234'],\App\Modules\EventWillowPublicApi\addressLocation('80 Wooster Street, Bethel, Connecticut 06801-1234, United States','US'));
+        $this->assertSame(['city'=>'','state'=>'','postal'=>''],\App\Modules\EventWillowPublicApi\addressLocation('80 Wooster Street, Bethel, CT 06801','CA'));
+        $this->assertSame(['city'=>'Bethel','state'=>'Connecticut','postal'=>'06801-1234'],\App\Modules\EventWillowPublicApi\addressLocation('80 Wooster Street, Bethel, Connecticut 06801-1234, United States','US'));
+        $venue->forceFill(['address1'=>'77 Forest Street, Hartford, CT','city'=>null,'state'=>null,'postal_code'=>null]);
+        $location=Serializer::location($venue);
+        $this->assertSame('Hartford',$location['city']);
+        $this->assertSame('Connecticut',$location['state']);
+        $this->assertSame('',$location['postal']);
     }
     public function test_key_and_source_are_required_on_every_endpoint(): void {
         [$role,$event,$id]=$this->fixture();

@@ -351,7 +351,15 @@ Key configuration in `.env`:
 - `GEMINI_API_KEY` - For AI event parsing/translation
 - `REPORT_ERRORS` - Enable Sentry error reporting
 
+## Upstream sync workflow
+
+Use `php artisan upstream:sync preview` to inspect missing upstream commits. `prepare` starts an uncommitted merge on a new sync branch; `continue` resumes after reviewed conflicts are staged; `check` validates the committed tree. Only the explicit `draft-pr` action pushes and publishes a draft, and no action merges into main. These user-requested integration branches are an exception to the general main-only workflow above. Read `docs/UPSTREAM_SYNC.md`. Configure each checkout with `setup` so rerere is enabled and automatic staging stays disabled. Run `php artisan test --filter=UpstreamSyncWorkflowTest` when changing this workflow. The command and workflow live in `app/Modules/EventWillowSync`; use the normal console environment (DDEV here), with no separate Python runner. Focused sync checks are not a full-suite or browser verification claim.
+
 ## Localization
+
+EventWillow-specific wording and category labels belong in `app/Modules/EventWillowBranding/lang/{locale}/{group}.php`, not in upstream `resources/lang`. Keep the original translation keys and placeholders, and review schedule nouns separately from verbs and timetable references. Upstream catalogs load first, EventWillow defaults second, and administrator overrides last. The module also supplies the defaults shown in the translations editor. See `app/Modules/EventWillowBranding/README.md`; validate changes with the EventWillow branding translation and override tests plus the existing translation tests.
+
+Presentation defaults (theme mode and palettes, repository/social links), logo rendering, and dashboard color overrides also live in `app/Modules/EventWillowBranding`. Keep upstream templates limited to small configuration/include hooks; preserve configured public image URLs and saved theme preferences.
 
 Supported languages are defined in `config('app.supported_languages')`. Each has a corresponding directory in `resources/lang/`.
 

@@ -23,11 +23,11 @@ function countryName(string $country): string {
     return ['US'=>'United States','CA'=>'Canada','GB'=>'United Kingdom','AU'=>'Australia','NZ'=>'New Zealand','IE'=>'Ireland','DE'=>'Germany','FR'=>'France','ES'=>'Spain','IT'=>'Italy','IN'=>'India','ZA'=>'South Africa'][$country] ?? $country;
 }
 function addressLocation(string $address, string $country): array {
-    $empty = ['city'=>'', 'postal'=>''];
+    $empty = ['city'=>'', 'state'=>'', 'postal'=>''];
     if (strtoupper($country) !== 'US') return $empty;
-    // Only parse an explicit comma-separated city, recognized state, and ZIP suffix.
+    // Only parse an explicit comma-separated city and recognized state suffix, with optional ZIP.
     $states = array_merge(array_keys(usStates()), array_values(usStates()));
     $pattern = implode('|', array_map(fn ($state) => preg_quote($state, '/'), $states));
-    if (!preg_match('/,\s*([^,\r\n]+),\s*(?:'.$pattern.')\s+(\d{5}(?:-\d{4})?)\s*(?:,\s*(?:US|USA|United States))?\s*$/iD', trim($address), $match)) return $empty;
-    return ['city'=>trim($match[1]), 'postal'=>$match[2]];
+    if (!preg_match('/,\s*([^,\r\n]+),\s*('.$pattern.')(?:\s+(\d{5}(?:-\d{4})?))?\s*(?:,\s*(?:US|USA|United States))?\s*$/iD', trim($address), $match)) return $empty;
+    return ['city'=>trim($match[1]), 'state'=>stateName($match[2], 'US'), 'postal'=>$match[3]??''];
 }
