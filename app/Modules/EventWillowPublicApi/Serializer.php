@@ -34,9 +34,13 @@ final class Serializer
 
     public static function location(?Role $role): array
     {
+        $address = $role?->address1 ?? '';
+        $country = strtoupper($role?->country_code ?? '');
+        $parsed = addressLocation($address, $country);
         return ['venue' => $role?->name ?? '', 'venue_id' => $role ? UrlUtils::encodeId($role->id) : '',
-            'address' => $role?->address1 ?? '', 'city' => $role?->city ?? '', 'state' => stateName($role?->state ?? '', $role?->country_code ?? '', $role?->address1 ?? ''),
-            'country' => strtoupper($role?->country_code ?? ''), 'postal' => $role?->postal_code ?? ''];
+            'address' => $address, 'city' => trim($role?->city ?? '') ?: $parsed['city'],
+            'state' => stateName($role?->state ?? '', $country, $address),
+            'country' => $country, 'postal' => trim($role?->postal_code ?? '') ?: $parsed['postal']];
     }
 
     public static function safeUrl(?string $url): ?string
@@ -50,6 +54,9 @@ final class Serializer
         $start = $event->occurrenceStartUtc($date, $timezone);
         $roles = $event->roles;
         $venue = $roles->firstWhere('type', 'venue');
+        if (!$venue && $event->relationLoaded('venue')) {
+            $venue = $event->getRelation('venue')->first();
+        }
         $home = $roles->first();
         $url = $event->getGuestUrl($home->subdomain, $date, true);
         // Do not let canonicalTarget choose a hidden/unaccepted association outside this public relation.

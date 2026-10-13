@@ -22,3 +22,12 @@ function countryName(string $country): string {
     if (class_exists('Locale')) { return \Locale::getDisplayRegion('und_' . $country, 'en') ?: $country; }
     return ['US'=>'United States','CA'=>'Canada','GB'=>'United Kingdom','AU'=>'Australia','NZ'=>'New Zealand','IE'=>'Ireland','DE'=>'Germany','FR'=>'France','ES'=>'Spain','IT'=>'Italy','IN'=>'India','ZA'=>'South Africa'][$country] ?? $country;
 }
+function addressLocation(string $address, string $country): array {
+    $empty = ['city'=>'', 'postal'=>''];
+    if (strtoupper($country) !== 'US') return $empty;
+    // Only parse an explicit comma-separated city, recognized state, and ZIP suffix.
+    $states = array_merge(array_keys(usStates()), array_values(usStates()));
+    $pattern = implode('|', array_map(fn ($state) => preg_quote($state, '/'), $states));
+    if (!preg_match('/,\s*([^,\r\n]+),\s*(?:'.$pattern.')\s+(\d{5}(?:-\d{4})?)\s*(?:,\s*(?:US|USA|United States))?\s*$/iD', trim($address), $match)) return $empty;
+    return ['city'=>trim($match[1]), 'postal'=>$match[2]];
+}
