@@ -21,6 +21,8 @@
         <x-doc-nav-group label="Manage" expanded>
             <x-doc-nav-link href="#manage-boost">Boost</x-doc-nav-link>
             <x-doc-nav-link href="#manage-plans">Schedules</x-doc-nav-link>
+            <x-doc-nav-link href="#manage-blocked">Blocked</x-doc-nav-link>
+            <x-doc-nav-link href="#manage-feeds">Feeds</x-doc-nav-link>
             <x-doc-nav-link href="#manage-domains">Domains</x-doc-nav-link>
             <x-doc-nav-link href="#manage-referrals">Referrals</x-doc-nav-link>
             <x-doc-nav-link href="#manage-newsletters">Newsletters</x-doc-nav-link>
@@ -250,6 +252,11 @@
                         <td>Venue map address lookups are failing</td>
                         <td>The address search behind the <a href="#venue-map" class="doc-link">venue map</a> has not answered for an hour, so maps that owners switched on are still waiting for their pins. Check that the address in <code class="doc-inline-code">MAP_GEOCODER_URL</code> is reachable from the server. Links to Queue.</td>
                         <td>Where <code class="doc-inline-code">MAP_GEOCODER_URL</code> is set</td>
+                    </tr>
+                    <tr>
+                        <td>Feeds are failing, many at once</td>
+                        <td>At least five of the sites that feeds read, and half of all the sites being read, could not be read in the last day. That many at once points at this server (its network, or an address of yours that other hosts block) and not at each site. While the row shows, no owner is emailed that their feed is broken and no feed is paused for it. Links to <a href="#manage-feeds" class="doc-link">Feeds</a>, filtered to the failing ones.</td>
+                        <td>Every install with a feed</td>
                     </tr>
                     <tr>
                         <td>Realtime page views are not being deleted</td>
@@ -809,6 +816,69 @@
         <p class="text-gray-600 dark:text-gray-300 mb-6">This page is on every install, because a schedule can be deleted and its name released on a selfhosted install too, and this is where you undo it. Only plans behave differently: a plain selfhost resolves every schedule to the Enterprise feature set, so the plan counts, the plan filters and columns, and the card that assigns a plan only appear on hosted installs. The features in each tier come from the application itself and what a plan charges from your Stripe prices; neither can be edited here. The figures the site advertises are set in the <a href="#settings-plan-pricing" class="doc-link">Plan pricing</a> card on Settings.</p>
     </section>
 
+    <!-- Manage: Blocked (every install) -->
+    <section id="manage-blocked" class="doc-section">
+        <h2 class="doc-heading">
+            <svg aria-hidden="true" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" class="w-5 h-5 text-gray-500 dark:text-gray-400 flex-shrink-0">
+                <path stroke-linecap="round" stroke-linejoin="round" d="M18.364 18.364A9 9 0 0 0 5.636 5.636m12.728 12.728A9 9 0 0 1 5.636 5.636m12.728 12.728L5.636 5.636" />
+            </svg>
+            Blocked (Manage)
+        </h2>
+        <p class="text-gray-600 dark:text-gray-300 mb-6">The Blocked page, at <code class="doc-inline-code">/admin/blocked</code>, is where you shut out an account that abuses the service, and where you keep the list of what new accounts are refused for. It is there on every install. Deleting a spam schedule on the <a href="#manage-plans" class="doc-link">Schedules</a> page leaves its owner free to make another one; blocking the account does not.</p>
+        <ul class="doc-list mb-6">
+            <li><strong class="text-gray-900 dark:text-white">Three totals</strong> - blocked accounts, entries on the list, and how many sign-ups the list has refused</li>
+            <li><strong class="text-gray-900 dark:text-white">Find an account</strong> - by name, email address or a schedule it owns. The owner card on a schedule's admin page and the names under Recent sign-ups on the <a href="#insights-users" class="doc-link">Users</a> page lead to the same place</li>
+            <li><strong class="text-gray-900 dark:text-white">Blocked accounts</strong> - who is blocked, how many schedules the block took down, when and by whom, and your note</li>
+            <li><strong class="text-gray-900 dark:text-white">Refused at sign-up</strong> - the list itself, with how often each entry has refused someone</li>
+        </ul>
+
+        <h3 id="blocked-account" class="doc-subheading">Blocking an account</h3>
+        <p class="text-gray-600 dark:text-gray-300 mb-4">A block is decided on the account's own page, which shows what you need first: the schedules it owns, how it signs in, the network address it signed up from, and the other accounts that were made from that same address, each one press away. Press <strong class="text-gray-900 dark:text-white">Block account</strong> and:</p>
+        <ul class="doc-list mb-6">
+            <li>The account can no longer sign in, by password, Google or Facebook, or use its API key. Anyone signed in to it is signed out on their next page</li>
+            <li>Every schedule it owns goes offline and its subdomain is released, exactly as <strong class="text-gray-900 dark:text-white">Delete</strong> on the Schedules page does. A paid plan on one of them is cancelled, and a newsletter waiting to be sent goes back to a draft</li>
+            <li>Its email address goes on the list, so it cannot sign up again</li>
+        </ul>
+        <p class="text-gray-600 dark:text-gray-300 mb-4">Two switches add more to the list, and both are off until you turn them on. <strong class="text-gray-900 dark:text-white">Also refuse new accounts from the address</strong> adds the network address the account signed up from (for an IPv6 address, the /64 it sits in). <strong class="text-gray-900 dark:text-white">Also refuse new accounts at the domain</strong> adds its email domain. Beside each is the number of other accounts that share it: a large number means an office, a mobile network or a mail provider that ordinary people use, and it should stay off.</p>
+        <p class="text-gray-600 dark:text-gray-300 mb-6">An administrator cannot be blocked, and you cannot block yourself. Schedules the account is only a member of are not touched.</p>
+
+        <h3 id="blocked-unblock" class="doc-subheading">Unblocking</h3>
+        <p class="text-gray-600 dark:text-gray-300 mb-6"><strong class="text-gray-900 dark:text-white">Unblock account</strong>, on the same page, undoes what the block did and nothing else. The account can sign in again, the schedules this block took down come back, and the entries it added leave the list. A schedule that was already deleted before the block stays deleted, a cancelled plan stays cancelled, and a subdomain somebody has taken in the meantime stays theirs: the schedule then comes back under its released name.</p>
+
+        <h3 id="blocked-list" class="doc-subheading">The list</h3>
+        <p class="text-gray-600 dark:text-gray-300 mb-4">A new account is refused when it matches an entry, whichever way it is being made: the sign-up form, Google or Facebook, the API, or the account a guest form offers. Accounts that already exist are never affected by the list, so adding a domain does not lock anyone out. An entry is one of:</p>
+        <ul class="doc-list mb-6">
+            <li><strong class="text-gray-900 dark:text-white">Email address</strong> - one mailbox. A <code class="doc-inline-code">+tag</code>, and for Gmail the dots in the name, do not make a new address</li>
+            <li><strong class="text-gray-900 dark:text-white">Email domain</strong> - everything at <code class="doc-inline-code">example.com</code> and its subdomains</li>
+            <li><strong class="text-gray-900 dark:text-white">Network address</strong> - one IP address, or a range such as <code class="doc-inline-code">203.0.113.0/24</code>. The widest range allowed is /16 for IPv4 and /32 for IPv6</li>
+        </ul>
+        <p class="text-gray-600 dark:text-gray-300 mb-6">When you add an entry by hand, the page tells you how many existing accounts already match it. The address an account signed up from is kept for 90 days, or for as long as the account is blocked, so the address switch is not offered for an older account. Every block, unblock and change to the list is in the <a href="#system-audit-log" class="doc-link">Audit Log</a>.</p>
+    </section>
+
+    <!-- Manage: Feeds (every install) -->
+    <section id="manage-feeds" class="doc-section">
+        <h2 class="doc-heading">
+            <svg aria-hidden="true" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" class="w-5 h-5 text-gray-500 dark:text-gray-400 flex-shrink-0">
+                <path stroke-linecap="round" stroke-linejoin="round" d="M12.75 19.5v-.75a7.5 7.5 0 0 0-7.5-7.5H4.5m0-6.75h.75c7.87 0 14.25 6.38 14.25 14.25v.75M6 18.75a.75.75 0 1 1-1.5 0 .75.75 0 0 1 1.5 0Z" />
+            </svg>
+            Feeds (Manage)
+        </h2>
+        <p class="text-gray-600 dark:text-gray-300 mb-6">The Feeds page, at <code class="doc-inline-code">/admin/feeds</code>, lists every <a href="{{ route('marketing.docs.managing_schedules') }}#feeds" class="doc-link">feed</a> on the install: the addresses schedules keep reading for events, which schedule reads what, and whether it is being read. A feed is shown by its site, never by its address, because for a private calendar the address is the key to it.</p>
+        <ul class="doc-list mb-6">
+            <li><strong class="text-gray-900 dark:text-white">Three totals</strong> - all feeds, how many are failing, and how many are paused</li>
+            <li><strong class="text-gray-900 dark:text-white">Search and filter</strong> - by schedule, subdomain, feed name or site, and by state: <strong class="text-gray-900 dark:text-white">Failing</strong>, <strong class="text-gray-900 dark:text-white">Paused</strong> or <strong class="text-gray-900 dark:text-white">Waiting for somebody</strong> (drafts to review, or a decision)</li>
+            <li><strong class="text-gray-900 dark:text-white">The list</strong> - twenty per page, what is not being read first: the schedule, which opens its admin page, the feed with its site, kind and number of events, its status, its last good read and its next try</li>
+            <li><strong class="text-gray-900 dark:text-white">Status</strong> - a failing feed shows a reason and a status code (<code class="doc-inline-code">http_error 503</code>) and how many tries have failed, never what the other server said. A paused one shows why it was paused. A feed on a schedule whose plan does not include feeds shows <strong class="text-gray-900 dark:text-white">Not being read</strong></li>
+        </ul>
+
+        <h3 class="doc-subheading">Actions</h3>
+        <ul class="doc-list mb-6">
+            <li><strong class="text-gray-900 dark:text-white">Read now</strong> - reads the feed on the next run, whatever its wait after a failure says. Runs start every minute</li>
+            <li><strong class="text-gray-900 dark:text-white">Resume</strong> - starts a paused feed again with a clean slate</li>
+        </ul>
+        <p class="text-gray-600 dark:text-gray-300 mb-6">Feeds are read by the <code class="doc-inline-code">app:import-feeds</code> task, every minute, so they need the same cron entry as everything else on the <a href="#system-queue" class="doc-link">Queue</a> page. Each read is one request to the feed's address, and a feed of posts also opens each new post's own page. All of them go through the same guard as every outbound fetch: public addresses only, with every redirect checked again.</p>
+    </section>
+
     <!-- Manage: Domains (hosted only) -->
     <section id="manage-domains" class="doc-section">
         <h2 class="doc-heading">
@@ -907,6 +977,8 @@
             Blog (Manage)
         </h2>
         <p class="text-gray-600 dark:text-gray-300">The Blog page manages the posts of the marketing site's blog: a list with each post's status, views and word count, <strong class="text-gray-900 dark:text-white">Create Post</strong>, and edit, preview and delete on each row. The blog belongs to the marketing site, which only eventschedule.com serves, so this page and its entry in the Manage row are missing on every other install, selfhosted or SaaS.</p>
+        <p class="text-gray-600 dark:text-gray-300 mt-4">A post the scheduled writer finished but its check would not publish is kept as a draft marked <strong class="text-gray-900 dark:text-white">Held</strong>, with the reason under its title: fix it and publish it, publish it as it is, or delete it. The check looks at what a post says about the product, the pages it links to, its length and its wording. On the create and edit forms, <strong class="text-gray-900 dark:text-white">Generate Content</strong> writes a post from a topic and shows what the check made of it above the form; nothing is saved until you save.</p>
+        <p class="text-gray-600 dark:text-gray-300 mt-4"><strong class="text-gray-900 dark:text-white">Review</strong> goes through the posts already published: what the check finds in each, which posts are on the same subject, and what is proposed (keep, rewrite, merge into another post, or hide from search engines). It changes nothing by itself. <strong class="text-gray-900 dark:text-white">Merge</strong> on a row makes that post's address redirect to the other one, and keeps its text.</p>
     </section>
 
     <!-- System: Audit Log -->

@@ -16,6 +16,18 @@
         <x-doc-nav-link href="#appointments">Appointments</x-doc-nav-link>
         <x-doc-nav-link href="#seating">Seating plans</x-doc-nav-link>
         <x-doc-nav-link href="#requests">Requests</x-doc-nav-link>
+        <x-doc-nav-group label="Feeds" href="#feeds">
+            <x-doc-nav-link href="#feeds-add">Adding a feed</x-doc-nav-link>
+            <x-doc-nav-link href="#feeds-sources">What can be a feed</x-doc-nav-link>
+            <x-doc-nav-link href="#feeds-new-events">New events</x-doc-nav-link>
+            <x-doc-nav-link href="#feeds-review">Reviewing drafts</x-doc-nav-link>
+            <x-doc-nav-link href="#feeds-updates">Changes and your edits</x-doc-nav-link>
+            <x-doc-nav-link href="#feeds-gone">When an event leaves</x-doc-nav-link>
+            <x-doc-nav-link href="#feeds-decisions">Needs your decision</x-doc-nav-link>
+            <x-doc-nav-link href="#feeds-undo">Undoing the first read</x-doc-nav-link>
+            <x-doc-nav-link href="#feeds-settings">Changing or removing a feed</x-doc-nav-link>
+            <x-doc-nav-link href="#feeds-trouble">When a feed cannot be read</x-doc-nav-link>
+        </x-doc-nav-group>
         <x-doc-nav-link href="#followers">Followers</x-doc-nav-link>
         <x-doc-nav-group label="Team" href="#team">
             <x-doc-nav-link href="#transfer-ownership">Transferring Ownership</x-doc-nav-link>
@@ -89,6 +101,11 @@
                         <td>Only while something is pending</td>
                     </tr>
                     <tr>
+                        <td><a href="#feeds" class="doc-link">Feeds</a></td>
+                        <td>Addresses the schedule keeps reading for events, with drafts to review and decisions to make. The number is how many wait for you</td>
+                        <td>Once the schedule has a feed, owners and admins. Using it needs <x-doc-badge plan="enterprise" /></td>
+                    </tr>
+                    <tr>
                         <td><a href="#followers" class="doc-link">Followers</a></td>
                         <td>People who follow the schedule or signed up by email, and your QR follow code</td>
                         <td>Always on eventschedule.com; on a selfhosted install, once someone has subscribed</td>
@@ -135,15 +152,19 @@
         <h3 id="schedule-calendar" class="doc-subheading">Reading the calendar</h3>
         <ul class="doc-list mb-6">
             <li>On the month grid, the <strong>arrow buttons</strong> step a month back or forward and <strong>This Month</strong> returns to today. The phone list has no month buttons</li>
-            <li>An event that is not public carries a mark beside its name: <strong>Draft</strong> or <strong>Internal</strong></li>
-            <li>Click an event to open its public page in a new tab. To change it, point at it in the grid and use the <strong>Edit</strong> link that appears, or <strong>Edit Event</strong> on a phone card</li>
+            <li>Each event shows its name and its time, and one that is still to come says under them what state it is in: <strong>Now</strong>, <strong>Sold Out</strong>, <strong>Few left</strong> or <strong>Free entry</strong>. A day with one event shows its picture, and an event that runs over several days is one bar across them</li>
+            <li>An event that is not public says so under its name, <strong>Draft</strong> or <strong>Internal</strong>, and a cancelled one says <strong>Cancelled</strong>, on days that are over as well</li>
+            <li>Days that are over go quiet, and a week that is wholly over is drawn smaller, so the week it is now is not pushed down the page. Once an event of today has ended it gives its place to what is still to come and stands behind <strong>earlier today</strong>; when nothing is left today, the day's events stay in view</li>
+            <li>A busy day shows its first three events, and more where the week has room. <strong>+N more</strong>, or the day's number, opens the whole day, and says how many of the events it holds are drafts</li>
+            <li>Rest the pointer on an event, or move to it with the keyboard, and a card opens beside its day with its date, time and place, and with <strong>View Event</strong> and <strong>Edit Event</strong>. A click on the event itself opens its public page in a new tab. On a phone, use <strong>Edit Event</strong> on the card</li>
+            <li>The arrow keys move between events and days, and Page Up and Page Down change the month</li>
             <li>On a Talent schedule, a day a team member marked as unavailable is tinted, and its info icon names who. See <a href="#availability" class="doc-link">Availability</a></li>
         </ul>
 
         <h3 id="schedule-add" class="doc-subheading">Adding events</h3>
         <ul class="doc-list mb-6">
             <li><strong>Add Event</strong> creates a new event by hand. It appears once the schedule's email address is verified, and is hidden from viewers</li>
-            <li>On the month grid, owners and admins can click an empty part of a day to start a new event on that date</li>
+            <li>On the month grid, owners and admins can use the <strong>plus</strong> that appears on a day, when the pointer is on it or it is reached with the keyboard, to start a new event on that date</li>
             <li><strong>Use a Template</strong> sits beside Add Event once you have at least one saved <a href="#templates" class="doc-link">template</a> (Pro)</li>
         </ul>
         <p class="text-gray-600 dark:text-gray-300 mb-4">
@@ -226,8 +247,8 @@
                         <td>The owner only, once their Google account is connected and the schedule has a Google Calendar linked</td>
                     </tr>
                     <tr>
-                        <td><strong>Events Graphic</strong></td>
-                        <td>Builds a shareable <a href="{{ route('marketing.docs.event_graphics') }}" class="doc-link">graphic</a> of the month's events</td>
+                        <td><strong>Events graphic</strong></td>
+                        <td>Builds a shareable <a href="{{ route('marketing.docs.event_graphics') }}" class="doc-link">graphic</a> of your upcoming events, with a caption to post beside it</td>
                         <td>Everyone, including viewers</td>
                     </tr>
                     <tr>
@@ -337,7 +358,7 @@
 
         <h3 class="doc-subheading">Setting Availability</h3>
         <ol class="doc-list doc-list-numbered mb-6">
-            <li>Click a <strong>date</strong> in the month grid to mark it. The day is tinted red and, on a wide screen, labelled <strong>Unavailable</strong>.</li>
+            <li>Click a <strong>date</strong> in the month grid to mark it, or move to it with the keyboard (the arrow keys go from day to day) and press Enter or Space. The day is tinted red and, on a wide screen, labelled <strong>Unavailable</strong>.</li>
             <li>Click the same date again to <strong>clear</strong> the mark.</li>
             <li>Click <strong>Save</strong>. The button stays disabled until you change something, so nothing is saved by accident.</li>
             <li>Save before you move to another month with the arrows. Moving loads a new page, and marks you have not saved are lost.</li>
@@ -449,7 +470,7 @@
                     <tr>
                         <td><strong>A date from another schedule</strong></td>
                         <td>A schedule that adds you to one of its events, when your schedule reviews it first. A Talent schedule always does, unless that schedule is already on its approved list</td>
-                        <td>The event's name, that schedule's picture and its name after <strong>From</strong> as a link to its page, the date and time, the sub-schedule, and the opening of that schedule's description</td>
+                        <td>The event's name, that schedule's picture and its name after <strong>From</strong> as a link to its page, the date and time, the sub-schedule, the venue when it is neither of you, and the opening of that schedule's description</td>
                     </tr>
                     <tr>
                         <td><strong>An appointment booking</strong></td>
@@ -478,7 +499,7 @@
 
         <h3 class="doc-subheading">Being told about them</h3>
         <ul class="doc-list mb-6">
-            <li><strong>From your request form.</strong> Event Schedule emails owners and admins as the request arrives. A busy day does not fill your inbox: that is at most one email every 15 minutes, and anything that arrives in between is in the daily summary</li>
+            <li><strong>From your request form.</strong> Event Schedule emails owners and admins as the request arrives. A busy day does not fill your inbox: that is at most one email every 15 minutes, and anything that arrives in between is in the daily summary. The email spells out each new request (the event, who asked, when, their contact details, their answers to your questions and their message), and a request is named in one email only, so searching your mailbox for an event's name finds it. One email spells out up to five requests, fewer when they are long, and names any others that arrived with them in a line each (the event, who asked and the day), which is what a programme sent through your import page looks like; their answers are on the Requests page. Past 35 at once, it says how many follow in the next email</li>
             <li><strong>From another schedule.</strong> An event another schedule adds you to is announced once a day</li>
             <li><strong>The setting</strong> is <strong>New event requests</strong> under <a href="{{ route('marketing.docs.creating_schedules') }}#settings-notifications" class="doc-link">Settings &rarr; Notifications</a>. It is on unless you turn it off, and it is per person rather than per schedule. Viewers are never notified</li>
             <li><strong>A shared mailbox</strong> can be added as the schedule's <a href="{{ route('marketing.docs.creating_schedules') }}#notification-email" class="doc-link">shared notification address</a>, which gets a copy of each request email</li>
@@ -487,6 +508,141 @@
 
         <p class="text-gray-600 dark:text-gray-300 mb-4">
             To turn requests on, choose your request form, name schedules whose submissions skip approval, and set your request terms, see <a href="{{ route('marketing.docs.creating_schedules') }}#engagement-requests" class="doc-link">Creating Schedules: Requests</a>. Talent schedules get a shorter version of those settings, because a request to book a performer is always reviewed by hand.
+        </p>
+    </section>
+
+
+    <!-- Feeds -->
+    <section id="feeds" class="doc-section">
+        <h2 class="doc-heading">
+            <svg aria-hidden="true" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" class="w-5 h-5 text-gray-500 dark:text-gray-400 flex-shrink-0">
+                <path stroke-linecap="round" stroke-linejoin="round" d="M12.75 19.5v-.75a7.5 7.5 0 0 0-7.5-7.5H4.5m0-6.75h.75c7.87 0 14.25 6.38 14.25 14.25v.75M6 18.75a.75.75 0 1 1-1.5 0 .75.75 0 0 1 1.5 0Z" />
+            </svg>
+            Feeds
+            <x-doc-badge plan="enterprise" />
+        </h2>
+        <p class="text-gray-600 dark:text-gray-300 mb-4">
+            A feed is an address your schedule goes on reading, about once an hour: somebody else's calendar, an RSS feed, or a page that lists events. New events arrive on their own, a change at the source is copied to the event here, and anything you edited yourself is kept as you left it. It is the standing version of <a href="{{ route('marketing.docs.ai_import') }}#link-import" class="doc-link">importing a link</a>, which copies once and stops.
+        </p>
+        <p class="text-gray-600 dark:text-gray-300 mb-4">
+            The <strong class="text-gray-900 dark:text-white">Feeds</strong> tab appears once the schedule has a feed, for owners and admins. The number on it is how many things wait for somebody: drafts to look over, and decisions. On eventschedule.com feeds are part of the Enterprise plan. A selfhosted install has them.
+        </p>
+
+        <h3 id="feeds-add" class="doc-subheading">Adding a feed</h3>
+        <ol class="doc-list doc-list-numbered mb-6">
+            <li>Open <strong class="text-gray-900 dark:text-white">Edit Schedule</strong>, choose <strong class="text-gray-900 dark:text-white">Integrations</strong>, open the <strong class="text-gray-900 dark:text-white">Feeds from other sites</strong> row and press <strong class="text-gray-900 dark:text-white">Add a feed</strong>. Once the schedule has a feed, the same button is on the Feeds tab. On the import page, a link that was read as a calendar or as a page's own event data offers <strong class="text-gray-900 dark:text-white">Keep this link in sync</strong>, which starts from the same place.</li>
+            <li>Paste the address and press <strong class="text-gray-900 dark:text-white">Check feed</strong>. The address is read once and nothing is added. You are shown how many upcoming events it holds, how many are already on your schedule, what was left out and why, and the first few with their times.</li>
+            <li>Choose what happens to <strong class="text-gray-900 dark:text-white">new events</strong>: <strong class="text-gray-900 dark:text-white">Publish them</strong>, or <strong class="text-gray-900 dark:text-white">Hold them as drafts</strong> for you to look over.</li>
+            <li>Choose what happens <strong class="text-gray-900 dark:text-white">when an event is no longer in the feed</strong>: <strong class="text-gray-900 dark:text-white">Leave it</strong>, <strong class="text-gray-900 dark:text-white">Mark it cancelled</strong>, or <strong class="text-gray-900 dark:text-white">Remove it</strong>.</li>
+            <li>Under <strong class="text-gray-900 dark:text-white">More options</strong> you can name the feed, file its events under a sub-schedule, give them a category, and say which clock its times are on.</li>
+            <li>Press <strong class="text-gray-900 dark:text-white">Add feed</strong>. The first read starts within a minute. A feed with many events is taken in over several minutes.</li>
+        </ol>
+        <p class="text-gray-600 dark:text-gray-300 mb-4">
+            A schedule can read up to ten feeds. An address is stored encrypted and is not shown again: every page names the site a feed reads, never the address, because for a private calendar the address is the key to it.
+        </p>
+
+        <h3 id="feeds-sources" class="doc-subheading">What can be a feed</h3>
+        <div class="doc-table-wrap">
+            <table class="doc-table">
+                <thead>
+                    <tr>
+                        <th>Kind</th>
+                        <th>What is read</th>
+                        <th>Knows when an event is gone</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    <tr>
+                        <td>Calendar</td>
+                        <td>An .ics or webcal address, including a Google or Outlook calendar's public link. Events up to a year ahead are taken. A repeating entry arrives as its next twelve dates, each an event of its own, and later dates arrive as earlier ones pass</td>
+                        <td>Yes</td>
+                    </tr>
+                    <tr>
+                        <td>Page</td>
+                        <td>A page that lists its events with event data in its markup, as most venue and ticketing sites do</td>
+                        <td>Yes, up to the last event the page shows. A page that lists only its next ten cannot say what became of the eleventh</td>
+                    </tr>
+                    <tr>
+                        <td>RSS, Atom or JSON feed</td>
+                        <td>Each post's own page is opened for the event's date and place. A post with no event date is left out and counted</td>
+                        <td>No. It lists only its newest posts</td>
+                    </tr>
+                </tbody>
+            </table>
+        </div>
+        <p class="text-gray-600 dark:text-gray-300 mb-4">
+            No AI is used to read a feed, so it costs nothing per read and reads the same way every time. A page that needs a sign-in, or one whose events are only in its pictures, cannot be a feed: <a href="{{ route('marketing.docs.ai_import') }}" class="doc-link">import it</a> instead.
+        </p>
+
+        <h3 id="feeds-new-events" class="doc-subheading">New events</h3>
+        <ul class="doc-list mb-6">
+            <li>An event that is <strong class="text-gray-900 dark:text-white">already on your schedule</strong>, with the same name at the same time, is linked to the feed and not added again. The feed never changes or removes an event it only matched</li>
+            <li><strong class="text-gray-900 dark:text-white">Followers are not emailed about the first read.</strong> Events that arrive later are announced like any new event</li>
+            <li>A venue named in the feed is matched to a venue your team already has. Otherwise a new one is made for it, a few at a time</li>
+            <li>A schedule's feeds add at most 500 new events a day between them, and leave room in the schedule's own daily allowance. What is left arrives the next day, and the feed's page says so</li>
+        </ul>
+
+        <h3 id="feeds-review" class="doc-subheading">Reviewing drafts</h3>
+        <p class="text-gray-600 dark:text-gray-300 mb-4">
+            With <strong class="text-gray-900 dark:text-white">Hold them as drafts</strong>, new events wait on the feed's own page under <strong class="text-gray-900 dark:text-white">Waiting for review</strong>, soonest first. Nobody sees a draft until you publish it. Each row has its date, when and where, and a line for what is missing, such as a picture or a place.
+        </p>
+        <ul class="doc-list mb-6">
+            <li><strong class="text-gray-900 dark:text-white">View</strong> opens the event as visitors would see it and <strong class="text-gray-900 dark:text-white">Edit</strong> opens its form</li>
+            <li><strong class="text-gray-900 dark:text-white">Publish</strong> makes it public. <strong class="text-gray-900 dark:text-white">Skip</strong> deletes the draft, and the feed does not add it again however long the source goes on listing it. It asks first. A draft you have already changed is not skipped: open it and delete it there if you do not want it</li>
+            <li>Tick several rows for <strong class="text-gray-900 dark:text-white">Publish selected</strong> or <strong class="text-gray-900 dark:text-white">Skip selected</strong></li>
+            <li><strong class="text-gray-900 dark:text-white">Publish all</strong> publishes everything waiting, over the next few minutes. On a feed that is paused it publishes the next 25 at once, and you press it again for the rest</li>
+        </ul>
+
+        <h3 id="feeds-updates" class="doc-subheading">Changes at the source, and your own</h3>
+        <p class="text-gray-600 dark:text-gray-300 mb-4">
+            A feed follows eight things about an event: its name, description, start, length, link, category, venue and picture. Each one follows the source until you change it yourself. From then on that one is yours, and the rest go on following. So you can rewrite a description and still have a new start time arrive on its own.
+        </p>
+        <p class="text-gray-600 dark:text-gray-300 mb-4">
+            Whether an event is public is set once, when it is added, and never changed by the feed. On the event's own form, a line under its name says which feed it comes from. Tickets, promo codes, the agenda, photos and everything else you add to an event are never touched.
+        </p>
+
+        <h3 id="feeds-gone" class="doc-subheading">When an event leaves the feed</h3>
+        <p class="text-gray-600 dark:text-gray-300 mb-4">
+            An event counts as gone when it has not started, was missing from two reads in a row with at least an hour and a half between its last sighting and the second, and is not listed again by this feed or by another of the schedule's feeds. Then your choice applies: it is left as it is, marked cancelled, or removed. An event the source marks as cancelled is cancelled here, and restored if the source puts it back on.
+        </p>
+        <p class="text-gray-600 dark:text-gray-300 mb-4">
+            What you do by hand stands. An event you restore is not cancelled again for the same absence, and one you cancelled yourself is not restored by the feed. If you change this choice later, it also applies to events that have already left the feed and are still on your schedule, at the next read: the Edit feed page says how many before you save.
+        </p>
+        <ul class="doc-list mb-6">
+            <li><strong class="text-gray-900 dark:text-white">Only what is the feed's alone is cancelled or removed.</strong> An event with sales, RSVPs or people who asked to be told about it is never changed without you. Nor is one removed that carries your own work: photos, videos, a poll, promo codes, an agenda, a seating plan, or a field you edited</li>
+            <li><strong class="text-gray-900 dark:text-white">A large number missing at once is held.</strong> When more than three in ten of a feed's coming events, and at least five, are missing from one read, nothing is changed. It lets go by itself if they return</li>
+            <li>A feed of posts lists only its newest, so it cannot tell that an event is gone. Its events stay</li>
+            <li>A calendar that comes back empty while events are still to come is not taken as "everything is gone". Nothing changes until it lists something again</li>
+        </ul>
+
+        <h3 id="feeds-decisions" class="doc-subheading">Needs your decision</h3>
+        <p class="text-gray-600 dark:text-gray-300 mb-4">
+            When people have signed up for an event and the source moves it, calls it off or no longer lists it, the event is left alone and appears under <strong class="text-gray-900 dark:text-white">Needs your decision</strong> with what the feed says and how many signed up. So does an event that carries your own work, where the feed would otherwise remove it. <strong class="text-gray-900 dark:text-white">Keep the event</strong> leaves it, and the same difference is not raised again. <strong class="text-gray-900 dark:text-white">Cancel the event</strong> or <strong class="text-gray-900 dark:text-white">Move the event</strong> shows what will happen first, and where there is somebody the email would reach, lets you email the people who signed up with a note of your own.
+        </p>
+
+        <h3 id="feeds-undo" class="doc-subheading">Undoing the first read</h3>
+        <p class="text-gray-600 dark:text-gray-300 mb-4">
+            For a day after a feed's first read, <strong class="text-gray-900 dark:text-white">Undo first read</strong> removes the events that read added and pauses the feed. An event somebody signed up for, or one you already changed, stays. Use it when the times came out an hour off or the feed was not the one you meant, then fix the setting and resume. A resumed feed starts over as a first read: its events are published or held as its setting says, followers are not emailed about them, and it can be undone again.
+        </p>
+
+        <h3 id="feeds-settings" class="doc-subheading">Changing or removing a feed</h3>
+        <p class="text-gray-600 dark:text-gray-300 mb-4">
+            <strong class="text-gray-900 dark:text-white">Edit feed</strong> changes its name, the two choices, the sub-schedule, the category and the clock. Changes hold from the next read, and events already on the schedule keep how they are published. A new clock is the exception: the feed is read again at once and every start you have not changed moves with it. <strong class="text-gray-900 dark:text-white">Pause</strong> stops a feed being read until you resume it.
+        </p>
+        <p class="text-gray-600 dark:text-gray-300 mb-4">
+            <strong class="text-gray-900 dark:text-white">Remove feed</strong> asks what becomes of its events. Keep them, and they are ordinary events from then on. Or delete the coming ones, which takes only events that have not started, that nobody signed up for and that you have not changed.
+        </p>
+
+        <h3 id="feeds-trouble" class="doc-subheading">When a feed cannot be read</h3>
+        <ul class="doc-list mb-6">
+            <li>A read that fails is tried again after an hour, then two, then six, then once a day. Nothing on your schedule changes while a feed cannot be read</li>
+            <li>After a day the feed is marked in red. After three days the team is emailed. After two weeks the feed is <strong class="text-gray-900 dark:text-white">paused</strong>, with one more email</li>
+            <li><strong class="text-gray-900 dark:text-white">Read now</strong> tries at once. <strong class="text-gray-900 dark:text-white">Resume</strong> starts a paused feed again with a clean slate</li>
+            <li>A feed is also paused when the schedule changes hands and when the member who added it leaves the team, so that nobody inherits a feed they have not seen</li>
+            <li>If the plan no longer includes feeds, they are not read. What they already made is still yours to publish, skip or remove</li>
+        </ul>
+        <p class="text-gray-600 dark:text-gray-300 mb-4">
+            Three emails keep a feed from needing to be watched: drafts waiting for review, an event that needs your decision, and a feed that has stopped being read. Each is sent at most once a day per schedule, to every owner and admin who has <strong class="text-gray-900 dark:text-white">Feeds</strong> switched on under <a href="{{ route('marketing.docs.creating_schedules') }}#settings-notifications" class="doc-link">Notifications</a>, and to the shared notification address. A decision about an event within three days is sent at once, and a second decision on the same day is in the next day's email.
         </p>
     </section>
 

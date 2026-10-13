@@ -30,10 +30,13 @@ class HelpUtils
                 'section-merge' => '/docs/creating-schedules#merge',
                 'section-style' => '/docs/schedule-styling#overview',
                 'section-gallery' => '/docs/creating-schedules#gallery',
-                'style-tab-animation' => '/docs/schedule-styling#list-animation',
-                'style-tab-background' => '/docs/schedule-styling#backgrounds',
-                // The row is "Header and layout": it opens on the header style, with custom CSS last.
+                // The Style tab's four rows, in the order of the page, by the id of the row itself.
+                // Header opens on the header style; Events on the default layout, with the event
+                // animation under it.
                 'style-tab-advanced' => '/docs/schedule-styling#header-style',
+                'style-tab-background' => '/docs/schedule-styling#backgrounds',
+                'style-tab-animation' => '/docs/schedule-styling#event-layout',
+                'style-tab-css' => '/docs/schedule-styling#custom-css',
                 'section-subschedules' => '/docs/creating-schedules#customize',
                 'customize-tab-subschedules' => '/docs/creating-schedules#customize-subschedules',
                 'customize-tab-custom-fields' => '/docs/creating-schedules#customize-custom-fields',
@@ -62,6 +65,7 @@ class HelpUtils
                 'integration-tab-google' => '/docs/creating-schedules#integrations-google',
                 'integration-tab-microsoft' => '/docs/creating-schedules#integrations-microsoft',
                 'integration-tab-caldav' => '/docs/creating-schedules#integrations-caldav',
+                'integration-tab-feeds' => '/docs/creating-schedules#integrations-feeds',
                 'integration-tab-advanced' => '/docs/creating-schedules#integrations-advanced',
             ],
         ],
@@ -192,6 +196,14 @@ class HelpUtils
         '{subdomain}/seating/*/design' => '/docs/allocated-seating#build',
         '{subdomain}/seating/box-office/*' => '/docs/allocated-seating#box-office',
         '{subdomain}/requests' => '/docs/managing-schedules#requests',
+        // The platform admin's list of every feed. Before the schedule's own feed pages: on a
+        // page with no schedule in its address `{subdomain}/feeds` reads as `*/feeds`, which
+        // is this page too, and the first match wins.
+        'admin/feeds*' => '/docs/selfhost/admin#manage-feeds',
+        '{subdomain}/feeds' => '/docs/managing-schedules#feeds',
+        '{subdomain}/feeds/add' => '/docs/managing-schedules#feeds-add',
+        '{subdomain}/feeds/*/edit' => '/docs/managing-schedules#feeds-settings',
+        '{subdomain}/feeds/*' => '/docs/managing-schedules#feeds-review',
         '{subdomain}/followers' => '/docs/managing-schedules#followers',
         '{subdomain}/team' => '/docs/managing-schedules#team',
         '{subdomain}/plan' => '/docs/managing-schedules#plan',
@@ -204,7 +216,19 @@ class HelpUtils
         '{subdomain}/import/ai' => '/docs/ai-import',
         '{subdomain}/import/eventbrite' => '/docs/ai-import#eventbrite-import',
         '{subdomain}/scan-agenda' => '/docs/scan-agenda',
-        '{subdomain}/events-graphic*' => '/docs/event-graphics',
+        // The page's five rows, by the pane each one opens (the row's aria-controls, which is what
+        // navigation.blade.php reads from a button[data-row-group] click). A flat mapping opened
+        // the top of the guide whichever setting was on screen.
+        '{subdomain}/events-graphic*' => [
+            'doc' => '/docs/event-graphics',
+            'anchors' => [
+                'graphic-pane-events' => '/docs/event-graphics#events',
+                'graphic-pane-flyers' => '/docs/event-graphics#dates-and-numbers',
+                'graphic-pane-header' => '/docs/event-graphics#header-footer-text',
+                'graphic-pane-caption' => '/docs/event-graphics#text-template',
+                'graphic-pane-email' => '/docs/event-graphics#email-scheduling',
+            ],
+        ],
         'events' => '/docs/getting-started',
         // Explicit rather than load-bearing: '{subdomain}/merge-venues*' above already matches
         // this page, because resolvePattern() substitutes '*' for {subdomain} when there is no
@@ -264,6 +288,7 @@ class HelpUtils
         // Not the organizer's Boost guide: 'boost*' above does not match this path.
         'admin/boost*' => '/docs/selfhost/admin#manage-boost',
         'admin/schedules*' => '/docs/selfhost/admin#manage-plans',
+        'admin/blocked*' => '/docs/selfhost/admin#manage-blocked',
         // Hosted only, and the operator's own walkthrough is on the SaaS side of the guide.
         'admin/domains*' => '/docs/saas/custom-domains#admin-management',
         'admin/referrals*' => '/docs/selfhost/admin#manage-referrals',

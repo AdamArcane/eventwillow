@@ -1,4 +1,4 @@
-<x-marketing-layout>
+<x-marketing-layout :hp="true">
     <x-slot name="title">Embed Tickets on Your Website | Full Checkout in One iframe</x-slot>
     <x-slot name="description">Put the whole ticket checkout on your own website with one iframe tag: ticket types, custom questions, promo codes and payment by Stripe, PayPal or cash.</x-slot>
     <x-slot name="breadcrumbTitle">Embed Tickets</x-slot>
@@ -69,9 +69,9 @@
            not about the journey of a snippet - it is about the part
            itself, seen from the inside. /for-ai-agents owns "The
            Console" (request/response ledger, block cursor), /selfhost
-           owns "The Terminal" (window chrome), /open-source owns "The
-           Commit Log" (spine, unified diff). So: no terminal, no diff,
-           no fake browser bar.
+           owns "The Terminal" (window chrome), /open-source owns "View
+           source" (quoted code with line numbers and a marked line).
+           So: no terminal, no quoted source, no fake browser bar.
 
            THE SIGNATURE SHAPE is a DIMENSION LINE - a hairline with end
            ticks and a monospace label - which is how a datasheet says

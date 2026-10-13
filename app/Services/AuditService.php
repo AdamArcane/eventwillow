@@ -54,6 +54,15 @@ class AuditService
 
     const SCHEDULE_MEMBER_REMOVE = 'schedule.member_remove';
 
+    // A feed is an address somebody chose for the schedule to keep reading. Who added, changed
+    // or removed one is recorded with the site and the kind, never the address: for a private
+    // calendar the address is the credential, and this log is read by the whole team.
+    const FEED_ADD = 'schedule.feed_add';
+
+    const FEED_UPDATE = 'schedule.feed_update';
+
+    const FEED_REMOVE = 'schedule.feed_remove';
+
     // Destructive, and often performed by someone outside the schedule it touches (a curator
     // clearing a broken video off an unclaimed act), so worth a trail.
     const SCHEDULE_VIDEO_REMOVE = 'schedule.video_remove';
@@ -212,6 +221,16 @@ class AuditService
     const ADMIN_SCHEDULE_RESTORE = 'admin.schedule_restore';
 
     const ADMIN_SCHEDULE_UPDATE = 'admin.schedule_update';
+
+    // An operator shutting an account out, and letting it back in (AccountBlockService), and
+    // the list of what new accounts are refused for (Blocklist, /admin/blocked).
+    const ADMIN_ACCOUNT_BLOCK = 'admin.account_block';
+
+    const ADMIN_ACCOUNT_UNBLOCK = 'admin.account_unblock';
+
+    const ADMIN_BLOCKLIST_ADD = 'admin.blocklist_add';
+
+    const ADMIN_BLOCKLIST_REMOVE = 'admin.blocklist_remove';
 
     const ADMIN_GRANT = 'admin.grant';
 

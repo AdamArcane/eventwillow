@@ -535,6 +535,20 @@
                 <li v-for="note in listNotes" :key="note" v-text="note"></li>
             </ul>
 
+            {{-- A calendar address, or a page's own event data, is something a feed can go on
+                 reading. The address goes by POST, through the form after this page's own (a form
+                 cannot stand inside another), never in a query string: for a private calendar it
+                 is the key to it. This card is the editor's alone (the block it is in), so a
+                 guest's form has none of it. --}}
+            <p v-if="canKeepInSync" class="mt-3 text-sm text-gray-600 dark:text-gray-400">
+                <button type="button" @click="keepInSync" :disabled="isAddingAll" class="font-medium text-[var(--brand-blue)] hover:underline focus:outline-none focus-visible:ring-2 focus-visible:ring-[var(--brand-blue)] disabled:opacity-50">{{ __('messages.feeds_keep_in_sync') }}</button>
+                <span class="ms-1">{{ __('messages.feeds_keep_in_sync_help') }}</span>
+            </p>
+            <div v-if="canKeepInSync && feedPlanNotice" role="status" class="mt-3 rounded-lg border border-gray-200 bg-gray-50 p-3 text-sm text-gray-700 dark:border-gray-700 dark:bg-gray-800/50 dark:text-gray-300">
+                {{ __('messages.feeds_need_enterprise') }} {{ __('messages.feeds_gate_text') }}
+                <x-link :href="route('role.view_admin', ['subdomain' => $role->subdomain, 'tab' => 'feeds'])" class="js-leave-import">{{ __('messages.feeds_see_plan') }}</x-link>
+            </div>
+
             <button v-if="preview.meta && preview.meta.can_read_whole_page" type="button" @click="fetchPreview(true)" :disabled="isAddingAll"
                     class="mt-3 text-sm font-medium text-[var(--brand-blue)] hover:underline focus:outline-none focus-visible:ring-2 focus-visible:ring-[var(--brand-blue)]">
                 {{ __('messages.import_read_whole_page') }}
@@ -1092,6 +1106,12 @@
                                 @if ($fieldRegexHint && in_array($field['type'] ?? 'string', ['string', 'multiline_string'], true))
                                 <p v-pre class="mt-1 text-xs text-gray-500 dark:text-gray-400">{{ $fieldRegexHint }}</p>
                                 @endif
+                                {{-- An answer to a field the schedule prints on its event pages is
+                                     public: say so where it is typed. The owner's own import page
+                                     too, where the answer may be one the AI guessed. --}}
+                                @if (\App\Models\Role::isEventCustomFieldOnEventPage($field))
+                                <p class="mt-1 text-xs text-gray-500 dark:text-gray-400" data-answer-on-event>{{ __('messages.request_answer_on_event') }}</p>
+                                @endif
                             </div>
                             @endforeach
                         </div>
@@ -1407,6 +1427,14 @@
 
 </form>
 
+@unless ($isGuestPage)
+{{-- "Keep this link in sync": the address the page read, handed to the feed's own check. --}}
+<form method="post" id="feed-keep-form" action="{{ route('role.feeds.check', ['subdomain' => $role->subdomain]) }}" hidden>
+    @csrf
+    <input type="hidden" name="address" id="feed-keep-address">
+</form>
+@endunless
+
 <script {!! nonce_attr() !!}>
     document.addEventListener('DOMContentLoaded', function() {
         // Initialize flatpickr for any existing datepickers on page load
@@ -1506,6 +1534,8 @@
                 currentRequestId: null,
                 // Links are an editor's: the guest submission form shares this component.
                 isGuestPage: {{ $isGuestPage ? 'true' : 'false' }},
+                feedsAllowed: {{ ! $isGuestPage && \App\Models\EventFeed::allowedFor($role) ? 'true' : 'false' }},
+                feedPlanNotice: false,
                 // No AI key on this install: the box takes links only.
                 linksOnly: {{ $linksOnly ? 'true' : 'false' }},
                 readingHost: '',
@@ -1792,6 +1822,13 @@
                 const zone = (this.preview.meta && this.preview.meta.timezone) || @json($role->captureTimezone());
 
                 return @json(__('messages.import_times_shown_in', ['timezone' => '__Z__']), JSON_UNESCAPED_UNICODE).replace('__Z__', '\u2066' + zone.replace(/_/g, ' ') + '\u2069');
+            },
+
+            // What a feed reads is what the page read without the model: a calendar, or a page's
+            // own event data. Text, a flyer, a page the model read and a connected Google
+            // calendar are not addresses a feed can follow.
+            canKeepInSync() {
+                return ! this.isGuestPage && !! (this.preview && this.preview.meta) && ['ics', 'page'].includes(this.preview.meta.source) && this.isLink;
             },
 
             // What the person should know before choosing: what was left out and why, and that a
@@ -3461,6 +3498,20 @@
                 return `{{ route('event.tmp_image', ['filename' => '']) }}/${filename}`;
             },
 
+            @unless ($isGuestPage)
+            // Hand the address the page read to the feed's own check, which reads it again and
+            // shows what it found before anything is added. Off the plan, say so here instead.
+            keepInSync() {
+                if (! this.feedsAllowed) {
+                    this.feedPlanNotice = true;
+
+                    return;
+                }
+                document.getElementById('feed-keep-address').value = this.linkUrl;
+                document.getElementById('feed-keep-form').submit();
+            },
+            @endunless
+
             handleClear() {
                 const rows = (this.preview && this.preview.parsed) ? this.preview.parsed : [];
                 const unsaved = rows.filter((row, idx) => ! this.savedEvents[idx]).length;
@@ -3729,10 +3780,11 @@
                 try {
                     const url = @json(route('event.curate', ['subdomain' => $role->subdomain, 'hash' => '--hash--'])).replace('--hash--', hash);
                     const response = await fetch(url, {
-                        method: 'GET',
+                        method: 'POST',
                         headers: {
                             'Accept': 'application/json',
-                            'X-Requested-With': 'XMLHttpRequest'
+                            'X-Requested-With': 'XMLHttpRequest',
+                            'X-CSRF-TOKEN': document.querySelector('meta[name="csrf-token"]').getAttribute('content')
                         }
                     });
 
@@ -3815,10 +3867,11 @@
                 try {
                     const url = @json(route('event.curate', ['subdomain' => $role->subdomain, 'hash' => '--hash--'])).replace('--hash--', hash);
                     const response = await fetch(url, {
-                        method: 'GET',
+                        method: 'POST',
                         headers: {
                             'Accept': 'application/json',
-                            'X-Requested-With': 'XMLHttpRequest'
+                            'X-Requested-With': 'XMLHttpRequest',
+                            'X-CSRF-TOKEN': document.querySelector('meta[name="csrf-token"]').getAttribute('content')
                         }
                     });
 

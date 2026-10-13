@@ -113,6 +113,7 @@ class RoleUpdateRequest extends FormRequest
             'notification_email_new_feedback' => ['nullable', 'boolean'],
             'notification_email_new_poll_option' => ['nullable', 'boolean'],
             'notification_email_installment_due' => ['nullable', 'boolean'],
+            'notification_email_feed' => ['nullable', 'boolean'],
             'new_subdomain' => array_merge(
                 is_demo_mode() ? [] : ['required'],
                 ['string', 'max:50'],
@@ -146,6 +147,18 @@ class RoleUpdateRequest extends FormRequest
             'source_groups.*' => ['nullable', 'string', 'max:255'],
             'custom_domain' => [
                 'nullable', 'string', 'url', 'max:255',
+                // An address that parses to a plain host. The `url` rule also passes one with a
+                // quote in its path or a port that cannot exist, and Role::setCustomDomainAttribute()
+                // keeps such a value whole, because it cannot parse it to trim it.
+                function ($attribute, $value, $fail) {
+                    if (! $value) {
+                        return;
+                    }
+                    $host = is_string($value) ? parse_url($value, PHP_URL_HOST) : null;
+                    if (! is_string($host) || ! preg_match('/^[a-z0-9]([a-z0-9.-]*[a-z0-9])?$/i', $host) || preg_match('/[\'"<>\\\\\s]/', $value)) {
+                        $fail(__('validation.url', ['attribute' => $attribute]));
+                    }
+                },
                 Rule::unique('roles', 'custom_domain')->ignore($role->id),
                 function ($attribute, $value, $fail) use ($role) {
                     if (! $value) {
@@ -206,6 +219,7 @@ class RoleUpdateRequest extends FormRequest
             'event_custom_fields.*.required' => ['nullable'],
             'event_custom_fields.*.private' => ['nullable'],
             'event_custom_fields.*.show_on_request' => ['nullable'],
+            'event_custom_fields.*.show_on_event' => ['nullable'],
             'event_custom_fields.*.filter' => ['nullable'],
             'event_custom_fields.*.regex' => ['nullable', 'string', 'max:200'],
             'event_custom_fields.*.regex_hint' => ['nullable', 'string', 'max:200'],

@@ -7,11 +7,11 @@ use App\Models\Event;
 use App\Models\Role;
 use App\Utils\GeminiUtils;
 use App\Utils\IcsImportUtils;
+use App\Utils\ImportAddress;
 use App\Utils\JsonLdEventUtils;
+use App\Utils\RemoteImage;
 use App\Utils\UrlUtils;
-use Carbon\Carbon;
 use Illuminate\Http\Client\ConnectionException;
-use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Str;
 
 /**
@@ -50,17 +50,6 @@ class LinkImportService
     private const IMAGE_SECONDS = 15;
 
     private const MAX_IMAGE_BYTES = 5 * 1024 * 1024;
-
-    /**
-     * Sites that answer a server with a sign-in wall. Reading them would spend an AI request on
-     * a login form, so they are turned away before any fetch, with what does work instead.
-     */
-    private const SIGN_IN_WALLS = [
-        'facebook.com' => 'Facebook',
-        'fb.com' => 'Facebook',
-        'fb.me' => 'Facebook',
-        'instagram.com' => 'Instagram',
-    ];
 
     /**
      * @return array{parsed: list<array>, meta: array}
@@ -160,84 +149,27 @@ class LinkImportService
         return encrypt(['s' => $source, 'r' => $role->id, 'u' => $userId, 't' => now()->getTimestamp()]);
     }
 
+    /**
+     * How an address is spelled, which sites cannot be read and which links stand for a feed
+     * are ImportAddress's to say: a feed asks the same three questions. What they mean to the
+     * person on the import page is said here.
+     */
     private function normalise(string $link): string
     {
-        $url = trim($link);
-        // What a calendar app calls a subscription address is the same feed over https.
-        $url = preg_replace('#^webcals?://#i', 'https://', $url);
-
-        if (! preg_match('#^https?://[^\s/]+\.[^\s/]+#i', $url) || strlen($url) > 2048) {
-            throw $this->refusal('invalid_url');
-        }
-
-        // A name with letters outside ASCII (münchen.example) is fetched by its ASCII form. The
-        // fetch guard refuses the other: the name it vets has to be the name that is looked
-        // up, letter for letter. Only the name is converted (not a user name before it or a
-        // port after it), and by the rules browsers use now: under the older, "transitional"
-        // ones straße.de is strasse.de, which is somebody else's address.
-        if (preg_match('#^(https?://(?:[^/?\#\s@]*@)?)([^/?\#\s@:\[\]]+)((?::\d*)?(?:[/?\#].*)?)$#is', $url, $parts)
-            && preg_match('/[^\x00-\x7F]/', $parts[2])) {
-            $ascii = function_exists('idn_to_ascii')
-                ? idn_to_ascii($parts[2], IDNA_NONTRANSITIONAL_TO_ASCII, INTL_IDNA_VARIANT_UTS46)
-                : false;
-            // A conversion that brings in an "@" or a slash (their full-width forms map to
-            // them) has made another address of it, not another spelling of this one.
-            if (! is_string($ascii) || ! preg_match('/^[a-z0-9._\-]+$/i', $ascii)) {
-                throw $this->refusal('invalid_url');
-            }
-            $url = $parts[1].$ascii.$parts[3];
-        }
-
-        return $url;
+        return ImportAddress::normalise($link) ?? throw $this->refusal('invalid_url');
     }
 
     private function refuseSignInWalls(string $url): void
     {
-        $host = strtolower((string) parse_url($url, PHP_URL_HOST));
-
-        foreach (self::SIGN_IN_WALLS as $domain => $platform) {
-            if ($host === $domain || str_ends_with($host, '.'.$domain)) {
-                throw new LinkImportException('needs_screenshot', __('messages.link_import_social', ['platform' => $platform]));
-            }
+        if ($platform = ImportAddress::signInWall($url)) {
+            throw new LinkImportException('needs_screenshot', __('messages.link_import_social', ['platform' => $platform]));
         }
     }
 
-    /**
-     * Links people have that are not themselves readable, but point at a feed that is.
-     *
-     * @return array{0: string, 1: ?string} the address to fetch, and what it was rewritten from
-     */
+    /** @return array{0: string, 1: ?string} the address to fetch, and what it was rewritten from */
     protected function knownFeedFor(string $url): array
     {
-        $parts = parse_url($url) ?: [];
-        $host = strtolower($parts['host'] ?? '');
-        $path = $parts['path'] ?? '';
-        parse_str($parts['query'] ?? '', $query);
-
-        // A Google Calendar share or embed link is a script page with nothing in it. The
-        // calendar it names has a public feed at a fixed address.
-        if ($host === 'calendar.google.com' && ! str_contains($path, '/ical/')) {
-            $calendarId = null;
-
-            if (! empty($query['src']) && is_string($query['src'])) {
-                $calendarId = $query['src'];
-            } elseif (! empty($query['cid']) && is_string($query['cid'])) {
-                // "cid" is the calendar id, either as written or base64-encoded.
-                $decoded = base64_decode(strtr($query['cid'], '-_', '+/'), true);
-                $calendarId = $decoded !== false && str_contains($decoded, '@') ? $decoded : $query['cid'];
-            }
-
-            if ($calendarId && preg_match('/^[^\s\/]+@[^\s\/]+$/', $calendarId)) {
-                return ['https://calendar.google.com/calendar/ical/'.rawurlencode($calendarId).'/public/basic.ics', 'google'];
-            }
-        }
-
-        // A published Outlook calendar has a page and a feed side by side.
-        if (preg_match('/(^|\.)outlook\.(live|office365|office)\.com$/', $host) && str_ends_with($path, '/calendar.html')) {
-            return [preg_replace('/calendar\.html(\?.*)?$/', 'calendar.ics', $url), 'outlook'];
-        }
-
-        return [$url, null];
+        return ImportAddress::knownFeedFor($url);
     }
 
     /** @return array{body: string, type: string, url: string} */
@@ -291,17 +223,14 @@ class LinkImportService
         ];
     }
 
-    /** By what it is, not by what the address ends in. */
     private function isCalendar(array $fetched): bool
     {
-        return str_contains($fetched['type'], 'text/calendar')
-            || str_starts_with(ltrim($fetched['body'], "\xEF\xBB\xBF \t\r\n"), 'BEGIN:VCALENDAR');
+        return ImportAddress::isCalendar($fetched['type'], $fetched['body']);
     }
 
     private function isHtml(array $fetched): bool
     {
-        return str_contains($fetched['type'], 'html')
-            || (bool) preg_match('/<(!doctype html|html)\b/i', substr($fetched['body'], 0, 2048));
+        return ImportAddress::isHtml($fetched['type'], $fetched['body']);
     }
 
     private function hasAi(): bool
@@ -418,60 +347,14 @@ class LinkImportService
     }
 
     /**
-     * Leave out what the schedule already has, among the events it created itself.
-     *
-     * The same name at the same start is the plain case. The other two are what reading a link
-     * a second time runs into, because a series does not always come back in the shape it was
-     * saved in: once somebody moves one of its dates the source lists it date by date, and when
-     * that date has passed it is a rule again.
-     *  - A dated row is already there when a repeating event of that name falls on that day at
-     *    that time. Otherwise twelve single events were offered on top of the repeating one.
-     *  - A repeating row is already there when an event of that name exists at its next date.
+     * Leave out what the schedule already has, among the events it created itself. What counts
+     * as already there is ScheduleEventMatcher's to say.
      */
     private function dropAlreadyOnSchedule(Role $role, array $rows, string $timezone): array
     {
-        $key = fn ($name, $utc) => mb_strtolower(trim((string) $name)).'|'.$utc;
+        $matcher = new ScheduleEventMatcher($role, $timezone);
 
-        $existing = DB::table('events')
-            ->where('creator_role_id', $role->id)
-            ->whereNotNull('starts_at')
-            ->get(['name', 'starts_at'])
-            ->mapWithKeys(fn ($event) => [$key($event->name, Carbon::parse($event->starts_at)->format('Y-m-d H:i')) => true]);
-
-        if ($existing->isEmpty()) {
-            return $rows;
-        }
-
-        // Whole models, not a narrowed select: Event::matchesDate() reads a dozen columns.
-        $repeating = Event::where('creator_role_id', $role->id)
-            ->whereNotNull('starts_at')
-            ->whereNotNull('days_of_week')
-            ->get()
-            ->groupBy(fn (Event $event) => mb_strtolower(trim((string) $event->name)));
-
-        return array_values(array_filter($rows, function (array $row) use ($existing, $repeating, $key, $timezone) {
-            // The preview's time is a wall-clock time the save reads in the schedule's zone.
-            $start = Carbon::parse($row['event_date_time'], $timezone);
-
-            if (isset($existing[$key($row['event_name'], $start->copy()->utc()->format('Y-m-d H:i'))])) {
-                return false;
-            }
-
-            if (! empty($row['recurrence'])) {
-                $next = Carbon::parse($row['sort_at'] ?? $row['event_date_time'], $timezone)->utc()->format('Y-m-d H:i');
-
-                return ! isset($existing[$key($row['event_name'], $next)]);
-            }
-
-            foreach ($repeating[mb_strtolower(trim((string) $row['event_name']))] ?? [] as $event) {
-                if (Carbon::parse($event->starts_at, 'UTC')->setTimezone($timezone)->format('H:i') === $start->format('H:i')
-                    && $event->matchesDate($start->format('Y-m-d'), $timezone)) {
-                    return false;
-                }
-            }
-
-            return true;
-        }));
+        return array_values(array_filter($rows, fn (array $row) => $matcher->match($row) === null));
     }
 
     /**
@@ -596,18 +479,13 @@ class LinkImportService
 
     private function storeImage(string $url, int $seconds = 8): ?string
     {
-        $contents = UrlUtils::safeFetch($url, $seconds);
+        $image = RemoteImage::read($url, $seconds, self::MAX_IMAGE_BYTES);
 
-        if (! is_string($contents) || $contents === '' || strlen($contents) > self::MAX_IMAGE_BYTES) {
+        if (isset($image['reason'])) {
             return null;
         }
 
-        $info = @getimagesizefromstring($contents);
-        $extension = [IMAGETYPE_JPEG => 'jpg', IMAGETYPE_PNG => 'png', IMAGETYPE_GIF => 'gif', IMAGETYPE_WEBP => 'webp'][$info[2] ?? 0] ?? null;
-
-        if (! $extension) {
-            return null;
-        }
+        ['contents' => $contents, 'extension' => $extension] = $image;
 
         $directory = storage_path('app/temp');
         if (! is_dir($directory)) {

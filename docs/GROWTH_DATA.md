@@ -320,6 +320,16 @@ credits, legacy `plan_expires` rows and trials, which is most paid-tier schedule
 - `usage`: `{operation: {month: {count, schedules}}}` from `usage_daily`. For example,
   `gemini_parse_event` is AI import and `gcal_sync` is Google Calendar sync. `schedules` counts
   distinct schedules; install-level operations count toward `count` only.
+- `blog`: the blog, a post a row, as `{columns, rows}`. Columns: `path` (`/blog/<slug>`, the same
+  string `acquisition.by_landing_path` uses for a post), `section` (the post's section key, for
+  example `selling-tickets` or `by-event` for an audience post), `source` (`daily`, `audience` or
+  `admin` for a post the 2026-10 writer made, `before` for one from before it), `published` (month),
+  `words`, `views` and `noindex`. Empty off the nexus.
+  - **`views` changed meaning on 2026-10-08.** A view is counted on the request, and from that day
+    only for a request that passes the marketing pages' bot filters. Before it every crawler's
+    fetch counted, so an older post's total is mostly crawls. Compare posts by views gained since,
+    not by the total.
+  - Join a post to the sign-ups it brought through `signups.landing_path` = `path`.
 - `geography[]`: `{country, schedules, with_event, with_paid_sale, billing}`, over the
   k-anonymised `schedules.country`.
 - `boost`:
@@ -468,6 +478,7 @@ importing and not to a venue or talent the event is also listed on.
 | `imported_page_ai` | a web page whose text the model read |
 | `imported_eventbrite` | the Eventbrite import |
 | `imported_google`, `imported_microsoft`, `imported_caldav` | a calendar: a standing sync's pull, or a one-time import from it |
+| `imported_feed` | a feed: an address the schedule keeps reading, about once an hour (since schema 17) |
 
 - **They start at the release that added `events.import_source`.** Nothing recorded how an earlier
   event was made, so every older import reads as made by hand. A schedule with `imported` 0 and a
@@ -553,6 +564,21 @@ created over the API or WhatsApp cannot carry a price.
 
 ## Changelog (`meta.schema_version`)
 
+- **18** (2026-10-08)
+  - **New section `blog`**: a row a published post, with its `path`, `section`, `source`,
+    `published` month, `words`, `views` and `noindex`. Until now the blog reached this file only
+    as a landing path on a sign-up; nothing said which posts are read.
+  - **`views` on the blog stops counting crawlers from this date** (see `blog`). Nothing else
+    changed shape.
+- **17** (2026-10-08)
+  - **New in `events_by_source`:** `imported_feed`, events made by a feed (an address a schedule
+    keeps reading about once an hour). `imported` includes them, and so does
+    `daily.events_imported`. Zero for every schedule until feeds ship; the bucket is there first
+    so that no later pull changes shape.
+  - **Read it differently from the other sources.** Every other import happens with a person on
+    the import page. A feed's events arrive with nobody at the keyboard, a hundred in one read, so
+    `imported_feed` measures what a schedule is connected to, not what its organizer did that day.
+    Compare `imported` across this version only with `imported_feed` taken out.
 - **16** (2026-10-07)
   - **Seven new `traffic[]` counters** for the guest pages, across every schedule:
     `gp_event_visitors`, `gp_list_taps`, `gp_form_opens`, `gp_checkout_starts`,

@@ -1,4 +1,4 @@
-<x-marketing-layout>
+<x-marketing-layout :hp="true">
     <x-slot name="title">Privacy-First Event Analytics, Built In | Event Schedule</x-slot>
     {{-- "No visitor log" holds where a schedule's owner sees only daily counts. Where owners
          also have Realtime (RealtimeTracker::ownerViewEnabled(), the predicate the FAQ below
@@ -1129,7 +1129,7 @@
                 </div>
 
                 <!-- 6 -->
-                <div class="es-bento group relative lg:col-span-2" data-reveal="panel" data-tilt="3.5">
+                <div id="short-links" class="es-bento group relative scroll-mt-24 lg:col-span-2" data-reveal="panel" data-tilt="3.5">
                     <div class="es-tilt-inner es-dash-card relative flex h-full flex-col overflow-hidden p-7">
                         <div class="relative z-10">
                             <div class="mb-4 flex flex-wrap items-center gap-2">

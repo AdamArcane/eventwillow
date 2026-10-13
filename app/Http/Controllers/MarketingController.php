@@ -8,6 +8,7 @@ use App\Models\PageView;
 use App\Models\Role;
 use App\Services\AuditService;
 use App\Utils\AdminReauthUtils;
+use App\Utils\BrowseWall;
 use App\Utils\DiscoveryUtils;
 use App\Utils\DocsUtils;
 use App\Utils\HeroExperiment;
@@ -56,14 +57,15 @@ class MarketingController extends Controller
      * Same visibility rules as /browse: only events whose card shows a real image (own flyer, or
      * a talent/venue schedule's profile photo), so the wall is guaranteed visually rich posters.
      *
-     * Spread across schedules by DiscoveryUtils, so one schedule's cluster of same-day events
-     * cannot own the front of the rail, which renders the first 12 of this collection.
-     *
-     * One event per schedule before anybody's second, where /browse and /search allow two. The
-     * wall above the fold is 25 pictures with no names under them, and a schedule's second
-     * poster is very often its profile photo again: at two each, with one schedule's synced work
-     * calendar filling the pool, nine of the 25 were the same photo. A schedule's other events
-     * still follow once every schedule has had its turn, so the list is never shorter for it.
+     * ONE event for each schedule, its soonest, and no more (DiscoveryUtils::onePerSchedule()),
+     * as on /browse (BrowseWall). The wall, the phone strip, the rail and the structured list all
+     * read this one collection, so the rule holds for all four. The wall above the fold is 25
+     * pictures with no names under them, and a schedule's second poster is very often its
+     * profile photo again. Until 2026-10 a schedule's other events followed once every schedule
+     * had had its turn, so the list was never short: with sixteen schedules for the 25 places,
+     * one of them was on the wall five times. A short list is this page's honest state now. The
+     * wall fills the places left with its demo flyers, and the rail drops its pinned scroll
+     * below four.
      *
      * Cached for `marketing.wall_cache_seconds`: this is five correlated subqueries plus an
      * excludeLikelyTest() regex pass, run on the single most-hit page on the site, and its answer
@@ -79,9 +81,9 @@ class MarketingController extends Controller
         $limit = 25;
         $perSchedule = 1;
 
-        // Spread INSIDE the closure so the cached collection is already diverse, and so the
-        // cache still holds $limit models rather than the whole candidate pool.
-        $build = fn () => DiscoveryUtils::spread(
+        // Chosen INSIDE the closure so the cached collection is already one per schedule, and
+        // so the cache holds at most $limit models rather than the whole candidate pool.
+        $build = fn () => DiscoveryUtils::onePerSchedule(
             DiscoveryUtils::candidates(
                 $this->publicUpcomingEventsQuery()
                     ->where('is_hidden_from_discovery', false)
@@ -100,8 +102,7 @@ class MarketingController extends Controller
                 $limit,
                 $perSchedule
             ),
-            $limit,
-            $perSchedule
+            $limit
         );
 
         $ttl = (int) config('marketing.wall_cache_seconds');
@@ -124,16 +125,23 @@ class MarketingController extends Controller
         return 'marketing.wall.'.md5((string) config('app.url'));
     }
 
+    /** The cache key browseWall() reads and writes: which events /browse's wall is chosen from. */
+    public static function browseCacheKey(): string
+    {
+        return self::wallCacheKey().'.browse';
+    }
+
     /**
-     * Drop the cached homepage wall.
+     * Drop the cached homepage wall, and what /browse's wall is chosen from.
      *
      * Called from Event's saved/deleted hooks (see Event::WALL_CACHE_FIELDS) and from the admin
-     * discovery toggle. One Cache::forget, so it is cheap enough to run on every qualifying save;
-     * the next homepage hit pays for the rebuild.
+     * discovery toggle. Two Cache::forgets, so it is cheap enough to run on every qualifying
+     * save; the next hit on each page pays for its rebuild.
      */
     public static function forgetWallCache(): void
     {
         Cache::forget(self::wallCacheKey());
+        Cache::forget(self::browseCacheKey());
     }
 
     /**
@@ -299,6 +307,14 @@ class MarketingController extends Controller
     public function bookingRequests()
     {
         return view('marketing.booking-requests');
+    }
+
+    /**
+     * Event Lineup page: the lineup, pages for the acts listed, the logo wall and sponsors
+     */
+    public function lineup()
+    {
+        return view('marketing.lineup');
     }
 
     /**
@@ -6796,183 +6812,26 @@ class MarketingController extends Controller
     }
 
     /**
-     * Demos page - showcase demo schedules grouped by category
+     * Examples page: the demo schedules, on two walls of their own pictures
      */
     public function demos()
     {
-        $categories = $this->getDemoSchedulesByCategory();
+        $categories = \App\Utils\ExampleSchedules::byCategory();
         $allSchedules = collect($categories)->flatten(1);
+        // What app:generate-example-shots wrote: the schedules' pictures at the size the wall
+        // uses, and the photographs of their pages. Empty on an install that has not run it.
+        $pictures = \App\Utils\ExampleSchedules::shots();
 
         return view('marketing.demos', [
             'categories' => $categories,
             'scheduleCount' => $allSchedules->count(),
             'allSchedules' => $allSchedules->toArray(),
+            'walls' => \App\Utils\ExampleSchedules::walls($categories, $pictures['art']),
+            'art' => $pictures['art'],
+            'shots' => $pictures['shots'],
+            'xray' => $pictures['xray'],
+            'shotsDate' => $pictures['taken'],
         ]);
-    }
-
-    /**
-     * Get demo schedules organized by industry category
-     * Hardcoded data - no database query needed
-     * All URLs point to production eventschedule.com
-     */
-    protected function getDemoSchedulesByCategory(): array
-    {
-        return [
-            'Fitness & Wellness' => [
-                [
-                    'subdomain' => 'meditationclasses',
-                    'name' => 'Meditation Classes',
-                    'description' => 'Daily guided sessions for mindfulness and calm',
-                    'url' => 'https://meditationclasses.eventschedule.com/',
-                    'profile_image_url' => 'images/examples/profile_meditationclasses.png',
-                    'header_image_url' => 'images/examples/header_meditationclasses.png',
-                ],
-                [
-                    'subdomain' => 'weekendyogaretreat',
-                    'name' => 'Weekend Yoga Retreat',
-                    'description' => 'Multi-day weekend retreat with yoga classes',
-                    'url' => 'https://weekendyogaretreat.eventschedule.com/',
-                    'profile_image_url' => 'images/examples/profile_weekendyogaretreat.jpg',
-                    'header_image_url' => 'images/examples/header_weekendyogaretreat.jpeg',
-                ],
-                [
-                    'subdomain' => 'hikingclub',
-                    'name' => 'Hiking Club',
-                    'description' => 'Weekly group hikes and outdoor adventures',
-                    'url' => 'https://hikingclub.eventschedule.com/',
-                    'profile_image_url' => 'images/examples/profile_hikingclub.png',
-                    'header_image_url' => 'images/examples/header_hikingclub.png',
-                ],
-            ],
-            'Music & Entertainment' => [
-                [
-                    'subdomain' => 'battleofthebands',
-                    'name' => 'Battle of the Bands',
-                    'description' => 'Live competition showcasing local bands',
-                    'url' => 'https://battleofthebands.eventschedule.com/',
-                    'profile_image_url' => 'images/examples/profile_battleofthebands.jpg',
-                    'header_image_url' => 'images/examples/header_battleofthebands.jpg',
-                ],
-                [
-                    'subdomain' => 'sufficientgroundscoffeemusic',
-                    'name' => 'Sufficient Grounds',
-                    'description' => 'Acoustic sets and open mic nights at a cafe',
-                    'url' => 'https://sufficientgroundscoffeemusic.eventschedule.com/',
-                    'profile_image_url' => 'images/examples/profile_sufficientgroundscoffeemusic.jpg',
-                    'header_image_url' => 'images/examples/header_sufficientgroundscoffeemusic.png',
-                ],
-                [
-                    'subdomain' => 'villageidiot',
-                    'name' => 'Village Idiot',
-                    'description' => 'Weekly live music lineup at a neighborhood pub',
-                    'url' => 'https://villageidiot.eventschedule.com/',
-                    'profile_image_url' => 'images/examples/profile_villageidiot.png',
-                    'header_image_url' => 'images/examples/header_villageidiot.png',
-                ],
-            ],
-            'Community & Recreation' => [
-                [
-                    'subdomain' => 'communityyouthgroup',
-                    'name' => 'Community Youth Group',
-                    'description' => 'Activities and meetups for young people',
-                    'url' => 'https://communityyouthgroup.eventschedule.com/',
-                    'profile_image_url' => 'images/examples/profile_communityyouthgroup.png',
-                    'header_image_url' => 'images/examples/header_communityyouthgroup.png',
-                ],
-                [
-                    'subdomain' => 'karateclub',
-                    'name' => 'Karate Club',
-                    'description' => 'Martial arts classes for all skill levels',
-                    'url' => 'https://karateclub.eventschedule.com/',
-                    'profile_image_url' => 'images/examples/profile_karateclub.jpg',
-                    'header_image_url' => 'images/examples/header_karateclub.jpg',
-                ],
-                [
-                    'subdomain' => 'countyfairgrounds',
-                    'name' => 'County Fairgrounds',
-                    'description' => 'Seasonal events, fairs, and community gatherings',
-                    'url' => 'https://countyfairgrounds.eventschedule.com/',
-                    'profile_image_url' => 'images/examples/profile_countyfairgrounds.png',
-                    'header_image_url' => 'images/examples/header_countyfairgrounds.jpg',
-                ],
-            ],
-            'Creative & Workshops' => [
-                [
-                    'subdomain' => 'nateswoodworkingshop',
-                    'name' => "Nate's Woodworking Shop",
-                    'description' => 'Hands-on woodworking classes and projects',
-                    'url' => 'https://nateswoodworkingshop.eventschedule.com/',
-                    'profile_image_url' => 'images/examples/profile_nateswoodworkingshop.png',
-                    'header_image_url' => 'images/examples/header_nateswoodworkingshop.png',
-                ],
-                [
-                    'subdomain' => 'painting',
-                    'name' => 'Painting',
-                    'description' => 'Painting sessions for beginners and artists',
-                    'url' => 'https://painting.eventschedule.com/',
-                    'profile_image_url' => 'images/examples/profile_painting.jpg',
-                    'header_image_url' => 'images/examples/header_painting.jpg',
-                ],
-                [
-                    'subdomain' => 'pagesbooknookshop',
-                    'name' => 'Pages Book Nook Shop',
-                    'description' => 'Author readings, book clubs, and signings',
-                    'url' => 'https://pagesbooknookshop.eventschedule.com/',
-                    'profile_image_url' => 'images/examples/profile_pagesbooknookshop.png',
-                    'header_image_url' => 'images/examples/header_pagesbooknookshop.png',
-                ],
-            ],
-            'Springfield' => [
-                [
-                    'subdomain' => 'simpsons',
-                    'name' => 'Springfield Events',
-                    'description' => 'Community events across Springfield venues',
-                    'url' => 'https://simpsons.eventschedule.com/',
-                    'profile_image_url' => 'images/demo/demo_profile_donuts.jpg',
-                    'header_image_url' => 'images/demo/demo_header_town.jpg',
-                ],
-                [
-                    'subdomain' => 'demo-moestavern',
-                    'name' => "Moe's Tavern",
-                    'description' => 'Live music, trivia, and open mic nights',
-                    'url' => 'https://demo-moestavern.eventschedule.com/',
-                    'profile_image_url' => 'images/demo/demo_profile_beer.jpg',
-                    'header_image_url' => 'images/demo/demo_header_bar.jpg',
-                ],
-                [
-                    'subdomain' => 'demo-amphitheater',
-                    'name' => 'Springfield Amphitheater',
-                    'description' => 'Outdoor concerts and performances',
-                    'url' => 'https://demo-amphitheater.eventschedule.com/',
-                    'profile_image_url' => 'images/demo/demo_profile_amphitheater.jpg',
-                    'header_image_url' => 'images/demo/demo_header_concert.jpg',
-                ],
-                [
-                    'subdomain' => 'demo-bowlarama',
-                    'name' => "Barney's Bowl-A-Rama",
-                    'description' => 'Bowling leagues, tournaments, and cosmic bowling nights',
-                    'url' => 'https://demo-bowlarama.eventschedule.com/',
-                    'profile_image_url' => 'images/demo/demo_profile_bowling.jpg',
-                    'header_image_url' => 'images/demo/demo_header_bowling.jpg',
-                ],
-                [
-                    'subdomain' => 'demo-aztectheater',
-                    'name' => 'The Aztec Theater',
-                    'description' => "Classic films and premieres at Springfield's art deco cinema",
-                    'url' => 'https://demo-aztectheater.eventschedule.com/',
-                    'profile_image_url' => 'images/demo/demo_profile_popcorn.jpg',
-                    'header_image_url' => 'images/demo/demo_header_theater.jpg',
-                ],
-                [
-                    'subdomain' => 'demo-lardlad',
-                    'name' => 'Lard Lad Donuts',
-                    'description' => 'Donut tastings, coffee events, and sweet celebrations',
-                    'url' => 'https://demo-lardlad.eventschedule.com/',
-                    'profile_image_url' => 'images/demo/demo_profile_donut_box.jpg',
-                    'header_image_url' => 'images/demo/demo_header_donuts.jpg',
-                ],
-            ],
-        ];
     }
 
     /**
@@ -7062,7 +6921,7 @@ class MarketingController extends Controller
                                 ->orWhere('short_description', 'like', '%'.$escapedQuery.'%');
                         })
                         ->where('is_hidden_from_discovery', false)
-                        // Same order as browse(): dated events from today first, soonest first, then the
+                        // Same order as the homepage wall: dated events from today first, soonest first, then the
                         // recurring series whose starts_at is the date the series BEGAN (already past), then
                         // undated rows. A plain starts_at sort put a weekly night that started last year ahead
                         // of next week's one-offs, contradicting the /search page's own "soonest first".
@@ -7089,32 +6948,11 @@ class MarketingController extends Controller
     {
         $isAdmin = auth()->check() && auth()->user()->isAdmin();
 
-        // Only surface events whose card shows an image (own flyer, or a talent/venue
-        // schedule's profile photo) rather than the letter-gradient placeholder.
-        //
-        // This page renders the whole collection, so unlike the homepage rail it needs the
-        // WIDER pool to see any benefit: reordering 24 rows still leaves the same 24 events on
-        // the page. The FAQ answer below describes the cap, so keep the two in step.
-        $events = DiscoveryUtils::spread(
-            DiscoveryUtils::candidates(
-                $this->publicUpcomingEventsQuery()
-                    ->where('is_hidden_from_discovery', false)
-                    ->where(function ($sub) {
-                        $sub->where(function ($f) {
-                            $f->whereNotNull('flyer_image_url')
-                                ->where('flyer_image_url', '!=', '');
-                        })
-                            ->orWhereHas('roles', function ($r) {
-                                $r->whereIn('roles.type', ['talent', 'venue'])
-                                    ->whereNotNull('roles.profile_image_url')
-                                    ->where('roles.profile_image_url', '!=', '');
-                            });
-                    })
-                    ->orderByRaw('CASE WHEN starts_at >= ? THEN 0 ELSE 1 END, starts_at IS NULL, starts_at ASC, events.id ASC', [Carbon::today()]),
-                24
-            ),
-            24
-        );
+        $now = Carbon::now('UTC');
+
+        // One poster for each schedule: the event it has on next (BrowseWall). $more names the
+        // schedules that have something else coming up as well.
+        [$events, $more] = $this->browseWall($now);
 
         // Admins also see hidden events so they can restore them. Deliberately NOT spread and
         // NOT widened: this is a moderation list, where demoting an event past the 50th row
@@ -7167,6 +7005,10 @@ class MarketingController extends Controller
 
         return view('marketing.browse', [
             'events' => $events,
+            'wall' => BrowseWall::build($events, $more, $now),
+            'network' => BrowseWall::remote($federatedEvents, $now),
+            'hidden' => BrowseWall::build($hiddenEvents, [], $now, plain: true),
+            'browseAdmin' => $isAdmin,
             'hiddenEvents' => $hiddenEvents,
             'federatedEvents' => $federatedEvents,
             'federatedTotal' => $federatedTotal,
@@ -7177,6 +7019,91 @@ class MarketingController extends Controller
             'federatedLanguage' => $federatedLanguage,
             'federatedInstance' => $federatedInstance,
         ]);
+    }
+
+    /**
+     * The events on /browse's wall, soonest first, and the schedules among them that have more.
+     *
+     * Two reads make the pool. Dated events that have not ended, a few per owning schedule
+     * (DiscoveryUtils::candidates()), in the order they are on: what is running now first, then
+     * by start. And every series, because when a series is next on cannot be asked of SQL - the
+     * rhythm, the skipped dates and the end of the run are Event::nextOccurrenceFrom()'s.
+     * BrowseWall::pick() then keeps one event for each credited schedule.
+     *
+     * "Not ended" is in the SQL, before the pool is cut, on purpose. Chosen afterwards, a studio
+     * with three classes already over today had no row left in its three places, and was off the
+     * wall with one on tonight. It is start plus length, and SIX HOURS for an event with no
+     * length recorded, which is BrowseWall::NO_LENGTH_HOURS: the two must agree, or the pool
+     * holds rows the pick then throws away.
+     *
+     * Only events whose poster shows a picture (own flyer, or a talent/venue schedule's profile
+     * photo). The FAQ on the page describes these rules, so keep the two in step.
+     *
+     * The ids are cached with the homepage wall's (marketing.wall_cache_seconds, 0 in tests) and
+     * dropped with it. Each request reloads those rows through the same visibility rules and
+     * picks again, so an event that has ended or been unpublished since is gone at once and
+     * only a NEW event waits out the cache.
+     *
+     * @return array{0: \Illuminate\Support\Collection, 1: array<string, bool>}
+     */
+    private function browseWall(Carbon $now): array
+    {
+        $listed = fn () => $this->publicEventsQuery()
+            ->where('is_hidden_from_discovery', false)
+            ->where(function ($sub) {
+                $sub->where(function ($f) {
+                    $f->whereNotNull('flyer_image_url')
+                        ->where('flyer_image_url', '!=', '');
+                })
+                    ->orWhereHas('roles', function ($r) {
+                        $r->whereIn('roles.type', ['talent', 'venue'])
+                            ->whereNotNull('roles.profile_image_url')
+                            ->where('roles.profile_image_url', '!=', '');
+                    });
+            });
+
+        $build = function () use ($listed, $now) {
+            $at = $now->format('Y-m-d H:i:s');
+
+            $dated = DiscoveryUtils::candidates(
+                $listed()
+                    ->whereNull('days_of_week')
+                    ->whereNotNull('starts_at')
+                    ->whereRaw(
+                        'DATE_ADD(starts_at, INTERVAL ROUND(IF(duration IS NULL OR duration <= 0, ?, duration) * 60) MINUTE) >= ?',
+                        [BrowseWall::NO_LENGTH_HOURS, $at]
+                    )
+                    ->orderByRaw('GREATEST(starts_at, ?) ASC, events.id ASC', [$at]),
+                BrowseWall::LIMIT,
+                1
+            );
+
+            $series = $listed()
+                ->whereNotNull('days_of_week')
+                ->orderByDesc('events.id')
+                ->limit(BrowseWall::SERIES)
+                ->get();
+
+            $pool = $dated->concat($series);
+            $picked = BrowseWall::pick($pool, BrowseWall::LIMIT, $now);
+
+            return [
+                'ids' => $picked->pluck('id')->all(),
+                'more' => BrowseWall::schedulesWithMore($pool, $picked, $now),
+            ];
+        };
+
+        $ttl = (int) config('marketing.wall_cache_seconds');
+        $chosen = $ttl > 0 ? Cache::remember(self::browseCacheKey(), $ttl, $build) : $build();
+
+        if (! $chosen['ids']) {
+            return [(new Event)->newCollection(), []];
+        }
+
+        return [
+            BrowseWall::pick($listed()->whereIn('events.id', $chosen['ids'])->get(), BrowseWall::LIMIT, $now),
+            $chosen['more'],
+        ];
     }
 
     /**
@@ -7385,11 +7312,32 @@ class MarketingController extends Controller
     }
 
     /**
-     * Base query for upcoming, public, non-demo events shown on the platform discovery
-     * surfaces (homepage Discover, /browse, /search). Callers add hidden-state filtering,
-     * any text search, ordering and limits.
+     * Base query for upcoming, public, non-demo events shown on the homepage Discover, /search
+     * and /for-talent. Callers add hidden-state filtering, any text search, ordering and limits.
+     *
+     * "Upcoming" here is from the start of today (UTC), every series, and anything of a day or
+     * longer that is still running. /browse asks a finer question (not ended, to the minute) and
+     * builds on publicEventsQuery() itself.
      */
     private function publicUpcomingEventsQuery(): Builder
+    {
+        return $this->publicEventsQuery()
+            ->where(function ($q) {
+                $q->where('starts_at', '>=', Carbon::today())
+                    ->orWhereNotNull('days_of_week')
+                    ->orWhere(function ($q2) {
+                        $q2->where('duration', '>=', 24)
+                            ->whereRaw('DATE_ADD(starts_at, INTERVAL duration HOUR) >= ?', [Carbon::today()]);
+                    });
+            });
+    }
+
+    /**
+     * Which events the platform's discovery surfaces may show at all, whenever they are on:
+     * public, accepted by a listed schedule, not demo content and not a likely test. Every
+     * caller adds its own rule about time.
+     */
+    private function publicEventsQuery(): Builder
     {
         $excludeCountry = strtolower(trim((string) config('app.search_exclude_country', '')));
         $publicScheduleFilter = $this->publicScheduleFilter();
@@ -7399,7 +7347,7 @@ class MarketingController extends Controller
         // roles is ordered explicitly because the relation has no ordering of its own, and three
         // things read its FIRST element: getViewableRole() (the name and city on the card),
         // getGuestUrlData() via role()/venue (the card's href and the url in the ItemList JSON-LD)
-        // and DiscoveryUtils::spread() (the schedule an event spends its quota against).
+        // and DiscoveryUtils::scheduleKey() (the schedule an event is counted against, on every surface).
         //
         // event_role.id, NOT roles.id. It is attachment order, which is what the unordered query
         // was already returning in practice - the join drives off the event_id index, whose leaves
@@ -7412,14 +7360,6 @@ class MarketingController extends Controller
         // Scoped to discovery rather than added to Event::roles(), which guest pages, graphics and
         // emails all read. The sitemap deliberately keeps the natural order for the same reason.
         return Event::with(['roles' => fn ($q) => $q->orderBy('event_role.id'), 'creatorRole'])
-            ->where(function ($q) {
-                $q->where('starts_at', '>=', Carbon::today())
-                    ->orWhereNotNull('days_of_week')
-                    ->orWhere(function ($q2) {
-                        $q2->where('duration', '>=', 24)
-                            ->whereRaw('DATE_ADD(starts_at, INTERVAL duration HOUR) >= ?', [Carbon::today()]);
-                    });
-            })
             ->where('is_private', false)
             ->where('is_draft', false)
             ->where('is_cancelled', false)
@@ -7532,7 +7472,7 @@ class MarketingController extends Controller
             ['page' => 'Creating Schedules', 'section' => 'Videos & Links', 'description' => 'Manage YouTube videos, social links, and short links.', 'url' => $r['creating_schedules'].'#videos-links', 'category' => 'User Guide', 'keywords' => 'youtube social payment links videos short link vanity url custom slug forwarding redirect'],
             ['page' => 'Creating Schedules', 'section' => 'Customize', 'description' => 'Sub-schedules, custom fields, categories and custom labels.', 'url' => $r['creating_schedules'].'#customize', 'category' => 'User Guide', 'keywords' => 'customize personalize'],
             ['page' => 'Creating Schedules', 'section' => 'Sub-schedules', 'description' => 'Create categories to organize events within a schedule.', 'url' => $r['creating_schedules'].'#customize-subschedules', 'category' => 'User Guide', 'keywords' => 'groups categories organize'],
-            ['page' => 'Creating Schedules', 'section' => 'Custom Fields', 'description' => 'Add custom fields to your events.', 'url' => $r['creating_schedules'].'#customize-custom-fields', 'category' => 'User Guide', 'keywords' => 'custom fields metadata request form validation pattern regex hint multiselect checklist show as filter room search shareable link'],
+            ['page' => 'Creating Schedules', 'section' => 'Custom Fields', 'description' => 'Add custom fields to your events.', 'url' => $r['creating_schedules'].'#customize-custom-fields', 'category' => 'User Guide', 'keywords' => 'custom fields metadata request form validation pattern regex hint multiselect checklist show as filter room floor on event page public search shareable link'],
             ['page' => 'Creating Schedules', 'section' => 'Categories', 'description' => 'Customise the event categories shown on your schedule.', 'url' => $r['creating_schedules'].'#customize-categories', 'category' => 'User Guide', 'keywords' => 'categories custom rename add'],
             ['page' => 'Creating Schedules', 'section' => 'Sponsors', 'description' => 'Showcase sponsor logos and links on your schedule page.', 'url' => $r['creating_schedules'].'#engagement-sponsors', 'category' => 'User Guide', 'keywords' => 'sponsors logos branding partners'],
             ['page' => 'Creating Schedules', 'section' => 'Gallery', 'description' => 'Show a gallery of photos of your venue, past events or team on your schedule page.', 'url' => $r['creating_schedules'].'#gallery', 'category' => 'User Guide', 'keywords' => 'gallery photos images pictures slideshow lightbox album upload'],
@@ -7561,6 +7501,7 @@ class MarketingController extends Controller
             ['page' => 'Creating Schedules', 'section' => 'Google Calendar', 'description' => 'Set up Google Calendar sync for your schedule.', 'url' => $r['creating_schedules'].'#integrations-google', 'category' => 'User Guide', 'keywords' => 'google calendar sync'],
             ['page' => 'Creating Schedules', 'section' => 'Outlook Calendar', 'description' => 'Set up Outlook / Microsoft 365 calendar sync for your schedule.', 'url' => $r['creating_schedules'].'#integrations-microsoft', 'category' => 'User Guide', 'keywords' => 'outlook microsoft 365 office calendar sync teams'],
             ['page' => 'Creating Schedules', 'section' => 'CalDAV Calendar', 'description' => 'Set up CalDAV protocol integration.', 'url' => $r['creating_schedules'].'#integrations-caldav', 'category' => 'User Guide', 'keywords' => 'caldav ical protocol'],
+            ['page' => 'Creating Schedules', 'section' => 'Feeds from Other Sites', 'description' => 'Keep a schedule up to date from a calendar address, an RSS feed or a page that lists events.', 'url' => $r['creating_schedules'].'#integrations-feeds', 'category' => 'User Guide', 'keywords' => 'feed rss atom ics ical webcal sync import subscribe'],
             ['page' => 'Creating Schedules', 'section' => 'Calendar Text and Feeds', 'description' => 'Calendar description template and iCal/RSS feed URLs.', 'url' => $r['creating_schedules'].'#integrations-advanced', 'category' => 'User Guide', 'keywords' => 'advanced feeds ical rss subscribe calendar description template variables price discount before after coupon calendar text'],
             ['page' => 'Creating Schedules', 'section' => 'AI Details Generator', 'description' => 'Use AI to generate schedule descriptions (Enterprise).', 'url' => $r['creating_schedules'].'#ai-details-generator', 'category' => 'User Guide', 'keywords' => 'ai generate details description automatic'],
             ['page' => 'Creating Schedules', 'section' => 'The Schedule Form', 'description' => 'Where the schedule form is, its sections and rows, and how the one Save works.', 'url' => $r['creating_schedules'].'#schedule-form', 'category' => 'User Guide', 'keywords' => 'edit schedule form sections rows save'],
@@ -7575,16 +7516,16 @@ class MarketingController extends Controller
             ['page' => 'Schedule Styling', 'section' => 'Default Layout', 'description' => 'Choose between the month calendar and the list as your schedule\'s default layout.', 'url' => $r['schedule_styling'].'#event-layout', 'category' => 'User Guide', 'keywords' => 'calendar grid list layout display default'],
             ['page' => 'Schedule Styling', 'section' => 'Header Style', 'description' => 'Choose the Banner or Compact header style for your public schedule page.', 'url' => $r['schedule_styling'].'#header-style', 'category' => 'User Guide', 'keywords' => 'header style banner compact slim full-width bar'],
             ['page' => 'Schedule Styling', 'section' => 'Profile Image', 'description' => 'Upload and set your profile or logo image, which also becomes your favicon on Pro.', 'url' => $r['schedule_styling'].'#profile-image', 'category' => 'User Guide', 'keywords' => 'logo avatar photo favicon browser tab icon apple touch home screen'],
-            ['page' => 'Schedule Styling', 'section' => 'Header Image', 'description' => 'Set header banners with presets, custom uploads, or a venue logo wall.', 'url' => $r['schedule_styling'].'#header-images', 'category' => 'User Guide', 'keywords' => 'banner cover header logo wall venue logos'],
-            ['page' => 'Schedule Styling', 'section' => 'Background', 'description' => 'Choose solid color, gradient, or image backgrounds.', 'url' => $r['schedule_styling'].'#backgrounds', 'category' => 'User Guide', 'keywords' => 'background color gradient image'],
-            ['page' => 'Schedule Styling', 'section' => 'Accent Color', 'description' => 'Select accent colors for buttons and interactive elements.', 'url' => $r['schedule_styling'].'#color-scheme', 'category' => 'User Guide', 'keywords' => 'color accent theme palette scheme'],
-            ['page' => 'Schedule Styling', 'section' => 'Font Family', 'description' => 'Choose custom fonts from Google Fonts.', 'url' => $r['schedule_styling'].'#typography', 'category' => 'User Guide', 'keywords' => 'font text typeface google fonts typography'],
+            ['page' => 'Schedule Styling', 'section' => 'Header Image', 'description' => 'Pick a header picture from a wall of presets, upload your own, or show a venue logo wall.', 'url' => $r['schedule_styling'].'#header-images', 'category' => 'User Guide', 'keywords' => 'banner cover header logo wall venue logos pictures thumbnails upload accent gradient'],
+            ['page' => 'Schedule Styling', 'section' => 'Background', 'description' => 'Choose a gradient by its swatch, a solid color, or an image background.', 'url' => $r['schedule_styling'].'#backgrounds', 'category' => 'User Guide', 'keywords' => 'background color gradient image swatch rotation hex upload'],
+            ['page' => 'Schedule Styling', 'section' => 'Accent Color', 'description' => 'Set the accent color for buttons and highlights, with a picker, a hex code or a preset.', 'url' => $r['schedule_styling'].'#color-scheme', 'category' => 'User Guide', 'keywords' => 'color accent theme palette scheme hex'],
+            ['page' => 'Schedule Styling', 'section' => 'Font Family', 'description' => 'Choose a Google Font from a list that shows your schedule\'s name in each one.', 'url' => $r['schedule_styling'].'#typography', 'category' => 'User Guide', 'keywords' => 'font text typeface google fonts typography search'],
             ['page' => 'Schedule Styling', 'section' => 'Event Animation', 'description' => 'Animate event cards as visitors scroll your schedule.', 'url' => $r['schedule_styling'].'#list-animation', 'category' => 'User Guide', 'keywords' => 'animation motion scroll reveal rise focus slide deal shine curtain effect'],
             ['page' => 'Schedule Styling', 'section' => 'AI Style Generator', 'description' => 'Use AI to generate cohesive branding, images, colors, and fonts (Enterprise).', 'url' => $r['schedule_styling'].'#ai-style-generator', 'category' => 'User Guide', 'keywords' => 'ai generate style branding images automatic'],
             ['page' => 'Schedule Styling', 'section' => 'Remove Branding', 'description' => 'Remove the "Powered by Event Schedule" badge (Pro), and what a selfhosted install keeps.', 'url' => $r['schedule_styling'].'#remove-branding', 'category' => 'User Guide', 'keywords' => 'branding badge powered by white label selfhost attribution credit licence'],
             ['page' => 'Schedule Styling', 'section' => 'Custom CSS', 'description' => 'Add custom CSS for advanced styling (Pro).', 'url' => $r['schedule_styling'].'#custom-css', 'category' => 'User Guide', 'keywords' => 'css stylesheet custom code'],
             ['page' => 'Schedule Styling', 'section' => 'Hiding Sections', 'description' => 'Hide any panel on your schedule or event pages with one line of CSS (Pro).', 'url' => $r['schedule_styling'].'#hiding-sections', 'category' => 'User Guide', 'keywords' => 'hide remove section panel css display none notify me performer list'],
-            ['page' => 'Schedule Styling', 'section' => 'Live Preview', 'description' => 'Preview styling changes in real time.', 'url' => $r['schedule_styling'].'#live-preview', 'category' => 'User Guide', 'keywords' => 'preview real-time'],
+            ['page' => 'Schedule Styling', 'section' => 'Live Preview', 'description' => 'See your header, events, background and colors as you change them, in light and dark.', 'url' => $r['schedule_styling'].'#live-preview', 'category' => 'User Guide', 'keywords' => 'preview real-time light dark view schedule not saved'],
 
             // Managing Schedules
             ['page' => 'Managing Schedules', 'section' => 'Overview', 'description' => 'Introduction to the schedule admin panel and tabs.', 'url' => $r['managing_schedules'].'#overview', 'category' => 'User Guide', 'keywords' => 'admin panel dashboard'],
@@ -7595,6 +7536,12 @@ class MarketingController extends Controller
             ['page' => 'Managing Schedules', 'section' => 'Availability', 'description' => 'Set availability dates for talent schedules.', 'url' => $r['managing_schedules'].'#availability', 'category' => 'User Guide', 'keywords' => 'available dates talent booking'],
             ['page' => 'Managing Schedules', 'section' => 'Appointments', 'description' => 'The Appointments tab: set up bookable types, see your bookings, and share your booking page. One type is free; Pro adds more, paid bookings and scheduling rules.', 'url' => $r['managing_schedules'].'#appointments', 'category' => 'User Guide', 'keywords' => 'appointments tab bookings booking page tab free calendly'],
             ['page' => 'Managing Schedules', 'section' => 'Requests', 'description' => 'Manage public event request submissions and appointment bookings that need approval.', 'url' => $r['managing_schedules'].'#requests', 'category' => 'User Guide', 'keywords' => 'submissions approve reject appointment booking approval pending'],
+            ['page' => 'Managing Schedules', 'section' => 'Feeds', 'description' => 'Keep a schedule up to date from a calendar address, an RSS feed or a page that lists events.', 'url' => $r['managing_schedules'].'#feeds', 'category' => 'User Guide', 'keywords' => 'feed rss atom ics ical webcal sync import subscribe standing automatic'],
+            ['page' => 'Managing Schedules', 'section' => 'Adding a Feed', 'description' => 'Check an address, choose how new events arrive and what happens when one leaves the feed.', 'url' => $r['managing_schedules'].'#feeds-add', 'category' => 'User Guide', 'keywords' => 'add feed address check publish drafts'],
+            ['page' => 'Managing Schedules', 'section' => 'Reviewing Drafts', 'description' => 'Publish, skip or edit the events a feed holds as drafts.', 'url' => $r['managing_schedules'].'#feeds-review', 'category' => 'User Guide', 'keywords' => 'review drafts publish skip publish all'],
+            ['page' => 'Managing Schedules', 'section' => 'Feed Updates and Your Edits', 'description' => 'What a feed copies from its source, and why a field you changed is kept.', 'url' => $r['managing_schedules'].'#feeds-updates', 'category' => 'User Guide', 'keywords' => 'feed update edits overwrite keep changed'],
+            ['page' => 'Managing Schedules', 'section' => 'When an Event Leaves a Feed', 'description' => 'Leave, cancel or remove an event that is no longer listed, and the decisions held for you.', 'url' => $r['managing_schedules'].'#feeds-gone', 'category' => 'User Guide', 'keywords' => 'feed removed cancelled gone decision registered'],
+            ['page' => 'Managing Schedules', 'section' => 'When a Feed Cannot Be Read', 'description' => 'Retries, the emails a team gets, and when a feed is paused.', 'url' => $r['managing_schedules'].'#feeds-trouble', 'category' => 'User Guide', 'keywords' => 'feed failing paused resume read now error'],
             ['page' => 'Managing Schedules', 'section' => 'Followers', 'description' => 'Manage your audience, follow links and the Account badge.', 'url' => $r['managing_schedules'].'#followers', 'category' => 'User Guide', 'keywords' => 'subscribers audience follow account badge remove'],
             ['page' => 'Managing Schedules', 'section' => 'Team', 'description' => 'Invite team members as admins or viewers: who sees sales and refunds, who runs check-in, and who can scan tickets at the door.', 'url' => $r['managing_schedules'].'#team', 'category' => 'User Guide', 'keywords' => 'members permissions collaborate admin viewer access level staff door scanner sales refunds'],
             ['page' => 'Managing Schedules', 'section' => 'Transferring Ownership', 'description' => 'Hand a schedule and everything on it to another account, with the new owner accepting by email.', 'url' => $r['managing_schedules'].'#transfer-ownership', 'category' => 'User Guide', 'keywords' => 'transfer ownership hand over change owner give away new owner sell venue'],
@@ -7664,10 +7611,10 @@ class MarketingController extends Controller
 
             // Newsletters
             ['page' => 'Newsletters', 'section' => 'Overview', 'description' => 'Send branded email newsletters to your audience.', 'url' => $r['newsletters'].'#overview', 'category' => 'User Guide', 'keywords' => 'email newsletter campaign'],
-            ['page' => 'Newsletters', 'section' => 'Newsletter Builder', 'description' => 'Use the three-tab builder: Content, Style, Settings.', 'url' => $r['newsletters'].'#newsletter-builder', 'category' => 'User Guide', 'keywords' => 'builder editor compose'],
+            ['page' => 'Newsletters', 'section' => 'Newsletter Builder', 'description' => 'Use the three-tab builder: Content, Style, Settings.', 'url' => $r['newsletters'].'#newsletter-builder', 'category' => 'User Guide', 'keywords' => 'builder editor compose preview text preheader inbox line desktop mobile phone preview'],
             ['page' => 'Newsletters', 'section' => 'Block Types', 'description' => 'Available content blocks: heading, text, events, button, image, video, quote, sponsors, poll, divider, spacer, social links, profile image and header banner.', 'url' => $r['newsletters'].'#block-types', 'category' => 'User Guide', 'keywords' => 'blocks content heading text button image video quote sponsors poll divider spacer social profile image header banner'],
             ['page' => 'Newsletters', 'section' => 'Templates', 'description' => 'The five style presets, and the Templates tab for designs you save.', 'url' => $r['newsletters'].'#templates', 'category' => 'User Guide', 'keywords' => 'template design preset'],
-            ['page' => 'Newsletters', 'section' => 'Style Customization', 'description' => 'Customize colors, fonts, and button styles.', 'url' => $r['newsletters'].'#style-customization', 'category' => 'User Guide', 'keywords' => 'color font button style design'],
+            ['page' => 'Newsletters', 'section' => 'Style Customization', 'description' => 'Customize colors, fonts, and button styles.', 'url' => $r['newsletters'].'#style-customization', 'category' => 'User Guide', 'keywords' => 'color font button style design system font dark mode'],
             ['page' => 'Newsletters', 'section' => 'Email Subscribers', 'description' => 'Collect email addresses from visitors, give them an account when they confirm, and send an automatic digest when you publish new events.', 'url' => $r['newsletters'].'#email-subscribers', 'category' => 'User Guide', 'keywords' => 'subscribers email subscribe sign up audience mailing list new event announcement notify automatic digest opt in confirm'],
             ['page' => 'Newsletters', 'section' => 'Recipients & Segments', 'description' => 'Choose audiences: followers, email subscribers, ticket buyers, waitlists, sub-schedules or manual lists. An event\'s interest list is not a segment.', 'url' => $r['newsletters'].'#recipients', 'category' => 'User Guide', 'keywords' => 'recipients segments audience list subscribers followers ticket buyers waitlist interest list who receives default everyone'],
             ['page' => 'Newsletters', 'section' => 'Managing Segments', 'description' => 'The Segments tab: create, rename and delete audience segments.', 'url' => $r['newsletters'].'#managing-segments', 'category' => 'User Guide', 'keywords' => 'segments create edit delete reusable'],
@@ -7777,15 +7724,16 @@ class MarketingController extends Controller
 
             // Event Graphics
             ['page' => 'Event Graphics', 'section' => 'Overview', 'description' => 'Generate a shareable image and ready-to-paste text from your upcoming events, free on every plan.', 'url' => $r['event_graphics'].'#overview', 'category' => 'User Guide', 'keywords' => 'graphics images social media flyer free plan credit watermark download copy'],
-            ['page' => 'Event Graphics', 'section' => 'Image Size', 'description' => 'Fit the graphic to a fixed social format: Square, Portrait, Story, or Landscape, or leave it on Auto.', 'url' => $r['event_graphics'].'#overview', 'category' => 'User Guide', 'keywords' => 'image size square portrait story landscape auto 1080 1200 630 social format instagram facebook dimensions aspect ratio'],
-            ['page' => 'Event Graphics', 'section' => 'Events Per Schedule', 'description' => 'Cap how many events any one talent or venue can contribute so a single act or room cannot fill the graphic.', 'url' => $r['event_graphics'].'#overview', 'category' => 'User Guide', 'keywords' => 'events per schedule max limit cap talent venue variety diversity same band repeat dominate spread lineup unlimited'],
+            ['page' => 'Event Graphics', 'section' => 'Layout and Shape', 'description' => 'Grid, Rows or List, flyers per row, and a fixed social shape: Square, Portrait, Story or Wide, or leave it on Natural.', 'url' => $r['event_graphics'].'#overview', 'category' => 'User Guide', 'keywords' => 'layout grid rows list flyers per row shape image size square portrait story wide landscape natural auto 1080 1200 630 social format instagram facebook dimensions aspect ratio'],
+            ['page' => 'Event Graphics', 'section' => 'Which Events', 'description' => 'Which upcoming events are used, how many, a limit per talent or venue, and leaving recurring events out.', 'url' => $r['event_graphics'].'#events', 'category' => 'User Guide', 'keywords' => 'events number of events limit per talent venue per schedule max cap variety diversity same band repeat dominate spread lineup unlimited recurring exclude flyer required'],
+            ['page' => 'Event Graphics', 'section' => 'Dates and Numbers', 'description' => 'A date strip on or above each flyer, your own text in place of the date, and a numbered badge per flyer.', 'url' => $r['event_graphics'].'#dates-and-numbers', 'category' => 'User Guide', 'keywords' => 'date strip overlay above flyer show text number badge numbered flyers'],
             ['page' => 'Event Graphics', 'section' => 'Header & Footer Text', 'description' => 'Add a headline above and a sign-off below the events.', 'url' => $r['event_graphics'].'#header-footer-text', 'category' => 'User Guide', 'keywords' => 'header footer text headline tagline branding signoff'],
-            ['page' => 'Event Graphics', 'section' => 'Text Template', 'description' => 'Customize text formatting for event graphics.', 'url' => $r['event_graphics'].'#text-template', 'category' => 'User Guide', 'keywords' => 'template text format'],
+            ['page' => 'Event Graphics', 'section' => 'Text Template', 'description' => 'How each event is written in the caption that goes with the graphic.', 'url' => $r['event_graphics'].'#text-template', 'category' => 'User Guide', 'keywords' => 'template text format caption wording whatsapp bold'],
             ['page' => 'Event Graphics', 'section' => 'Quick Reference', 'description' => 'Essential template variables at a glance.', 'url' => $r['event_graphics'].'#quick-reference', 'category' => 'User Guide', 'keywords' => 'variables reference cheatsheet price discount before after coupon'],
             ['page' => 'Event Graphics', 'section' => 'All Template Variables', 'description' => 'Complete list of available template variables.', 'url' => $r['event_graphics'].'#variables', 'category' => 'User Guide', 'keywords' => 'variables placeholders tokens price discount before after coupon'],
-            ['page' => 'Event Graphics', 'section' => 'AI Text Prompt', 'description' => 'Use AI to transform generated text (Enterprise).', 'url' => $r['event_graphics'].'#ai-prompt', 'category' => 'User Guide', 'keywords' => 'ai prompt transform text'],
-            ['page' => 'Event Graphics', 'section' => 'Email Scheduling', 'description' => 'Schedule automatic graphic emails (Enterprise).', 'url' => $r['event_graphics'].'#email-scheduling', 'category' => 'User Guide', 'keywords' => 'email schedule automatic send'],
-            ['page' => 'Event Graphics', 'section' => 'Text Options', 'description' => 'The switches that decide what the text beside the graphic includes.', 'url' => $r['event_graphics'].'#text-options', 'category' => 'User Guide', 'keywords' => 'text options url link short'],
+            ['page' => 'Event Graphics', 'section' => 'AI Text Prompt', 'description' => 'Tell AI how to rewrite the caption (Enterprise).', 'url' => $r['event_graphics'].'#ai-prompt', 'category' => 'User Guide', 'keywords' => 'ai prompt transform text rewrite caption instruction'],
+            ['page' => 'Event Graphics', 'section' => 'Email Scheduling', 'description' => 'Have the graphic and its caption emailed daily, weekly or monthly (Enterprise).', 'url' => $r['event_graphics'].'#email-scheduling', 'category' => 'User Guide', 'keywords' => 'email schedule scheduled automatic send it now last sent'],
+            ['page' => 'Event Graphics', 'section' => 'Caption Options', 'description' => 'The switches that decide what the caption beside the graphic includes.', 'url' => $r['event_graphics'].'#text-options', 'category' => 'User Guide', 'keywords' => 'caption text options url link short https event id english every upcoming event'],
 
             // Analytics
             ['page' => 'Analytics', 'section' => 'Overview', 'description' => 'Introduction to the analytics dashboard.', 'url' => $r['analytics'].'#overview', 'category' => 'User Guide', 'keywords' => 'analytics dashboard stats'],
@@ -7984,6 +7932,8 @@ class MarketingController extends Controller
             ['page' => 'Admin Panel', 'section' => 'Usage', 'description' => 'Calls to email, AI, calendar and payment providers against daily limits, and the translation backlog.', 'url' => $r['selfhost_admin'].'#insights-usage', 'category' => 'Selfhost', 'keywords' => 'usage features tracking'],
             ['page' => 'Admin Panel', 'section' => 'Boost Management', 'description' => 'Manage Boost ad campaigns.', 'url' => $r['selfhost_admin'].'#manage-boost', 'category' => 'Selfhost', 'keywords' => 'boost campaigns manage ads'],
             ['page' => 'Admin Panel', 'section' => 'Schedules', 'description' => 'Manage any schedule on any install: edit its details, verify it, release a squatted subdomain, mark it deleted and restore it. Plans are assigned on hosted installs only.', 'url' => $r['selfhost_admin'].'#manage-plans', 'category' => 'Selfhost', 'keywords' => 'plans tiers subscription manage schedules delete deleted restore rename subdomain release free up squatted taken unclaimed ownerless junk takedown undo this is not me claimed owner filter curator approved list'],
+            ['page' => 'Admin Panel', 'section' => 'Blocked', 'description' => 'Block an account that abuses the service: it is signed out, its schedules go offline, and its email address, domain or network address can be refused at sign-up.', 'url' => $r['selfhost_admin'].'#manage-blocked', 'category' => 'Selfhost', 'keywords' => 'block blocked ban banned spam spammer spammers abuse suspend account unblock blocklist blacklist refuse sign-up signup email domain ip address network range'],
+            ['page' => 'Admin Panel', 'section' => 'Feeds', 'description' => 'Every feed on the install: which schedule reads what, whether it is being read, and Read now or Resume for one that is not.', 'url' => $r['selfhost_admin'].'#manage-feeds', 'category' => 'Selfhost', 'keywords' => 'feeds admin failing paused read now resume ics rss import'],
             ['page' => 'Admin Panel', 'section' => 'Domains Management', 'description' => 'Manage custom domains (SaaS only).', 'url' => $r['selfhost_admin'].'#manage-domains', 'category' => 'Selfhost', 'keywords' => 'domains custom manage'],
             ['page' => 'Admin Panel', 'section' => 'Newsletters Management', 'description' => 'Manage newsletters from the admin panel.', 'url' => $r['selfhost_admin'].'#manage-newsletters', 'category' => 'Selfhost', 'keywords' => 'newsletters manage admin'],
             ['page' => 'Admin Panel', 'section' => 'Audit Log', 'description' => 'View platform activity audit log.', 'url' => $r['selfhost_admin'].'#system-audit-log', 'category' => 'Selfhost', 'keywords' => 'audit log activity tracking'],
@@ -8122,6 +8072,8 @@ class MarketingController extends Controller
             ['page' => 'API Reference', 'section' => 'Create Event', 'description' => 'POST /api/events/{subdomain} - Create a new event.', 'url' => $r['developer_api'].'#create-event', 'category' => 'Developer', 'keywords' => 'create event post new'],
             ['page' => 'API Reference', 'section' => 'Update Event', 'description' => 'PUT /api/events/{id} - Update an event.', 'url' => $r['developer_api'].'#update-event', 'category' => 'Developer', 'keywords' => 'update event put modify'],
             ['page' => 'API Reference', 'section' => 'Delete Event', 'description' => 'DELETE /api/events/{id} - Delete an event.', 'url' => $r['developer_api'].'#delete-event', 'category' => 'Developer', 'keywords' => 'delete event remove destroy'],
+            ['page' => 'API Reference', 'section' => 'Cancel Event', 'description' => 'POST /api/events/{id}/cancel - Call an event off and keep its sales.', 'url' => $r['developer_api'].'#cancel-event', 'category' => 'Developer', 'keywords' => 'cancel event call off cancelled notify attendees sales is_cancelled'],
+            ['page' => 'API Reference', 'section' => 'Restore Event', 'description' => 'POST /api/events/{id}/restore - Undo a cancellation.', 'url' => $r['developer_api'].'#restore-event', 'category' => 'Developer', 'keywords' => 'restore event undo cancellation uncancel'],
             ['page' => 'API Reference', 'section' => 'Upload Flyer', 'description' => 'POST /api/events/flyer/{event_id} - Upload an event flyer image.', 'url' => $r['developer_api'].'#upload-flyer', 'category' => 'Developer', 'keywords' => 'upload flyer image poster'],
             ['page' => 'API Reference', 'section' => 'List Categories', 'description' => 'GET /api/categories - List event categories.', 'url' => $r['developer_api'].'#list-categories', 'category' => 'Developer', 'keywords' => 'list categories get'],
             ['page' => 'API Reference', 'section' => 'List Sales', 'description' => 'GET /api/sales - List ticket sales.', 'url' => $r['developer_api'].'#list-sales', 'category' => 'Developer', 'keywords' => 'list sales tickets get'],
@@ -8139,6 +8091,10 @@ class MarketingController extends Controller
             ['page' => 'API Reference', 'section' => 'The Sale Object', 'description' => 'Every field the sale endpoints return.', 'url' => $r['developer_api'].'#sale-object', 'category' => 'Developer', 'keywords' => 'sale object fields response tickets'],
             ['page' => 'API Reference', 'section' => 'What an Update Replaces or Removes', 'description' => 'What PUT /api/events/{id} resets or deletes when a field is left out.', 'url' => $r['developer_api'].'#update-event-removes', 'category' => 'Developer', 'keywords' => 'put update event removes promo codes tickets recurring'],
             ['page' => 'API Reference', 'section' => 'Refunds', 'description' => 'Full and partial refunds through PUT /api/sales/{id}.', 'url' => $r['developer_api'].'#refunds', 'category' => 'Developer', 'keywords' => 'refund sale partial amount stripe paypal'],
+            ['page' => 'API Reference', 'section' => 'End Time', 'description' => 'Send ends_at instead of working out a duration in hours.', 'url' => $r['developer_api'].'#event-end-time', 'category' => 'Developer', 'keywords' => 'ends_at end time duration length hours utc daylight saving clock change'],
+            ['page' => 'API Reference', 'section' => 'Flyer from an Address', 'description' => 'Send flyer_image_url with an event and the picture is fetched and stored as its flyer.', 'url' => $r['developer_api'].'#event-flyer-url', 'category' => 'Developer', 'keywords' => 'flyer_image_url flyer image url address picture poster remove flyer same call'],
+            ['page' => 'API Reference', 'section' => 'External ID', 'description' => 'Give an event the id your own system knows it by, and find it again on the next sync.', 'url' => $r['developer_api'].'#event-external-id', 'category' => 'Developer', 'keywords' => 'external_id external id sync duplicate 409 conflict lookup source id import'],
+            ['page' => 'API Reference', 'section' => 'Create or Update in One Call', 'description' => 'Send "upsert": true with an external_id: the first call creates the event, later calls update it.', 'url' => $r['developer_api'].'#event-upsert', 'category' => 'Developer', 'keywords' => 'upsert create or update external_id sync idempotent duplicate post events'],
             ['page' => 'API Reference', 'section' => 'Daily Cap', 'description' => 'The daily limit on events created per schedule and per account.', 'url' => $r['developer_api'].'#event-daily-cap', 'category' => 'Developer', 'keywords' => 'daily cap limit event_create_limit 422'],
 
             // Webhooks (Developer)

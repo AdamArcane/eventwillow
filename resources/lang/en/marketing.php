@@ -8,6 +8,9 @@
  */
 
 return [
+    'home_title' => 'EventWillow - Free Event Calendar, Ticketing & Booking',
+    'home_description' => 'Publish your events on one calendar page, take bookings and unlimited free registrations, and sell tickets on Pro with zero platform fees. Free to start.',
+
     'pricing_title' => 'EventWillow Pricing - Simple Tools for Better Events',
     'pricing_description' => 'Everything you need to plan, publish, and manage your event, with straightforward pricing built for gatherings of all sizes.',
 

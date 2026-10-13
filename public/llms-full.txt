@@ -889,7 +889,7 @@ curl -X DELETE https://eventschedule.com/api/schedules/the-blue-note/groups/gP5r
 
 #### GET /events
 
-List events owned by the authenticated user. Can be filtered by schedule and date range. Only events belonging to Pro schedules are included in the results.
+List events owned by the authenticated user. Can be filtered by schedule, date range and whether the event is cancelled. Only events belonging to Pro schedules are included in the results. Drafts and cancelled events are listed beside the rest, so check `is_draft` and `is_cancelled` before republishing a row.
 
 **Authentication**: Required
 **Plan**: Pro required (events on non-Pro schedules are silently filtered out)
@@ -900,6 +900,8 @@ List events owned by the authenticated user. Can be filtered by schedule and dat
 | subdomain | string | - | Filter events by schedule subdomain |
 | starts_after | date | - | Filter events starting on or after this date (Y-m-d) |
 | starts_before | date | - | Filter events starting on or before this date (Y-m-d) |
+| is_cancelled | boolean | - | `true` for cancelled events only, `false` to leave them out. Without it both are listed |
+| external_id | string | - | The event your own system knows by this id, matched exactly. With `subdomain` it is one event or none |
 | page | integer | 1 | Page number |
 | per_page | integer | 100 | Results per page (max 500) |
 
@@ -1044,7 +1046,11 @@ Create a new event under a schedule.
 |-------|------|----------|-------------|
 | name | string | Yes | Event name (max 255 chars) |
 | starts_at | string | Yes | Start date/time in UTC (Y-m-d H:i:s format) |
-| duration | number | No | Duration in hours (0 to 24) |
+| flyer_image_url | string | No | The address of a picture to use as the flyer (http or https, max 2048 chars). It is fetched once, before anything is saved, and stored as our own file: a public address that answers within 10 seconds with a JPEG, PNG, GIF or WebP of at most 8 MB, else a `422` and nothing is created or changed. Larger than 2000 pixels is resized. On update a new address replaces the flyer, `null` removes it, and the address the event already reports is no change |
+| external_id | string | No | The id your own system knows this event by (text or a number, max 255 chars). Unique for the schedule that owns the event and compared exactly, so `aB3` and `Ab3` are two ids. An id the schedule already has an event for returns `409` with that event's `id` under `data`, and nothing is created, unless `upsert` is true |
+| upsert | boolean | No | With `external_id`: `true` updates the event that already has the id instead of answering `409`. The first call creates (201, `meta.created` true), later calls update (200, `meta.created` false). The update follows the rules of PUT /events/{id}: nothing is required, a field not sent keeps its stored value, a new event's defaults are not applied again (an event made a draft by hand stays a draft), and it is not counted against the daily cap. Send `tickets`, `addons` or `event_parts` only to change them, each existing row with its `id`. Without an `external_id` it is a `422` |
+| duration | number | No | Duration in hours (0 to 8760, decimals allowed) |
+| ends_at | string | No | The end in UTC (Y-m-d H:i:s format). Another way to give the length: send it instead of `duration`, and the length is the time between the two moments. Must be after the start and at most 8760 hours after it. If both are sent and disagree, the one that differs from the stored value wins on an update, and it is a `422` when both were changed or the event is new. `null` changes nothing |
 | description | string | No | Full description, supports markdown (max 10000 chars) |
 | short_description | string | No | Brief description (max 500 chars) |
 | event_url | string | No | External URL for the event (max 255 chars) |
@@ -1158,6 +1164,8 @@ Update an existing event. Supports partial updates; only the fields provided wil
 
 **Request body**: Same fields as POST /events/{subdomain}. All fields are optional.
 
+`external_id` is kept unless the request names it: a value sets or changes it, `null` clears it. Only an owner or admin of the schedule that owns the event can change it, and an id another event of that schedule holds is a `422`.
+
 **Example**:
 ```bash
 curl -X PUT https://eventschedule.com/api/events/vN4wR8 \
@@ -1194,9 +1202,9 @@ curl -X PUT https://eventschedule.com/api/events/vN4wR8 \
 
 #### DELETE /events/{id}
 
-Permanently delete an event.
+Permanently delete an event. An event that has sales is not deleted (422): cancel it with `POST /events/{id}/cancel` instead, which keeps the sale records.
 
-**Authentication**: Required (must have permission to edit)
+**Authentication**: Required (the person who made the event, or an owner or admin of the schedule that owns it; a schedule that only lists the event gets a 403)
 **Plan**: Pro required
 
 **Path parameters**:
@@ -1223,12 +1231,74 @@ curl -X DELETE https://eventschedule.com/api/events/vN4wR8 \
 - `401` - Missing or invalid API key
 - `403` - Unauthorized to delete this event, or not a Pro account
 - `404` - Event not found
+- `422` - The event has sales and cannot be deleted
+
+---
+
+#### POST /events/{id}/cancel
+
+Call an event off without deleting it. The event keeps its page, which now says it is cancelled, and it keeps every sale and registration. It leaves the schedule's public calendar and any connected Google, Outlook or CalDAV calendar, and stops selling. Running boost campaigns are stopped and refunded, and installment plans stop charging. Sales are not refunded by this call.
+
+Unless the event is a draft, an `event.cancelled` webhook is sent. Cancelling an event that is already cancelled changes nothing and answers 200. An appointment booking is cancelled through its sale, which frees the slot and emails the guest.
+
+**Authentication**: Required (must have permission to edit)
+**Plan**: Pro required
+
+**Path parameters**:
+| Parameter | Type | Description |
+|-----------|------|-------------|
+| id | string | The encoded ID of the event |
+
+**Request body** (JSON, optional):
+| Field | Type | Description |
+|-------|------|-------------|
+| notify_attendees | boolean | Email the people who bought, registered or asked to be told. Buyers are emailed only when the schedule sends from its own address. Nobody is emailed about a draft |
+| message | string | A note added under the cancellation email (max 280 chars) |
+
+**Example**:
+```bash
+curl -X POST https://eventschedule.com/api/events/vN4wR8/cancel \
+  -H "X-API-Key: es_abc123..." \
+  -H "Content-Type: application/json" \
+  -d '{"notify_attendees": true, "message": "The hall is flooded."}'
+```
+
+**Success response** (200): the Event object, with `is_cancelled` true and `cancelled_at` set, and `meta.message` "Event cancelled successfully".
+
+**Error responses**:
+- `401` - Missing or invalid API key
+- `403` - Unauthorized to edit this event, or not a Pro account
+- `404` - Event not found
+- `422` - Validation error (a message longer than 280 characters)
+
+---
+
+#### POST /events/{id}/restore
+
+Undo a cancellation. The event returns to the public calendar and to connected calendars, and sales reopen. Nobody is emailed. A boost campaign or installment plan that the cancellation stopped stays stopped. Unless the event is a draft, an `event.updated` webhook is sent. Restoring an event that is not cancelled changes nothing and answers 200.
+
+**Authentication**: Required (must have permission to edit)
+**Plan**: Pro required
+
+**Example**:
+```bash
+curl -X POST https://eventschedule.com/api/events/vN4wR8/restore \
+  -H "X-API-Key: es_abc123..."
+```
+
+**Success response** (200): the Event object, with `is_cancelled` false and `cancelled_at` null, and `meta.message` "Event restored successfully".
+
+**Error responses**:
+- `401` - Missing or invalid API key
+- `403` - Unauthorized to edit this event, or not a Pro account
+- `404` - Event not found
+- `422` - An appointment booking cannot be restored
 
 ---
 
 #### POST /events/flyer/{event_id}
 
-Upload a flyer image for an event. Any existing flyer image will be replaced.
+Upload a flyer image for an event. Any existing flyer image will be replaced, and an image larger than 2000 pixels is resized. To set a flyer from an address instead of a file, send `flyer_image_url` when creating or updating the event. To remove a flyer, send `"flyer_image_url": null` to PUT /events/{id}.
 
 **Authentication**: Required (must own the event)
 **Plan**: Pro required
@@ -1574,12 +1644,16 @@ Fan comments, photos and videos submitted on events for schedules you own or adm
 | description | string | Yes | Full description (may contain markdown) |
 | starts_at | datetime | No | Start date/time in UTC (Y-m-d H:i:s) |
 | duration | number | Yes | Duration in hours |
+| ends_at | datetime | Yes | End date/time in UTC (Y-m-d H:i:s): the start plus the duration, to the minute. Null when the event has no length. For a recurring event, the end of the first date |
 | category_id | integer | Yes | Category ID |
 | event_url | string | Yes | External URL |
 | registration_url | string | Yes | External registration URL |
 | venue_id | string | Yes | Encoded ID of associated venue schedule |
-| flyer_image_url | string | Yes | URL of the flyer image |
+| flyer_image_url | string | Yes | Address of the flyer image in our storage. Sending an address in this field on create or update fetches that picture as the flyer |
 | is_private | boolean | No | Whether the event is private (hidden from calendar, only accessible via direct link) |
+| external_id | string | Yes | The id your own system gave the event. Look an event up with GET /events?external_id= |
+| is_cancelled | boolean | No | Whether the event is cancelled. Read-only: changed with POST /events/{id}/cancel and /restore. Sending back the value you read is accepted; a different one is a 422 |
+| cancelled_at | datetime | Yes | When the event was cancelled (ISO 8601) |
 | is_password_protected | boolean | No | Whether the event page is protected by a password |
 | schedule_type | string | No | "single" or "recurring" |
 | recurring_frequency | string | Yes | Recurrence frequency. Only present for recurring events |
@@ -1839,7 +1913,7 @@ Create an event with ticket types and optionally upload a flyer. Requires an exi
 
 **Steps**:
 1. `create_event` - Create event with `tickets_enabled: true`, currency, payment method, and ticket array
-2. `upload_flyer` - Optionally upload a flyer image using the event ID from step 1
+2. `upload_flyer` - Optionally upload a flyer image file using the event ID from step 1 (a flyer at a public address needs no second step: send `flyer_image_url` in step 1)
 
 ### sell_tickets
 
@@ -1876,7 +1950,7 @@ Beyond the API endpoints documented above, Event Schedule includes these platfor
 - **Analytics**: Privacy-first (no cookies) page view tracking, device/browser breakdown, traffic sources, social link clicks, and conversion funnels.
 - **Event graphics**: Auto-generated promotional images in multiple layouts, sized for social media sharing, on every plan (AI-written graphic text and scheduled graphic emails are Enterprise).
 - **Sub-schedules**: Color-coded event categories within a schedule, with filtering and separate URLs. Manageable via API.
-- **Custom fields** (Pro): Custom data fields on events, each of which can also be asked on the public event request form.
+- **Custom fields** (Pro): Custom data fields on events, each of which can also be asked on the public event request form, offered as a filter on the schedule, and shown on the public event page (off by default).
 - **Fan content**: YouTube videos, photos and comments on events, with an approval workflow.
 - **Embedding**: Responsive iframe calendar embed for any website, with light/dark mode support; an embeddable ticket widget on Pro.
 - **AI features**: Gemini-powered event parsing from text/images (50 a day, 100 on Enterprise, 10 while a schedule is on its trial), auto-translation across the 12 supported languages, and bulk import.
@@ -1906,7 +1980,7 @@ Everything needed to publish events and gather an audience:
 - Interest list, email subscribers and automatic new-event digests
 - Up to 10 newsletter emails per month (each recipient counts as one)
 - AI event parsing (50 a day, 10 during the trial)
-- Import events from a link: a calendar feed or a page's own event data is read directly with no AI; any other page counts as one AI parse. A one-time copy of up to 100 events per read, not a subscription
+- Import events from a link: a calendar feed or a page's own event data is read directly with no AI; any other page counts as one AI parse. A one-time copy of up to 100 events per read, not a subscription (for a standing one, see Feeds below)
 
 ### Pro Plan
 
@@ -1937,6 +2011,7 @@ Enterprise adds everything in Pro, plus:
 - AI features: flyer generation, schedule and event detail generation, agenda scanning
 - WhatsApp event creation
 - Availability management
+- Feeds: an address a schedule keeps reading about once an hour, a calendar (.ics, webcal, a public Google or Outlook link), an RSS, Atom or JSON feed, or a page that carries event data. New events are published or held as drafts for review, a change at the source is copied except to a field the owner edited, and the owner chooses what happens to an event that leaves the feed (leave it, cancel it, remove it). An event people signed up for is never changed without the owner. No AI is used. Docs: https://eventschedule.com/docs/managing-schedules#feeds
 - Up to 1,000 newsletter emails per month
 - 100 AI event parses a day
 - Priority support

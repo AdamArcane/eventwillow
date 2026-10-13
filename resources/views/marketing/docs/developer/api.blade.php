@@ -35,6 +35,8 @@
             <x-doc-nav-link href="#create-event" search="create event post /api/events tickets agenda recurrence visibility venue members payment method daily cap"><span class="api-method-dot api-method-post"></span>Create Event</x-doc-nav-link>
             <x-doc-nav-link href="#update-event" search="update event put /api/events partial replaces removes promo codes passes venue members"><span class="api-method-dot api-method-put"></span>Update Event</x-doc-nav-link>
             <x-doc-nav-link href="#delete-event" search="delete event /api/events sales deleted appointment"><span class="api-method-dot api-method-delete"></span>Delete Event</x-doc-nav-link>
+            <x-doc-nav-link href="#cancel-event" search="cancel event post /api/events/cancel call off notify attendees sales is_cancelled"><span class="api-method-dot api-method-post"></span>Cancel Event</x-doc-nav-link>
+            <x-doc-nav-link href="#restore-event" search="restore event post /api/events/restore undo cancellation"><span class="api-method-dot api-method-post"></span>Restore Event</x-doc-nav-link>
             <x-doc-nav-link href="#upload-flyer" search="upload flyer image post /api/events/flyer multipart"><span class="api-method-dot api-method-post"></span>Upload Flyer</x-doc-nav-link>
             <x-doc-nav-link href="#list-categories" search="list categories get /api/categories"><span class="api-method-dot api-method-get"></span>List Categories</x-doc-nav-link>
         </x-doc-nav-group>
@@ -182,7 +184,7 @@
                     </div>
                 </div>
             </section>
-    
+
             <!-- Response Format -->
             <section id="response-format" class="doc-section api-endpoint-section">
                 <div class="api-endpoint-row">
@@ -237,7 +239,7 @@
                     </div>
                 </div>
             </section>
-    
+
             <!-- Pagination -->
             <section id="pagination" class="doc-section api-endpoint-section">
                 <div class="api-endpoint-row">
@@ -283,7 +285,7 @@
                     </div>
                 </div>
             </section>
-    
+
             <!-- Register -->
             <section id="register" class="doc-section api-endpoint-section">
                 <div class="api-endpoint-row">
@@ -378,7 +380,7 @@
                     </div>
                 </div>
             </section>
-    
+
             <!-- Login -->
             <section id="login" class="doc-section api-endpoint-section">
                 <div class="api-endpoint-row">
@@ -485,7 +487,7 @@
                     </div>
                 </div>
             </section>
-    
+
             <!-- Show Schedule -->
             <section id="show-schedule" class="doc-section api-endpoint-section">
                 <div class="api-endpoint-row">
@@ -556,7 +558,7 @@
                     </div>
                 </div>
             </section>
-    
+
             <!-- Create Schedule -->
             <section id="create-schedule" class="doc-section api-endpoint-section">
                 <div class="api-endpoint-row">
@@ -610,7 +612,7 @@
                     </div>
                 </div>
             </section>
-    
+
             <!-- Update Schedule -->
             <section id="update-schedule" class="doc-section api-endpoint-section">
                 <div class="api-endpoint-row">
@@ -640,7 +642,7 @@
                     </div>
                 </div>
             </section>
-    
+
             <!-- Delete Schedule -->
             <section id="delete-schedule" class="doc-section api-endpoint-section">
                 <div class="api-endpoint-row">
@@ -685,7 +687,7 @@
                     </div>
                 </div>
             </section>
-    
+
             <!-- List Sub-Schedules -->
             <section id="list-groups" class="doc-section api-endpoint-section">
                 <div class="api-endpoint-row">
@@ -725,7 +727,7 @@
                     </div>
                 </div>
             </section>
-    
+
             <!-- Create Sub-Schedule -->
             <section id="create-group" class="doc-section api-endpoint-section">
                 <div class="api-endpoint-row">
@@ -774,7 +776,7 @@
                     </div>
                 </div>
             </section>
-    
+
             <!-- Update Sub-Schedule -->
             <section id="update-group" class="doc-section api-endpoint-section">
                 <div class="api-endpoint-row">
@@ -802,7 +804,7 @@
                     </div>
                 </div>
             </section>
-    
+
             <!-- Delete Sub-Schedule -->
             <section id="delete-group" class="doc-section api-endpoint-section">
                 <div class="api-endpoint-row">
@@ -851,7 +853,7 @@
                             <code class="doc-inline-code">/api/events</code>
                         </div>
                         <p class="text-gray-600 dark:text-gray-300 mb-6">Returns a paginated list of events on the schedules where you are the owner or an admin, newest start date first. On the hosted service an event is only listed if at least one of its schedules is on a Pro or Enterprise plan. Appointment bookings are never returned here; they are not calendar events.</p>
-                        <p class="text-gray-600 dark:text-gray-300 mb-6">Drafts, internal and unlisted events are all included, so check <code class="doc-inline-code">is_draft</code>, <code class="doc-inline-code">is_internal</code> and <code class="doc-inline-code">is_private</code> before republishing a row on a public site. Each row is <a href="#event-object" class="doc-link">the event object</a>.</p>
+                        <p class="text-gray-600 dark:text-gray-300 mb-6">Drafts, internal, unlisted and cancelled events are all included, so check <code class="doc-inline-code">is_draft</code>, <code class="doc-inline-code">is_internal</code>, <code class="doc-inline-code">is_private</code> and <code class="doc-inline-code">is_cancelled</code> before republishing a row on a public site. Each row is <a href="#event-object" class="doc-link">the event object</a>.</p>
                         <div class="doc-table-wrap">
                             <table class="doc-table">
                                 <thead><tr><th>Parameter</th><th>Description</th></tr></thead>
@@ -866,6 +868,8 @@
                                     <tr><td><code class="doc-inline-code">tickets_enabled</code></td><td>Filter by whether tickets are enabled (boolean)</td></tr>
                                     <tr><td><code class="doc-inline-code">rsvp_enabled</code></td><td>Filter by whether RSVP/registration is enabled (boolean)</td></tr>
                                     <tr><td><code class="doc-inline-code">group_id</code></td><td>Filter by sub-schedule (encoded sub-schedule ID)</td></tr>
+                                    <tr><td><code class="doc-inline-code">is_cancelled</code></td><td><code class="doc-inline-code">true</code> for cancelled events only, <code class="doc-inline-code">false</code> to leave them out. Without it both are listed.</td></tr>
+                                    <tr><td><code class="doc-inline-code">external_id</code></td><td>The event your own system knows by this id, matched exactly, among the events that schedule owns: an event it only lists, which another schedule owns, is never the answer. With <code class="doc-inline-code">subdomain</code> it is one event or none. Without it, the events owned by schedules you are an owner or admin of. See <a href="#event-external-id" class="doc-link">External ID</a>.</td></tr>
                                 </tbody>
                             </table>
                         </div>
@@ -900,7 +904,7 @@
                     </div>
                 </div>
             </section>
-    
+
             <!-- Show Event -->
             <section id="show-event" class="doc-section api-endpoint-section">
                 <div class="api-endpoint-row">
@@ -918,7 +922,7 @@
                         </div>
                         <p class="text-gray-600 dark:text-gray-300 mb-6">Returns a single event by its encoded ID, including its ticket types, add-ons, members, agenda parts, venue, recurring configuration and visibility flags. Requires owner or admin access on one of the event's schedules, and a Pro or Enterprise plan. An appointment booking, which <a href="#list-events" class="doc-link">List Events</a> leaves out, can be read here by its ID.</p>
                         <h3 class="doc-subheading" id="event-object">The event object</h3>
-                        <p class="text-gray-600 dark:text-gray-300 mb-6">List, Show, Create and Update Event and Upload Flyer return this shape, and so do the <code class="doc-inline-code">event.*</code> <a href="{{ route('marketing.docs.developer.webhooks') }}#payload" class="doc-link">webhooks</a>. A field with nothing stored is <code class="doc-inline-code">null</code>, except the few marked as present only in some cases.</p>
+                        <p class="text-gray-600 dark:text-gray-300 mb-6">List, Show, Create, Update, Cancel and Restore Event and Upload Flyer return this shape, and so do the <code class="doc-inline-code">event.*</code> <a href="{{ route('marketing.docs.developer.webhooks') }}#payload" class="doc-link">webhooks</a>. A field with nothing stored is <code class="doc-inline-code">null</code>, except the few marked as present only in some cases.</p>
                         <div class="doc-table-wrap">
                             <table class="doc-table">
                                 <thead><tr><th>Field</th><th>Description</th></tr></thead>
@@ -926,12 +930,15 @@
                                     <tr><td><code class="doc-inline-code">id</code>, <code class="doc-inline-code">url</code></td><td>Encoded event ID and the address of the event's public page</td></tr>
                                     <tr><td><code class="doc-inline-code">name</code>, <code class="doc-inline-code">short_description</code>, <code class="doc-inline-code">description</code></td><td>Name, short summary and Markdown description</td></tr>
                                     <tr><td><code class="doc-inline-code">starts_at</code>, <code class="doc-inline-code">duration</code></td><td>Start in UTC (<code class="doc-inline-code">Y-m-d H:i:s</code>) and length in hours</td></tr>
+                                    <tr><td><code class="doc-inline-code">ends_at</code></td><td>The end in UTC, in the same format: the start plus the length, to the minute. <code class="doc-inline-code">null</code> for an event with no length. For a recurring event it is the end of the first date. See <a href="#event-end-time" class="doc-link">End time</a>.</td></tr>
                                     <tr><td><code class="doc-inline-code">category_id</code>, <code class="doc-inline-code">category_name</code>, <code class="doc-inline-code">category_color</code></td><td>The category's integer ID, with its name and colour as the schedule has them</td></tr>
                                     <tr><td><code class="doc-inline-code">is_draft</code>, <code class="doc-inline-code">is_private</code>, <code class="doc-inline-code">is_internal</code></td><td>Visibility flags, see <a href="#create-event" class="doc-link">Create Event</a></td></tr>
+                                    <tr><td><code class="doc-inline-code">external_id</code></td><td>The id your own system gave the event, or <code class="doc-inline-code">null</code>. See <a href="#event-external-id" class="doc-link">External ID</a>.</td></tr>
+                                    <tr><td><code class="doc-inline-code">is_cancelled</code>, <code class="doc-inline-code">cancelled_at</code></td><td>Whether the event is cancelled, and when (ISO 8601, <code class="doc-inline-code">null</code> otherwise). Read-only: change it with <a href="#cancel-event" class="doc-link">Cancel Event</a> and <a href="#restore-event" class="doc-link">Restore Event</a>. Sending back the value you read is accepted on create and update; a different one is a <code class="doc-inline-code">422</code>.</td></tr>
                                     <tr><td><code class="doc-inline-code">is_password_protected</code></td><td>Whether the event page asks for a password. The password itself is never returned.</td></tr>
                                     <tr><td><code class="doc-inline-code">event_url</code>, <code class="doc-inline-code">registration_url</code></td><td>The online or external event link, and the external registration link</td></tr>
                                     <tr><td><code class="doc-inline-code">venue_id</code>, <code class="doc-inline-code">venue_name</code>, <code class="doc-inline-code">venue_address1</code>, <code class="doc-inline-code">venue_subdomain</code></td><td>The event's venue schedule</td></tr>
-                                    <tr><td><code class="doc-inline-code">flyer_image_url</code></td><td>URL of the flyer image</td></tr>
+                                    <tr><td><code class="doc-inline-code">flyer_image_url</code></td><td>Address of the flyer image in our storage, or <code class="doc-inline-code">null</code>. See <a href="#event-flyer-url" class="doc-link">Flyer from an address</a> for what sending it does.</td></tr>
                                     <tr><td><code class="doc-inline-code">schedule_type</code></td><td><code class="doc-inline-code">single</code> or <code class="doc-inline-code">recurring</code></td></tr>
                                     <tr><td><code class="doc-inline-code">recurring_frequency</code>, <code class="doc-inline-code">recurring_interval</code>, <code class="doc-inline-code">days_of_week</code>, <code class="doc-inline-code">recurring_end_type</code>, <code class="doc-inline-code">recurring_end_value</code></td><td>Present only on a recurring event. <code class="doc-inline-code">days_of_week</code> reads <code class="doc-inline-code">"1111111"</code> for every frequency other than weekly and every_n_weeks.</td></tr>
                                     <tr><td><code class="doc-inline-code">rsvp_enabled</code>, <code class="doc-inline-code">rsvp_limit</code>, <code class="doc-inline-code">tickets_enabled</code></td><td>Registration and ticketing switches</td></tr>
@@ -1010,7 +1017,7 @@
                     </div>
                 </div>
             </section>
-    
+
             <!-- Create Event -->
             <section id="create-event" class="doc-section api-endpoint-section">
                 <div class="api-endpoint-row">
@@ -1034,7 +1041,8 @@
                                 <tbody>
                                     <tr><td><code class="doc-inline-code">name</code></td><td>Yes</td><td>Event name (max 255 characters)</td></tr>
                                     <tr><td><code class="doc-inline-code">starts_at</code></td><td>Yes</td><td>Start date and time in <strong class="text-gray-900 dark:text-white">UTC</strong>, formatted <code class="doc-inline-code">Y-m-d H:i:s</code></td></tr>
-                                    <tr><td><code class="doc-inline-code">duration</code></td><td>No</td><td>Length in hours, 0 to 8760. Decimals are allowed, so 1.5 is 90 minutes. There is no separate end-time field.</td></tr>
+                                    <tr><td><code class="doc-inline-code">duration</code></td><td>No</td><td>Length in hours, 0 to 8760. Decimals are allowed, so 1.5 is 90 minutes.</td></tr>
+                                    <tr><td><code class="doc-inline-code">ends_at</code></td><td>No</td><td>The end, in <strong class="text-gray-900 dark:text-white">UTC</strong> and formatted like <code class="doc-inline-code">starts_at</code>. Another way to give the length: send it instead of <code class="doc-inline-code">duration</code>. See <a href="#event-end-time" class="doc-link">End time</a> below.</td></tr>
                                     <tr><td><code class="doc-inline-code">description</code></td><td>No</td><td>Full description, Markdown supported (max 10,000 characters)</td></tr>
                                     <tr><td><code class="doc-inline-code">short_description</code></td><td>No</td><td>Short description used in listings and previews (max 500 characters)</td></tr>
                                     <tr><td><code class="doc-inline-code">event_url</code></td><td>No</td><td>A single URL for an online event or an external event page (max 500 characters)</td></tr>
@@ -1042,6 +1050,9 @@
                                     <tr><td><code class="doc-inline-code">category_id</code></td><td>No</td><td>Category ID, which must be in this schedule's effective category list (see <a href="#list-categories" class="doc-link">List Categories</a>)</td></tr>
                                     <tr><td><code class="doc-inline-code">category</code></td><td>No</td><td>Category name, matched case- and punctuation-insensitively against the same list. Ignored when <code class="doc-inline-code">category_id</code> is present; an unmatched name returns <code class="doc-inline-code">422 Category not found</code>.</td></tr>
                                     <tr><td><code class="doc-inline-code">schedule</code></td><td>No</td><td>Sub-schedule slug to file the event under. An unknown slug returns <code class="doc-inline-code">422 Sub-schedule not found</code>.</td></tr>
+                                    <tr><td><code class="doc-inline-code">flyer_image_url</code></td><td>No</td><td>The address of a picture to use as the flyer (http or https, max 2048 characters). It is fetched and stored with the event. See <a href="#event-flyer-url" class="doc-link">Flyer from an address</a> below.</td></tr>
+                                    <tr><td><code class="doc-inline-code">external_id</code></td><td>No</td><td>The id your own system knows this event by (text or a number, max 255 characters). See <a href="#event-external-id" class="doc-link">External ID</a> below.</td></tr>
+                                    <tr><td><code class="doc-inline-code">upsert</code></td><td>No</td><td><code class="doc-inline-code">true</code> to update the event that already has this <code class="doc-inline-code">external_id</code> instead of getting a <code class="doc-inline-code">409</code> (boolean). See <a href="#event-upsert" class="doc-link">Create or update in one call</a> below.</td></tr>
                                 </tbody>
                             </table>
                         </div>
@@ -1118,6 +1129,47 @@
                             <li><strong class="text-gray-900 dark:text-white">Talent.</strong> It is the event's one performer. <code class="doc-inline-code">members</code> is overridden, so other performers cannot be added through a talent schedule.</li>
                             <li><strong class="text-gray-900 dark:text-white">Curator.</strong> The event is listed on it, and takes its venue and performers from the request.</li>
                         </ul>
+                        <h3 class="doc-subheading" id="event-end-time">End time</h3>
+                        <p class="text-gray-600 dark:text-gray-300 mb-6">An event is stored as a start and a length. If your system keeps a start and an end, send <code class="doc-inline-code">ends_at</code> and the length is worked out for you, from the two moments in UTC. An event that runs across a clock change is as long as the time that actually passes: 8pm to 8pm over the night the clocks go forward is 23 hours.</p>
+                        <ul class="doc-list mb-6">
+                            <li><code class="doc-inline-code">ends_at</code> has to be after the start and at most 8760 hours after it. On an update that does not send <code class="doc-inline-code">starts_at</code> it is measured from the stored start.</li>
+                            <li>Send one of <code class="doc-inline-code">ends_at</code> and <code class="doc-inline-code">duration</code>. The event object carries both, so a client that reads an event and writes it back sends both, and that is accepted: the one that differs from the stored value is taken as the change. Change both to values that disagree and the reply is <code class="doc-inline-code">422</code>.</li>
+                            <li>Move only <code class="doc-inline-code">starts_at</code> and send the rest back as read, and the event moves whole: it keeps its length and ends later. That holds when the new start is past the old end too, as when an event is postponed by a day: an <code class="doc-inline-code">ends_at</code> that comes back exactly as it was read says nothing.</li>
+                            <li><code class="doc-inline-code">"ends_at": null</code> changes nothing. To take the length off an event, send <code class="doc-inline-code">duration</code> as <code class="doc-inline-code">null</code> or <code class="doc-inline-code">0</code>.</li>
+                        </ul>
+                        <h3 class="doc-subheading" id="event-flyer-url">Flyer from an address</h3>
+                        <p class="text-gray-600 dark:text-gray-300 mb-6">Send <code class="doc-inline-code">flyer_image_url</code> and the picture at that address becomes the event's flyer, in the same call. It is downloaded once and stored as a file of ours, so the event does not depend on the address afterwards, and the <code class="doc-inline-code">flyer_image_url</code> you read back is our copy's address, not the one you sent. To send a file of your own instead, use <a href="#upload-flyer" class="doc-link">Upload Flyer</a>.</p>
+                        <ul class="doc-list mb-6">
+                            <li>The address has to be public and answer within 10 seconds with a JPEG, PNG, GIF or WebP of at most 8 MB. What kind of picture it is, is read from the file itself, not from the address or the server's content type.</li>
+                            <li>The picture is fetched before anything is saved. If it cannot be had, the reply is <code class="doc-inline-code">422</code> with the reason under <code class="doc-inline-code">errors.flyer_image_url</code>, and the event is not created or changed.</li>
+                            <li>A picture wider or taller than 2,000 pixels is resized to fit. An animated GIF is stored as it is.</li>
+                            <li>On <a href="#update-event" class="doc-link">Update Event</a>, a new address replaces the flyer and <code class="doc-inline-code">null</code> removes it. The address the event already reports is no change, so an event that is read and written back keeps its flyer and nothing is downloaded. Nor is the address the flyer was last fetched from: a sync that sends its own picture address with every write downloads it once. To fetch that address again after the picture behind it changed, send <code class="doc-inline-code">null</code> first, or use <a href="#upload-flyer" class="doc-link">Upload Flyer</a>.</li>
+                        </ul>
+                        <h3 class="doc-subheading" id="event-external-id">External ID</h3>
+                        <p class="text-gray-600 dark:text-gray-300 mb-6"><code class="doc-inline-code">external_id</code> is the id your own system knows an event by: a post number, a row's key, a UUID. Send it when you create an event, and your next sync can find that event again instead of adding a second one. It is returned in <a href="#event-object" class="doc-link">the event object</a> and in every event webhook, and <code class="doc-inline-code">GET /api/events?external_id=...</code> looks an event up by it.</p>
+                        <ul class="doc-list mb-6">
+                            <li>It is unique for the schedule that owns the event, so two schedules fed by two systems may both have an event numbered 1. An event that has none reads <code class="doc-inline-code">null</code>.</li>
+                            <li>It is compared exactly: <code class="doc-inline-code">aB3</code> and <code class="doc-inline-code">Ab3</code> are two ids. A number is stored as its digits, and spaces around the value are dropped.</li>
+                            <li>Creating an event with an id the schedule already has an event for returns <code class="doc-inline-code">409</code>, with that event's <code class="doc-inline-code">id</code> under <code class="doc-inline-code">data</code>, and nothing is created, unless the request asks to <a href="#event-upsert" class="doc-link">update it instead</a>. Two requests that carry the same new id at the same moment end the same way: one creates the event, the other gets the <code class="doc-inline-code">409</code>.</li>
+                            <li><a href="#update-event" class="doc-link">Update Event</a> sets it on an event that has none, changes it, or clears it with <code class="doc-inline-code">null</code>. An update that does not mention it leaves it alone. Only an owner or admin of the schedule that owns the event can change it, and an id another event of that schedule holds is refused with <code class="doc-inline-code">422</code>.</li>
+                            <li>The admin panel neither shows nor changes it, and editing an event there keeps it.</li>
+                        </ul>
+                        <h3 class="doc-subheading" id="event-upsert">Create or update in one call</h3>
+                        <p class="text-gray-600 dark:text-gray-300 mb-6">A sync usually does not know whether it has sent a record before. Send <code class="doc-inline-code">"upsert": true</code> with an <code class="doc-inline-code">external_id</code> and this endpoint decides: the first call creates the event and returns <code class="doc-inline-code">201</code>, and every later call with the same id updates that event and returns <code class="doc-inline-code">200</code>. <code class="doc-inline-code">meta.created</code> says which happened.</p>
+                        <ul class="doc-list mb-6">
+                            <li>The update follows the rules of <a href="#update-event" class="doc-link">Update Event</a>, not the rules above. Nothing is required, a field the request does not carry keeps its stored value, and none of a new event's defaults are applied again: an event you turned into a draft in the admin panel stays a draft when the source sends it again.</li>
+                            <li>That includes the lists. Send <code class="doc-inline-code">tickets</code>, <code class="doc-inline-code">addons</code> or <code class="doc-inline-code">event_parts</code> only when you mean to change them, and send each existing row with its <code class="doc-inline-code">id</code>: a row without one is a new row, and a stored row the list leaves out is retired, as <a href="#update-event-removes" class="doc-link">an update does</a>.</li>
+                            <li>The update is not counted against the <a href="#event-daily-cap" class="doc-link">daily cap</a>.</li>
+                            <li><code class="doc-inline-code">upsert</code> without an <code class="doc-inline-code">external_id</code> is refused with <code class="doc-inline-code">422</code>, because there is nothing to match on.</li>
+                            <li>The event is looked up among the events this schedule owns. An event another schedule owns is never matched, even when this schedule lists it.</li>
+                        </ul>
+                        <div class="doc-code-block mb-6">
+                            <div class="doc-code-header"><span>Create or update</span><button class="doc-copy-btn">Copy</button></div>
+                            <pre><code><span class="code-keyword">curl</span> -X POST <span class="code-string">"{{ config('app.url') }}/api/events/your-schedule"</span> \
+         -H <span class="code-string">"X-API-Key: your_api_key"</span> \
+         -H <span class="code-string">"Content-Type: application/json"</span> \
+         -d <span class="code-string">'{"external_id": "post-4686933", "upsert": true, "name": "Spring concert", "starts_at": "2026-05-09 17:30:00"}'</span></code></pre>
+                        </div>
                         <h3 class="doc-subheading" id="event-daily-cap">Daily cap</h3>
                         <p class="text-gray-600 dark:text-gray-300 mb-6">The hosted service caps how many events one schedule, and one account across its schedules, may create in a day, as an anti-abuse measure. The shipped defaults are 500 a day per schedule on Pro, 1,000 on Enterprise and 100 during a trial, and three times that per account. A bulk import that trips the cap gets a <code class="doc-inline-code">422</code> whose body carries <code class="doc-inline-code">"code": "event_create_limit"</code> beside <code class="doc-inline-code">error</code>, so it can stop at the first refusal and resume the next day. Selfhosted installs have no cap.</p>
                     </div>
@@ -1178,7 +1230,7 @@
                         <p class="text-gray-600 dark:text-gray-300 mb-6">Update an event by its encoded ID. Takes the same parameters as <a href="#create-event" class="doc-link">Create Event</a>, and supports partial updates: send only the fields you want to change. Requires owner or admin access on one of the event's schedules and a Pro or Enterprise plan. Returns <code class="doc-inline-code">200</code> with <a href="#event-object" class="doc-link">the event object</a>.</p>
                         <p class="text-gray-600 dark:text-gray-300 mb-6">The update runs through one of the event's schedules that you own or administer. If your account created the event but is neither owner nor admin of any of its schedules, the reply is <code class="doc-inline-code">422 No schedule found for this event that you have access to</code>.</p>
                         <h3 class="doc-subheading" id="update-event-kept">What an update leaves alone</h3>
-                        <p class="text-gray-600 dark:text-gray-300 mb-6">A field the request does not carry keeps its stored value. That covers the start time, the visibility flags, the recurrence, the payment method, the lists of ticket types, add-ons and agenda parts, the venue, the performers and the other schedules the event is listed on. The schedule that owns the event never changes.</p>
+                        <p class="text-gray-600 dark:text-gray-300 mb-6">A field the request does not carry keeps its stored value. That covers the start time, the visibility flags, the recurrence, the payment method, the lists of ticket types, add-ons and agenda parts, the venue, the performers and the other schedules the event is listed on. The schedule that owns the event never changes, and the event's <a href="#event-external-id" class="doc-link"><code class="doc-inline-code">external_id</code></a> stays unless the request names it.</p>
                         <p class="text-gray-600 dark:text-gray-300 mb-6">What the API has no field for stays as the admin panel left it: promo codes, a ticket type's <strong class="text-gray-900 dark:text-white">Max Per Order</strong>, custom fields and pass settings, the dates added to or skipped from a series, sponsors and the event's custom fields. An update that only renames an event changes its name.</p>
                         <p class="text-gray-600 dark:text-gray-300 mb-6">A venue, performer or listing the request does not name also keeps its answer. One that had not yet accepted the event, or had turned it down, is still in that state afterwards: an update does not accept an event on a schedule's behalf. <code class="doc-inline-code">venue_id</code>, <code class="doc-inline-code">venue_name</code> and <code class="doc-inline-code">venue_address1</code> sent as <code class="doc-inline-code">null</code> name no venue, so the event stays where it is.</p>
                         <ul class="doc-list mb-6">
@@ -1212,7 +1264,7 @@
                     </div>
                 </div>
             </section>
-    
+
             <!-- Delete Event -->
             <section id="delete-event" class="doc-section api-endpoint-section">
                 <div class="api-endpoint-row">
@@ -1227,8 +1279,8 @@
                             <span class="api-method-pill api-method-pill-delete px-2 py-1 rounded text-sm font-medium">DELETE</span>
                             <code class="doc-inline-code">/api/events/{id}</code>
                         </div>
-                        <p class="text-gray-600 dark:text-gray-300 mb-6">Permanently delete an event. Requires owner or admin access on one of its schedules and a Pro or Enterprise plan. There is no undo, so hide the event with <code class="doc-inline-code">is_draft</code> instead if you may want it back.</p>
-                        <p class="text-gray-600 dark:text-gray-300 mb-6">An event that has sales is not deleted. The reply is <code class="doc-inline-code">422</code> and nothing changes, whether those sales are paid, refunded or cancelled, because the sale records would go with the event. Cancel it in the admin panel instead, which keeps the records and lets you tell the buyers.</p>
+                        <p class="text-gray-600 dark:text-gray-300 mb-6">Permanently delete an event. Only the event's own people can: whoever made it, or an owner or admin of the schedule that owns it. A schedule that only lists the event answers <code class="doc-inline-code">403</code> and can take the event off its own list instead. Requires a Pro or Enterprise plan. There is no undo, so if you may want it back, hide the event with <code class="doc-inline-code">is_draft</code> or <a href="#cancel-event" class="doc-link">cancel it</a> instead.</p>
+                        <p class="text-gray-600 dark:text-gray-300 mb-6">An event that has sales is not deleted. The reply is <code class="doc-inline-code">422</code> and nothing changes, whether those sales are paid, refunded or cancelled, because the sale records would go with the event. <a href="#cancel-event" class="doc-link">Cancel it</a> instead, which keeps the records and lets you tell the buyers.</p>
                         <p class="text-gray-600 dark:text-gray-300 mb-6">Deleting also removes the synced copy from any connected Google Calendar, Outlook calendar and CalDAV calendar, cancels any running boost campaign, and deletes its gallery photos and sponsor logo files. Unless the event was a draft, an <code class="doc-inline-code">event.deleted</code> <a href="{{ route('marketing.docs.developer.webhooks') }}" class="doc-link">webhook</a> is sent with the event's final state.</p>
                         <p class="text-gray-600 dark:text-gray-300 mb-6">An appointment booking is the exception. It is cancelled, not deleted: the slot is freed, the booking and its sale are kept, the guest of a booking that was still live is emailed, and no webhook is sent. That reply is a bare <code class="doc-inline-code">{"message": "Appointment cancelled"}</code> with no <code class="doc-inline-code">data</code> wrapper.</p>
                     </div>
@@ -1249,7 +1301,93 @@
                     </div>
                 </div>
             </section>
-    
+
+            <!-- Cancel Event -->
+            <section id="cancel-event" class="doc-section api-endpoint-section">
+                <div class="api-endpoint-row">
+                    <div class="api-endpoint-desc">
+                        <h2 class="doc-heading">
+                            <svg aria-hidden="true" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" class="w-5 h-5 text-gray-500 dark:text-gray-400 flex-shrink-0">
+                                <path stroke-linecap="round" stroke-linejoin="round" d="M9.75 9.75l4.5 4.5m0-4.5l-4.5 4.5M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+                            </svg>
+                            Cancel Event
+                        </h2>
+                        <div class="flex items-center gap-2 mb-4">
+                            <span class="api-method-pill api-method-pill-post px-2 py-1 rounded text-sm font-medium">POST</span>
+                            <code class="doc-inline-code">/api/events/{id}/cancel</code>
+                        </div>
+                        <p class="text-gray-600 dark:text-gray-300 mb-6">Call an event off without deleting it. The event keeps its page, which now says it is cancelled, and it keeps every sale and registration. It leaves the schedule's public calendar, stops selling, and is removed from any connected Google Calendar, Outlook calendar and CalDAV calendar. Any running boost campaign is stopped and refunded, and installment plans stop charging. Requires a Pro or Enterprise plan, and to be the event's own: the user who created it, or an owner or admin of the schedule that owns it. A schedule that only lists the event answers <code class="doc-inline-code">403</code>, and can take the event off its own list instead.</p>
+                        <p class="text-gray-600 dark:text-gray-300 mb-6">This is the way to stop an event that has sales, which <a href="#delete-event" class="doc-link">Delete Event</a> refuses. Sales are not refunded by this call: refund each one through <a href="#update-sale" class="doc-link">Update Sale</a> or in the admin panel.</p>
+                        <p class="text-gray-600 dark:text-gray-300 mb-6">Send <code class="doc-inline-code">notify_attendees</code> as <code class="doc-inline-code">true</code> to email the people who bought, registered or asked to be told, with an optional <code class="doc-inline-code">message</code> of up to 280 characters under it. Buyers are emailed only when the schedule sends from its own address. Nobody is emailed about a draft, and nobody is emailed unless you ask.</p>
+                        <p class="text-gray-600 dark:text-gray-300 mb-6">Unless the event is a draft, an <code class="doc-inline-code">event.cancelled</code> <a href="{{ route('marketing.docs.developer.webhooks') }}" class="doc-link">webhook</a> is sent. Cancelling an event that is already cancelled changes nothing and answers <code class="doc-inline-code">200</code>. An appointment booking is cancelled through its sale, which frees the slot and emails the guest. The reply is the event object.</p>
+                    </div>
+                    <div class="api-endpoint-code">
+                        <div class="doc-code-block">
+                            <div class="doc-code-header"><span>cURL</span><button class="doc-copy-btn">Copy</button></div>
+                            <pre><code><span class="code-keyword">curl</span> -X POST <span class="code-string">"{{ config('app.url') }}/api/events/evt123/cancel"</span> \
+         -H <span class="code-string">"X-API-Key: your_api_key_here"</span> \
+         -H <span class="code-string">"Content-Type: application/json"</span> \
+         -d <span class="code-string">'{"notify_attendees": true, "message": "The hall is flooded."}'</span></code></pre>
+                        </div>
+                        <div class="doc-code-block">
+                            <div class="doc-code-header"><span>Response (200)</span><button class="doc-copy-btn">Copy</button></div>
+                            <pre><code>{
+        <span class="code-string">"data"</span>: {
+            <span class="code-string">"id"</span>: <span class="code-string">"evt123"</span>,
+            <span class="code-string">"name"</span>: <span class="code-string">"Jazz Night"</span>,
+            <span class="code-string">"is_cancelled"</span>: <span class="code-value">true</span>,
+            <span class="code-string">"cancelled_at"</span>: <span class="code-string">"2026-10-08T09:30:00+00:00"</span>
+        },
+        <span class="code-string">"meta"</span>: {
+            <span class="code-string">"message"</span>: <span class="code-string">"Event cancelled successfully"</span>
+        }
+    }</code></pre>
+                        </div>
+                    </div>
+                </div>
+            </section>
+
+            <!-- Restore Event -->
+            <section id="restore-event" class="doc-section api-endpoint-section">
+                <div class="api-endpoint-row">
+                    <div class="api-endpoint-desc">
+                        <h2 class="doc-heading">
+                            <svg aria-hidden="true" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" class="w-5 h-5 text-gray-500 dark:text-gray-400 flex-shrink-0">
+                                <path stroke-linecap="round" stroke-linejoin="round" d="M9 15L3 9m0 0l6-6M3 9h12a6 6 0 010 12h-3" />
+                            </svg>
+                            Restore Event
+                        </h2>
+                        <div class="flex items-center gap-2 mb-4">
+                            <span class="api-method-pill api-method-pill-post px-2 py-1 rounded text-sm font-medium">POST</span>
+                            <code class="doc-inline-code">/api/events/{id}/restore</code>
+                        </div>
+                        <p class="text-gray-600 dark:text-gray-300 mb-6">Undo a cancellation. The event returns to the public calendar and to connected calendars, and sales reopen. Requires a Pro or Enterprise plan, and, as cancelling does, to be the event's creator or an owner or admin of the schedule that owns it.</p>
+                        <p class="text-gray-600 dark:text-gray-300 mb-6">Nobody is emailed. A boost campaign or an installment plan that the cancellation stopped stays stopped. Unless the event is a draft, an <code class="doc-inline-code">event.updated</code> webhook is sent, with <code class="doc-inline-code">is_cancelled</code> back to <code class="doc-inline-code">false</code>.</p>
+                        <p class="text-gray-600 dark:text-gray-300 mb-6">Restoring an event that is not cancelled changes nothing and answers <code class="doc-inline-code">200</code>. An appointment booking cannot be restored and answers <code class="doc-inline-code">422</code>: its slot was freed when it was cancelled.</p>
+                    </div>
+                    <div class="api-endpoint-code">
+                        <div class="doc-code-block">
+                            <div class="doc-code-header"><span>cURL</span><button class="doc-copy-btn">Copy</button></div>
+                            <pre><code><span class="code-keyword">curl</span> -X POST <span class="code-string">"{{ config('app.url') }}/api/events/evt123/restore"</span> \
+         -H <span class="code-string">"X-API-Key: your_api_key_here"</span></code></pre>
+                        </div>
+                        <div class="doc-code-block">
+                            <div class="doc-code-header"><span>Response (200)</span><button class="doc-copy-btn">Copy</button></div>
+                            <pre><code>{
+        <span class="code-string">"data"</span>: {
+            <span class="code-string">"id"</span>: <span class="code-string">"evt123"</span>,
+            <span class="code-string">"name"</span>: <span class="code-string">"Jazz Night"</span>,
+            <span class="code-string">"is_cancelled"</span>: <span class="code-value">false</span>,
+            <span class="code-string">"cancelled_at"</span>: <span class="code-value">null</span>
+        },
+        <span class="code-string">"meta"</span>: {
+            <span class="code-string">"message"</span>: <span class="code-string">"Event restored successfully"</span>
+        }
+    }</code></pre>
+                        </div>
+                    </div>
+                </div>
+            </section>
             <!-- Upload Flyer -->
             <section id="upload-flyer" class="doc-section api-endpoint-section">
                 <div class="api-endpoint-row">
@@ -1271,11 +1409,12 @@
                                 <tbody>
                                     <tr><td>Formats</td><td>jpg, jpeg, png, gif, webp</td></tr>
                                     <tr><td>Maximum size</td><td>10 MB</td></tr>
+                                    <tr><td>Larger than 2,000 pixels</td><td>Resized to fit. An animated GIF is stored as it is</td></tr>
                                     <tr><td>Existing flyer</td><td>Replaced, and the old file is deleted from storage</td></tr>
                                 </tbody>
                             </table>
                         </div>
-                        <p class="text-gray-600 dark:text-gray-300 mt-6">The response is the full event record, so you can read the new <code class="doc-inline-code">flyer_image_url</code> straight back from <code class="doc-inline-code">data</code>. There is no endpoint for removing a flyer.</p>
+                        <p class="text-gray-600 dark:text-gray-300 mt-6">The response is the full event record, so you can read the new <code class="doc-inline-code">flyer_image_url</code> straight back from <code class="doc-inline-code">data</code>. To remove a flyer, send <code class="doc-inline-code">"flyer_image_url": null</code> to <a href="#update-event" class="doc-link">Update Event</a>. To set one from an address instead of a file, in the same call that creates the event, see <a href="#event-flyer-url" class="doc-link">Flyer from an address</a>.</p>
                     </div>
                     <div class="api-endpoint-code">
                         <div class="doc-code-block">
@@ -1296,7 +1435,7 @@
                     </div>
                 </div>
             </section>
-    
+
             <!-- List Categories -->
             <section id="list-categories" class="doc-section api-endpoint-section">
                 <div class="api-endpoint-row">
@@ -1398,7 +1537,7 @@
                     </div>
                 </div>
             </section>
-    
+
             <!-- Show Sale -->
             <section id="show-sale" class="doc-section api-endpoint-section">
                 <div class="api-endpoint-row">
@@ -1485,7 +1624,7 @@
                     </div>
                 </div>
             </section>
-    
+
             <!-- Create Sale -->
             <section id="create-sale" class="doc-section api-endpoint-section">
                 <div class="api-endpoint-row">
@@ -1541,7 +1680,7 @@
                     </div>
                 </div>
             </section>
-    
+
             <!-- Update Sale -->
             <section id="update-sale" class="doc-section api-endpoint-section">
                 <div class="api-endpoint-row">
@@ -1605,7 +1744,7 @@
                     </div>
                 </div>
             </section>
-    
+
             <!-- Delete Sale -->
             <section id="delete-sale" class="doc-section api-endpoint-section">
                 <div class="api-endpoint-row">
@@ -1641,7 +1780,7 @@
                     </div>
                 </div>
             </section>
-    
+
             <!-- List Feedback -->
             <section id="list-feedback" class="doc-section api-endpoint-section">
                 <div class="api-endpoint-row">
@@ -1704,7 +1843,7 @@
                     </div>
                 </div>
             </section>
-    
+
             <!-- List Fan Content -->
             <section id="list-fan-content" class="doc-section api-endpoint-section">
                 <div class="api-endpoint-row">
@@ -1766,7 +1905,7 @@
                     </div>
                 </div>
             </section>
-    
+
             <!-- Error Handling -->
             <section id="error-handling" class="doc-section api-endpoint-section">
                 <div class="api-endpoint-row">
@@ -1813,7 +1952,7 @@
                     </div>
                 </div>
             </section>
-    
+
             <!-- See Also -->
             <section id="see-also" class="doc-section">
                 <h2 class="doc-heading">

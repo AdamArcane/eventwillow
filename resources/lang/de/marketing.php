@@ -1,6 +1,9 @@
 <?php
 
 return [
+    'home_title' => 'EventWillow - Kostenloser Veranstaltungskalender & Buchungen',
+    'home_description' => 'Veröffentliche deine Events auf einer Kalenderseite, nimm Terminbuchungen und unbegrenzt kostenlose Anmeldungen an, verkaufe mit Pro Tickets ohne Plattformgebühren.',
+
     'pricing_title' => 'EventWillow Preise: Gratis-Plan, keine Plattformgebühren',
     'pricing_description' => 'Kostenlos starten: unbegrenzte Events und Anmeldungen ohne Limit. Bezahlte Tickets gibt es ab Pro, Enterprise bringt nummerierte Plätze. Keine Plattformgebühr.',
 

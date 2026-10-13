@@ -28,10 +28,9 @@ class NewsletterController extends Controller
             return;
         }
 
-        // Allow owners/members of any role
-        $hasRole = auth()->user()->roles()
-            ->wherePivot('level', '!=', 'follower')
-            ->exists();
+        // The people who run a schedule. A viewer used to pass here, and with it could write and
+        // send a newsletter, import ten thousand addresses and read every recipient list.
+        $hasRole = $this->getRoles()->isNotEmpty();
 
         if (! $hasRole) {
             abort(403, __('messages.not_authorized'));
@@ -40,7 +39,11 @@ class NewsletterController extends Controller
 
     protected function getRoles()
     {
-        return auth()->user()->roles()->wherePivot('level', '!=', 'follower')->get();
+        $user = auth()->user();
+
+        return $user->roles()->wherePivotIn('level', ['owner', 'admin'])->get()
+            ->filter(fn ($role) => $user->planAllowsTeamAccess($role))
+            ->values();
     }
 
     protected function getRole(Request $request)
@@ -56,7 +59,7 @@ class NewsletterController extends Controller
         }
 
         if (! auth()->user()->isAdmin()) {
-            if ($role->pivot->level === 'follower') {
+            if (! in_array($role->pivot->level, ['owner', 'admin'], true) || ! auth()->user()->planAllowsTeamAccess($role)) {
                 abort(403);
             }
         }
@@ -136,11 +139,7 @@ class NewsletterController extends Controller
         foreach ($segments as $segment) {
             $segment->recipient_count = $segment->recipientCount();
         }
-        $events = $role->events()
-            ->upcomingOrOngoing()
-            ->where('is_draft', false)
-            ->orderBy('starts_at')
-            ->get();
+        $events = app(NewsletterService::class)->eventChoices($role);
 
         $defaultBlocks = Newsletter::defaultBlocks($role);
 
@@ -150,7 +149,9 @@ class NewsletterController extends Controller
             ->first();
 
         $defaultTemplate = $lastNewsletter ? $lastNewsletter->template : 'modern';
-        $defaultStyleSettings = $lastNewsletter ? $lastNewsletter->style_settings : Newsletter::defaultStyleSettingsForRole($role);
+        $defaultStyleSettings = $lastNewsletter
+            ? Newsletter::movedToCurrentPreset($lastNewsletter->template, Newsletter::designSettings($lastNewsletter->style_settings), $role)
+            : Newsletter::defaultStyleSettingsForRole($role);
         $defaultSegmentIds = $lastNewsletter ? ($lastNewsletter->segment_ids ?? []) : [];
 
         // Load saved templates for the template picker
@@ -168,7 +169,7 @@ class NewsletterController extends Controller
                 if ($fromTemplate) {
                     $defaultBlocks = ! empty($fromTemplate->blocks) ? $fromTemplate->blocks : $defaultBlocks;
                     $defaultTemplate = $fromTemplate->template ?? 'modern';
-                    $defaultStyleSettings = $fromTemplate->style_settings ?? $defaultStyleSettings;
+                    $defaultStyleSettings = Newsletter::designSettings($fromTemplate->style_settings) ?? $defaultStyleSettings;
                 }
             }
         }
@@ -228,11 +229,7 @@ class NewsletterController extends Controller
         foreach ($segments as $segment) {
             $segment->recipient_count = $segment->recipientCount();
         }
-        $events = $role->events()
-            ->upcomingOrOngoing()
-            ->where('is_draft', false)
-            ->orderBy('starts_at')
-            ->get();
+        $events = app(NewsletterService::class)->eventChoices($role);
 
         return view('newsletter.edit', compact('role', 'newsletter', 'segments', 'events'));
     }
@@ -621,22 +618,13 @@ class NewsletterController extends Controller
         $this->authorizeAccess();
         $role = $this->getRole($request);
 
-        $events = $role->events()
-            ->upcomingOrOngoing()
-            ->where('is_draft', false)
-            ->orderBy('starts_at')
-            // creator_role_id is load-bearing in this select: getShortDateRangeDisplay() resolves
-            // scheduleTimezone() through the creatorRole relation, and BelongsTo short-circuits on
-            // a null foreign key - so omitting it silently renders every date in the app timezone
-            // rather than the schedule's, with no query and no error to notice.
-            ->with('creatorRole')
-            ->get(['events.id', 'events.name', 'events.starts_at', 'events.duration', 'events.creator_role_id'])
-            ->map(fn ($e) => [
-                'id' => $e->id,
-                'hash' => UrlUtils::encodeId($e->id),
-                'name' => $e->name,
-                'date' => $e->starts_at ? $e->getShortDateRangeDisplay() : '',
-            ]);
+        // The same list the builder is given, with the id as the app shows it.
+        $events = array_map(fn (array $event) => [
+            'id' => $event['id'],
+            'hash' => UrlUtils::encodeId($event['id']),
+            'name' => $event['name'],
+            'date' => $event['date'],
+        ], app(NewsletterService::class)->eventChoices($role));
 
         return response()->json($events);
     }
@@ -799,7 +787,8 @@ class NewsletterController extends Controller
 
         $eventName = null;
         if (in_array($segment->type, ['ticket_buyers', 'waitlist']) && ! empty($segment->filter_criteria['event_id'])) {
-            $eventName = \App\Models\Event::find($segment->filter_criteria['event_id'])?->translatedName();
+            // One of this schedule's events: the id is stored as posted, and any event's name answered here.
+            $eventName = $role->events()->where('events.id', (int) $segment->filter_criteria['event_id'])->first()?->translatedName();
         }
 
         return view('newsletter.segment-edit', [
@@ -1229,11 +1218,7 @@ class NewsletterController extends Controller
         $role = $this->getRole($request);
 
         $defaultBlocks = Newsletter::defaultBlocks($role);
-        $events = $role->events()
-            ->upcomingOrOngoing()
-            ->where('is_draft', false)
-            ->orderBy('starts_at')
-            ->get();
+        $events = app(NewsletterService::class)->eventChoices($role);
 
         $segments = collect();
 
@@ -1286,11 +1271,7 @@ class NewsletterController extends Controller
             abort(403);
         }
 
-        $events = $role->events()
-            ->upcomingOrOngoing()
-            ->where('is_draft', false)
-            ->orderBy('starts_at')
-            ->get();
+        $events = app(NewsletterService::class)->eventChoices($role);
 
         $segments = collect();
 
@@ -1371,7 +1352,7 @@ class NewsletterController extends Controller
             'name' => $validated['template_name'],
             'blocks' => $newsletter->blocks,
             'template' => $newsletter->template,
-            'style_settings' => $newsletter->style_settings,
+            'style_settings' => Newsletter::designSettings($newsletter->style_settings),
         ]);
 
         return back()->with('status', __('messages.template_saved'));

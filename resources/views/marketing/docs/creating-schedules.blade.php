@@ -51,6 +51,7 @@
             <x-doc-nav-link href="#integrations-google">Google Calendar</x-doc-nav-link>
             <x-doc-nav-link href="#integrations-microsoft">Outlook Calendar</x-doc-nav-link>
             <x-doc-nav-link href="#integrations-caldav">CalDAV Calendar</x-doc-nav-link>
+            <x-doc-nav-link href="#integrations-feeds">Feeds from other sites</x-doc-nav-link>
             <x-doc-nav-link href="#integrations-advanced">Calendar text and feeds</x-doc-nav-link>
             <x-doc-nav-link href="#available-variables">Available Variables</x-doc-nav-link>
         </x-doc-nav-group>
@@ -431,12 +432,13 @@
             </svg>
             Style
         </h2>
-        <p class="text-gray-600 dark:text-gray-300 mb-4">The <strong class="text-gray-900 dark:text-white">Style</strong> section decides how your public pages look, with a preview beside the form. It has a guide of its own, <a href="{{ route('marketing.docs.schedule_styling') }}" class="doc-link">Schedule Styling</a>. In the section's order:</p>
+        <p class="text-gray-600 dark:text-gray-300 mb-4">The <strong class="text-gray-900 dark:text-white">Style</strong> section decides how your public pages look, with a preview of your page that stays on screen while you work. It has a guide of its own, <a href="{{ route('marketing.docs.schedule_styling') }}" class="doc-link">Schedule Styling</a>. In the section's order:</p>
         <ul class="doc-list">
             <li><strong class="text-gray-900 dark:text-white">On the page as it opens</strong> - <a href="{{ route('marketing.docs.schedule_styling') }}#profile-image" class="doc-link">Square Profile Image</a>, <a href="{{ route('marketing.docs.schedule_styling') }}#color-scheme" class="doc-link">Accent Color</a> and <a href="{{ route('marketing.docs.schedule_styling') }}#typography" class="doc-link">Font Family</a></li>
-            <li><strong class="text-gray-900 dark:text-white">Event animation</strong> - <a href="{{ route('marketing.docs.schedule_styling') }}#list-animation" class="doc-link">how event cards arrive</a> as visitors scroll</li>
+            <li><strong class="text-gray-900 dark:text-white">Header</strong> - <a href="{{ route('marketing.docs.schedule_styling') }}#header-style" class="doc-link">Header Style</a> and <a href="{{ route('marketing.docs.schedule_styling') }}#header-images" class="doc-link">Header Image</a></li>
             <li><strong class="text-gray-900 dark:text-white">Background</strong> - <a href="{{ route('marketing.docs.schedule_styling') }}#backgrounds" class="doc-link">a gradient, a solid color or an image</a></li>
-            <li><strong class="text-gray-900 dark:text-white">Header and layout</strong> - <a href="{{ route('marketing.docs.schedule_styling') }}#header-style" class="doc-link">Header Style</a>, <a href="{{ route('marketing.docs.schedule_styling') }}#header-images" class="doc-link">Header Image</a>, <a href="{{ route('marketing.docs.schedule_styling') }}#event-layout" class="doc-link">Default Layout</a> and <a href="{{ route('marketing.docs.schedule_styling') }}#custom-css" class="doc-link">Custom CSS</a> <x-doc-badge plan="pro" /></li>
+            <li><strong class="text-gray-900 dark:text-white">Events</strong> - <a href="{{ route('marketing.docs.schedule_styling') }}#event-layout" class="doc-link">Default Layout</a>, and <a href="{{ route('marketing.docs.schedule_styling') }}#list-animation" class="doc-link">how event cards arrive</a> as visitors scroll</li>
+            <li><strong class="text-gray-900 dark:text-white">Custom CSS</strong> <x-doc-badge plan="pro" /> - <a href="{{ route('marketing.docs.schedule_styling') }}#custom-css" class="doc-link">your own CSS</a></li>
         </ul>
     </section>
 
@@ -542,7 +544,11 @@
             </div>
             <div class="doc-field">
                 <h4 class="font-semibold text-gray-900 dark:text-white mb-2">Private</h4>
-                <p class="text-sm text-gray-500 dark:text-gray-400">Hide the field's value from the guest portal. The value still appears in the admin portal and can be referenced in graphic templates and slug patterns via <code class="doc-inline-code">{custom_N}</code>. A private field is never offered as a filter, whatever its <strong class="text-gray-900 dark:text-white">Show as filter</strong> setting.</p>
+                <p class="text-sm text-gray-500 dark:text-gray-400">Hide the field's value from the guest portal. The value still appears in the admin portal and can be referenced in graphic templates and slug patterns via <code class="doc-inline-code">{custom_N}</code>. A private field is never offered as a filter and never shown on the event page, whatever its <strong class="text-gray-900 dark:text-white">Show as filter</strong> and <strong class="text-gray-900 dark:text-white">On event page</strong> settings.</p>
+            </div>
+            <div class="doc-field">
+                <h4 class="font-semibold text-gray-900 dark:text-white mb-2">On event page</h4>
+                <p class="text-sm text-gray-500 dark:text-gray-400">Show the field's answer on the public event page, in a row of its own under the venue: the room, the floor, a dress code. Off until you tick it, for every field, so nothing you already collect is published by accident. One field reads like the date and venue rows above it, and several are listed as pairs. A <strong class="text-gray-900 dark:text-white">Yes/No</strong> field is shown only on events where it is Yes, and an event with no answer shows nothing. Fields are listed in the order you drag them into here. The row appears on every page of the event, including a performer's or a curator's page of it. If the field is also on your request form, remember that a visitor typed the answer: tick this only for answers you are happy to publish once you accept the event. The request form tells the visitor so under the question, and the request card marks such an answer with an eye. If a ticked field does not appear on an event, one of these is why: the event has no answer for it, the field is private, a Yes/No field is No, the event's answers were entered through another schedule's form (an event holds one schedule's answers), your schedule has not accepted the event yet, or your schedule is no longer on Pro.</p>
             </div>
             <div class="doc-field">
                 <h4 class="font-semibold text-gray-900 dark:text-white mb-2">Show as filter</h4>
@@ -712,7 +718,7 @@
         <div class="doc-fields doc-fields--grouped">
             <div class="doc-field">
                 <h4 class="font-semibold text-gray-900 dark:text-white mb-2">New event requests</h4>
-                <p class="text-sm text-gray-500 dark:text-gray-400">Receive an email when new event requests are pending approval.</p>
+                <p class="text-sm text-gray-500 dark:text-gray-400">Receive an email when new event requests are pending approval. The email names each new request: what is asked for, who asked, when, how to reach them and their answers to your request form's questions.</p>
             </div>
             <div class="doc-field">
                 <h4 class="font-semibold text-gray-900 dark:text-white mb-2">New fan content</h4>
@@ -735,6 +741,10 @@
                 <p class="text-sm text-gray-500 dark:text-gray-400">A daily summary of <a href="{{ route('marketing.docs.tickets') }}#installments" class="doc-link">installment payments</a> due in the next two days, and an immediate email whenever one fails. It only matters if you let buyers pay in installments, which is a Pro feature.</p>
             </div>
             <div class="doc-field">
+                <h4 class="font-semibold text-gray-900 dark:text-white mb-2">Feeds</h4>
+                <p class="text-sm text-gray-500 dark:text-gray-400">An email when drafts from a <a href="{{ route('marketing.docs.managing_schedules') }}#feeds" class="doc-link">feed</a> are waiting for review, when an event people signed up for changed at its source, and when a feed cannot be read. At most one of each a day. On by default, and shown where the schedule can have feeds.</p>
+            </div>
+            <div class="doc-field">
                 <h4 class="font-semibold text-gray-900 dark:text-white mb-2">Weekly summary</h4>
                 <p class="text-sm text-gray-500 dark:text-gray-400">One email a week with your views, sign-ups, sales and the dates coming up, for all of your schedules together. It is only sent in a week with something to report. The switch is shown to the schedule's owner alone, who is the only one to receive it, and the email is sent on the hosted platform only.</p>
             </div>
@@ -750,7 +760,7 @@
         <h4 id="notification-email" class="font-semibold text-gray-900 dark:text-white mt-6 mb-2">Shared notification address</h4>
         <p class="text-gray-600 dark:text-gray-300 mb-4">If your team works from a shared mailbox, enter it under <strong class="text-gray-900 dark:text-white">Shared notification address</strong>, in the <strong class="text-gray-900 dark:text-white">Shared inbox</strong> group at the bottom of the Notifications row. It gets a copy of the schedule's notifications on top of each person's own emails, so it replaces nothing. Unlike the toggles above, it belongs to the whole schedule: there is one per schedule, and any owner or admin can change it.</p>
         <p class="text-gray-600 dark:text-gray-300 mb-4">Nothing is sent to it until it is confirmed. Saving the address emails it a confirmation link, valid for {{ \App\Services\NotificationEmailService::VERIFY_TTL_DAYS }} days, and the row shows <strong class="text-gray-900 dark:text-white">Waiting for confirmation</strong> with a button to send the link again. Anyone who reads that mailbox can confirm it, with or without an account. Changing the address asks for confirmation again.</p>
-        <p class="text-gray-600 dark:text-gray-300 mb-4">Under <strong class="text-gray-900 dark:text-white">Send to this address</strong> the address has its own set of toggles: <strong class="text-gray-900 dark:text-white">New event requests</strong> (on by default), <strong class="text-gray-900 dark:text-white">New ticket sale</strong>, <strong class="text-gray-900 dark:text-white">New feedback</strong>, <strong class="text-gray-900 dark:text-white">New poll option suggestions</strong> and <strong class="text-gray-900 dark:text-white">Installment payments</strong>. New fan content is not offered, because that email only ever goes to the person who created the event. Each one follows the same rules as your own copy, including the plan and email settings rules above. If the shared address is also the login of someone who already gets that email, it is not sent twice.</p>
+        <p class="text-gray-600 dark:text-gray-300 mb-4">Under <strong class="text-gray-900 dark:text-white">Send to this address</strong> the address has its own set of toggles: <strong class="text-gray-900 dark:text-white">New event requests</strong> (on by default), <strong class="text-gray-900 dark:text-white">New ticket sale</strong>, <strong class="text-gray-900 dark:text-white">New feedback</strong>, <strong class="text-gray-900 dark:text-white">New poll option suggestions</strong>, <strong class="text-gray-900 dark:text-white">Installment payments</strong> and <strong class="text-gray-900 dark:text-white">Feeds</strong> (on by default). New fan content is not offered, because that email only ever goes to the person who created the event. Each one follows the same rules as your own copy, including the plan and email settings rules above. If the shared address is also the login of someone who already gets that email, it is not sent twice. The request email carries what the requester sent, their contact details and their answers to private fields included, so choose a mailbox the whole team is meant to read.</p>
         <p class="text-gray-600 dark:text-gray-300 mb-4">Every email sent to the shared address ends with a <strong class="text-gray-900 dark:text-white">Stop sending to this address</strong> link, which removes it without signing in. It is also removed when the schedule is <a href="{{ route('marketing.docs.managing_schedules') }}#transfer-ownership" class="doc-link">transferred</a> to a new owner and the previous owner leaves.</p>
 
         <!-- Advanced Tab -->
@@ -1138,7 +1148,7 @@
             </div>
             <div class="doc-field">
                 <h4 class="font-semibold text-gray-900 dark:text-white mb-2">Your own questions <x-doc-badge plan="pro" /></h4>
-                <p class="text-sm text-gray-500 dark:text-gray-400">Add questions of your own to whichever form you use, with <a href="#customize-custom-fields" class="doc-link">Custom Fields</a> marked <strong class="text-gray-900 dark:text-white">On request form</strong>. Ask whatever you need before accepting an event: which of your equipment the visitor wants (a multi-select checklist), a reference number in a set format (a validation pattern), an expected head count. Answers appear on the request in <strong class="text-gray-900 dark:text-white">Admin Panel &rarr; Requests</strong> and on the event once you accept it. A link at the bottom of this row opens the Custom Fields row.</p>
+                <p class="text-sm text-gray-500 dark:text-gray-400">Add questions of your own to whichever form you use, with <a href="#customize-custom-fields" class="doc-link">Custom Fields</a> marked <strong class="text-gray-900 dark:text-white">On request form</strong>. Ask whatever you need before accepting an event: which of your equipment the visitor wants (a multi-select checklist), a reference number in a set format (a validation pattern), an expected head count. Answers appear on the request in <strong class="text-gray-900 dark:text-white">Admin Panel &rarr; Requests</strong>, in the email that announces it, and on the event once you accept it. A link at the bottom of this row opens the Custom Fields row.</p>
             </div>
         </div>
 
@@ -1495,6 +1505,12 @@
         <p class="text-gray-600 dark:text-gray-300 mb-4">
             Once connected, the row shows which server you are attached to, the sync direction can be changed there (with No Sync as a fourth choice), and <strong class="text-gray-900 dark:text-white">Disconnect</strong> asks you to confirm and then stops syncing. The connection belongs to the schedule's owner: other members see how it is set and cannot change it.
         </p>
+
+        <!-- Feeds from other sites -->
+        <h3 id="integrations-feeds" class="doc-subheading">Feeds from other sites</h3>
+        <p class="text-gray-600 dark:text-gray-300 mb-4">A feed is an address this schedule reads about once an hour: a calendar address (.ics or webcal), an RSS, Atom or JSON feed, or a page that lists its events. New events arrive on their own, a change at the source is copied to the event here, and anything you edited yourself is kept as you left it. A connected calendar, above, is your own calendar and syncs both ways. A feed is somebody else's list, and is only ever read.</p>
+        <p class="text-gray-600 dark:text-gray-300 mb-4">The row names the feeds the schedule has and leads to them. With none yet, <strong class="text-gray-900 dark:text-white">Add a feed</strong> asks for the address, reads it once, and shows what it found before anything is added. When you add it you choose whether new events are published at once or held as drafts for you to look over, and what happens to an event that is no longer in the feed: leave it, mark it cancelled, or remove it. An event that people have signed up for is never changed without asking you.</p>
+        <p class="text-gray-600 dark:text-gray-300 mb-6">Once a schedule has a feed, a <strong class="text-gray-900 dark:text-white">Feeds</strong> tab appears on the schedule's own page, where drafts wait for review and each feed says when it was last read. On eventschedule.com feeds are part of the Enterprise plan. A selfhosted install has them. Everything a feed does is in <a href="{{ route('marketing.docs.managing_schedules') }}#feeds" class="doc-link">Managing Schedules: Feeds</a>.</p>
 
         <!-- Advanced -->
         <h3 id="integrations-advanced" class="doc-subheading">Calendar text and feeds</h3>

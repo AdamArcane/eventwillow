@@ -275,6 +275,20 @@
       : (! $event->exists && $visibilityNow === 'public' ? __('messages.publish') : __('messages.save'));
   // The same for "Also list on": the boxes as they were ticked, when the form is coming back.
   $curatorsFromOld = old('curators_submitted') ? array_map('strval', (array) old('curators', [])) : null;
+  // And for the venue: the one that was CHOSEN before the refusal, or none if it was taken off.
+  // Read from the stored event alone, another venue chosen and a save refused over another field
+  // came back on the old venue, with nothing to say so, and the next save kept the event there;
+  // on a new event it came back with no venue at all. Only a venue this page offers is looked up:
+  // toData() is the whole schedule, and the id is whatever was posted.
+  // What is STORED stays what a change is measured against (hasKeyChange): measured against the
+  // venue the page came back on, a venue changed before the refusal would no longer be a change,
+  // and the question about telling the people who signed up would not be asked.
+  $savedVenueId = $event->exists && $selectedVenue ? \App\Utils\UrlUtils::encodeId($selectedVenue->id) : null;
+  if (old('venue_submitted')) {
+      $venueFromOld = (string) old('venue_id', '');
+      $venueWasOffered = $venueFromOld !== '' && collect($venues)->contains('id', $venueFromOld);
+      $selectedVenue = $venueWasOffered ? \App\Models\Role::find(\App\Utils\UrlUtils::decodeId($venueFromOld)) : null;
+  }
   // The Engagement tab's four settings ("" same as the schedule, "1" on, "0" off), as last chosen.
   $engagementSettingsNow = [];
   foreach (['fan_comments_enabled', 'fan_photos_enabled', 'fan_videos_enabled', 'feedback_enabled'] as $engagementField) {
@@ -2266,6 +2280,20 @@
                                 v-model="eventName" @keydown.enter="onNameEnter"
                                 required autocomplete="off" />
                             <x-input-error class="mt-2" :messages="$errors->get('name')" />
+                            {{-- An event a feed keeps up to date: said where it is edited, because
+                                 what is changed here stops following the source. The feed's name
+                                 is somebody's own text inside the form's Vue mount: v-pre. --}}
+                            @php
+                                $eventFeed = $event->keptByFeed();
+                            @endphp
+                            @if ($eventFeed)
+                            <p class="mt-2 text-sm text-gray-500 dark:text-gray-400" id="event-from-feed">
+                                <span v-pre>{{ __('messages.feeds_event_line', ['feed' => $eventFeed->name]) }}</span>
+                                @if ((int) $eventFeed->role_id === (int) $role->id)
+                                <x-link :href="route('role.feeds.show', ['subdomain' => $role->subdomain, 'hash' => \App\Utils\UrlUtils::encodeId($eventFeed->id)])">{{ __('messages.feeds_open_feed') }}</x-link>
+                                @endif
+                            </p>
+                            @endif
                         </div>
                         </div>
 
@@ -6411,6 +6439,7 @@
         eventIsSaved: @json($event->exists),
         // How the event is shown as SAVED. The save bar compares the choice on screen with it.
         savedVisibility: @json($event->exists ? $event->visibilityState() : null),
+        savedVenueId: @json($savedVenueId),
         // Set by the page's date helpers (updateScheduleTimePreview), which live outside Vue.
         whenLabel: '',
         categoryLabel: '',
@@ -6935,6 +6964,13 @@
       },
       acceptVenueAddress(event) {
         acceptAddress(event);
+      },
+      // A control whose `input` is followed at once by the `change` that carries its value.
+      saysItWithChange(el) {
+        if (! el || ! el.tagName) {
+          return false;
+        }
+        return el.tagName === 'SELECT' || (el.tagName === 'INPUT' && (el.type === 'checkbox' || el.type === 'radio'));
       },
       // A change anywhere in the form: remember which tab it was on.
       markDirty(el) {
@@ -9764,7 +9800,7 @@
       this.$nextTick(() => {
         this.origStartsAt = this.startsAt;
         this.origDuration = this.currentDuration;
-        this.origVenueId = this.selectedVenue ? this.selectedVenue.id : null;
+        this.origVenueId = this.eventIsSaved ? this.savedVenueId : (this.selectedVenue ? this.selectedVenue.id : null);
         this.origEventUrl = this.normalizeUrl(this.event.event_url);
         this.origIsOnline = this.isOnline;
         this.origIsInPerson = this.isInPerson;
@@ -9831,7 +9867,22 @@
       // Unsaved changes warning
       var dirtyForm = document.querySelector('form[enctype]');
       if (dirtyForm) {
-          dirtyForm.addEventListener('input', (e) => { this.markDirty(e.target); this.readPlainFields(); });
+          // A dropdown, a checkbox and a radio say what was chosen with `change`, and a browser
+          // fires `input` first, with room between the two for Vue to redraw. Anything written
+          // to the page's data on that `input` is a redraw, and a redraw puts a dropdown back on
+          // the value its model still holds: `change` then read "Please select", and no venue,
+          // performer, frequency or payment method could be chosen from a list. A checkbox
+          // bound to a list (the ticket types a promo code covers, the events a pass covers)
+          // was unticked again the same way. So those three are heard on `change` alone. A
+          // scripted change event (a WebDriver click on an option) is not preceded by an
+          // `input` at all, which is why the browser tests pick with the keyboard.
+          dirtyForm.addEventListener('input', (e) => {
+            if (this.saysItWithChange(e.target)) {
+              return;
+            }
+            this.markDirty(e.target);
+            this.readPlainFields();
+          });
           dirtyForm.addEventListener('change', (e) => { this.markDirty(e.target); this.readPlainFields(); });
       }
       this.readPlainFields();

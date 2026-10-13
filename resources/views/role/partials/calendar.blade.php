@@ -1,4 +1,10 @@
-@php $headerTemplates = $headerTemplates ?? collect(); @endphp
+@php
+    $headerTemplates = $headerTemplates ?? collect();
+    // This page draws a calendar: the layout prints the month's stylesheet in its head
+    // (partials/month-kit-styles), where an owner's custom CSS still comes after it. Said on the
+    // request, which the layout reads when its own turn comes: a page's body is rendered first.
+    request()->attributes->set('month_kit', true);
+@endphp
 <style>
     [v-cloak] { display: none !important; }
     .hover-accent:not(:disabled):hover {
@@ -16,7 +22,7 @@
     .es-date-month { color: var(--es-date-month); }
     .dark .es-date-month { color: var(--es-date-month-dark); }
 </style>
-<div class="flex h-full flex-col" id="calendar-app">
+<div class="flex h-full flex-col" id="calendar-app" data-vue-root>
 @php
     $role = $role ?? null;
     // A custom label is the schedule owner's own text, and this whole partial is one Vue mount:
@@ -25,6 +31,9 @@
     // braces is broken once, here, where no new place can forget it.
     $label = fn($key) => $role ? str_replace('{'.'{', '{ {', $role->customLabel($key)) : __('messages.' . $key);
     $isAdminRoute = $route == 'admin';
+    // The pages that are the signed-in person's own, where direction and language are theirs
+    // and not a schedule's: the admin's, and the dashboard (which has no schedule at all).
+    $ownPage = $isAdminRoute || $route === 'home';
     $alwaysShowFilters = in_array($route ?? '', ['guest', 'admin']);
     $stickyBleedClass = ($route === 'guest' && !(isset($embed) && $embed)) ? '-mx-5 px-5' : '-mx-4 px-4';
     // Whether this is a guest PAGE (or embed): its list is in the page once, the cards from a
@@ -50,8 +59,6 @@
     $startOfMonth = Carbon\Carbon::create($year, $month, 1)->startOfMonth()->startOfWeek($firstDay);
     $endOfMonth = Carbon\Carbon::create($year, $month, 1)->endOfMonth()->endOfWeek($lastDay);
     $currentDate = $startOfMonth->copy();
-    $totalDays = $endOfMonth->diffInDays($startOfMonth) + 1;
-    $totalWeeks = ceil($totalDays / 7);
     $unavailable = [];
     
     // The zone this whole calendar reasons in. Events are placed by their own schedule's
@@ -366,7 +373,7 @@
 <div style="--es-accent: {{ $accentColor }}; --es-contrast: {{ $contrastColor }}; --es-date-month: {{ $dateMonthColorLight }}; --es-date-month-dark: {{ $dateMonthColorDark }}">
 
 @if (! request()->graphic)
-<header class="{{ rtl_class($role ?? null, 'rtl', '', $isAdminRoute) }}"
+<header class="{{ rtl_class($role ?? null, 'rtl', '', $ownPage) }}"
     @if ($route == 'guest')
         :class="currentView === 'list' ? 'pt-0 pb-0' : 'pt-2 pb-4'"
     @else
@@ -461,7 +468,7 @@
                             class="w-full inline-flex items-center justify-center gap-2 px-4 py-2.5
                                    border border-gray-300 dark:border-gray-600 rounded-md transition-all duration-200
                                    bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100
-                                   text-base font-semibold {{ rtl_class($role ?? null, 'rtl', '', $isAdminRoute) }}">
+                                   text-base font-semibold {{ rtl_class($role ?? null, 'rtl', '', $ownPage) }}">
                         <svg class="w-4 h-4" viewBox="0 0 24 24" fill="currentColor">
                             <path d="M14,12V19.88C14.04,20.18 13.94,20.5 13.71,20.71C13.32,21.1 12.69,21.1 12.3,20.71L10.29,18.7C10.06,18.47 9.96,18.16 10,17.87V12H9.97L4.21,4.62C3.87,4.19 3.95,3.56 4.38,3.22C4.57,3.08 4.78,3 5,3H19C19.22,3 19.43,3.08 19.62,3.22C20.05,3.56 20.13,4.19 19.79,4.62L14.03,12H14Z"/>
                         </svg>
@@ -596,7 +603,7 @@
 {{-- narrowingFilterCount, not activeFilterCount: a sub-schedule page's own sub-schedule is the
      page, not a filter, so a bare /schedule/kids shows no row. Owner-customizable labels sit in
      v-pre spans: this is inside the Vue mount, and a label is owner-authored text. --}}
-<div v-cloak v-if="narrowingFilterCount > 0" id="active-filter-chips" class="mb-4 rounded-xl bg-white/95 dark:bg-gray-900/95 backdrop-blur-sm px-3 py-2 flex flex-wrap items-center gap-2 {{ rtl_class($role ?? null, 'rtl', '', $isAdminRoute) }}">
+<div v-cloak v-if="narrowingFilterCount > 0" id="active-filter-chips" class="mb-4 rounded-xl bg-white/95 dark:bg-gray-900/95 backdrop-blur-sm px-3 py-2 flex flex-wrap items-center gap-2 {{ rtl_class($role ?? null, 'rtl', '', $ownPage) }}">
     <span v-for="chip in activeFilterChips" :key="chip.id"
           class="inline-flex items-center gap-1 rounded-full border border-gray-300 dark:border-gray-600 bg-gray-50 dark:bg-gray-800 ps-3 pe-1 text-sm text-gray-800 dark:text-gray-200 max-w-full">
         <span class="truncate" dir="auto" v-text="chip.text"></span>
@@ -622,7 +629,7 @@
          the schedule and was only ever true of the connection. Above both views, and above the
          rows the cache may still have drawn. --}}
     <div v-cloak v-if="loadFailed" data-load-failed role="alert"
-         class="mb-4 flex flex-wrap items-center gap-3 rounded-lg border border-amber-200 dark:border-amber-700 bg-amber-50 dark:bg-amber-900/20 p-3 {{ rtl_class($role ?? null, 'rtl', '', $isAdminRoute) }}">
+         class="mb-4 flex flex-wrap items-center gap-3 rounded-lg border border-amber-200 dark:border-amber-700 bg-amber-50 dark:bg-amber-900/20 p-3 {{ rtl_class($role ?? null, 'rtl', '', $ownPage) }}">
         <svg class="w-5 h-5 flex-shrink-0 text-amber-600 dark:text-amber-400" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" aria-hidden="true">
             <path stroke-linecap="round" stroke-linejoin="round" d="M12 9v3.75m-9.303 3.376c-.866 1.5.217 3.374 1.948 3.374h14.71c1.73 0 2.813-1.874 1.948-3.374L13.949 3.378c-.866-1.5-3.032-1.5-3.898 0L2.697 16.126ZM12 15.75h.007v.008H12v-.008Z" />
         </svg>
@@ -637,7 +644,7 @@
     {{-- The one filter most visitors want, one press away: the schedule's sub-schedules where
          it has them, its categories otherwise. Everything else stays behind Filters. The names
          are the owner's text, drawn by Vue from data (v-text), never compiled. --}}
-    <div v-if="quickChips.length > 1" v-cloak class="gk-pills {{ rtl_class($role ?? null, 'rtl', '', $isAdminRoute) }}" role="group" aria-label="{{ $label('filters') }}">
+    <div v-if="quickChips.length > 1" v-cloak class="gk-pills {{ rtl_class($role ?? null, 'rtl', '', $ownPage) }}" role="group" aria-label="{{ $label('filters') }}">
         <button type="button" class="gk-pill" :class="{ 'gk-pill-on': !quickChipValue }" :aria-pressed="!quickChipValue ? 'true' : 'false'" @click="pickQuickChip('', $event)">{{ $label('show_all') }}</button>
         <button v-for="chip in quickChips" :key="chip.value" type="button" class="gk-pill" :class="{ 'gk-pill-on': quickChipValue === chip.value }"
                 :aria-pressed="quickChipValue === chip.value ? 'true' : 'false'" @click="pickQuickChip(chip.value, $event)">
@@ -646,29 +653,30 @@
     </div>
     @endif
 
-    <div v-show="currentView === 'calendar'" class="{{ rtl_class($role ?? null, 'rtl', '', $isAdminRoute) }}">
+    <div v-show="currentView === 'calendar'" class="{{ rtl_class($role ?? null, 'rtl', '', $ownPage) }}">
 
         @if (request()->graphic)
             @include('role.partials.calendar-graphic')
         @else
         <div v-if="isLoadingEvents">
-            {{-- Desktop skeleton --}}
-            <div class="hidden md:block border border-gray-300 dark:border-gray-700 rounded-lg overflow-hidden animate-pulse">
-                <div class="grid grid-cols-7 gap-px border-b border-gray-300 dark:border-gray-700 bg-gray-200 dark:bg-gray-700">
+            {{-- The month while it loads: its own frame, its weekday row and as many weeks as the
+                 month that is coming has, so the page keeps its shape when the month arrives. --}}
+            <div class="gk-cal gk-cal-wait {{ ($tab ?? '') == 'availability' ? 'gk-cal-pick' : 'hidden md:block' }} animate-pulse" aria-hidden="true">
+                <div class="gk-cal-head">
                     @for ($i = 0; $i < 7; $i++)
-                    <div class="flex justify-center bg-white dark:bg-gray-900 py-2">
-                        <div class="h-4 w-8 bg-gray-200 dark:bg-gray-700 rounded"></div>
-                    </div>
+                    <div class="gk-cal-wd"><i class="gk-cal-wait-bar gk-cal-wait-wd"></i></div>
                     @endfor
                 </div>
-                <div class="grid grid-cols-7 gap-px bg-gray-200 dark:bg-gray-700">
-                    @for ($i = 0; $i < 35; $i++)
-                    <div class="bg-white dark:bg-gray-900 p-2 min-h-[100px]">
-                        <div class="h-4 w-6 bg-gray-200 dark:bg-gray-700 rounded mb-2"></div>
-                        <div class="h-3 w-full bg-gray-200 dark:bg-gray-700 rounded mb-1"></div>
-                        <div class="h-3 w-3/4 bg-gray-200 dark:bg-gray-700 rounded"></div>
+                <div class="gk-cal-weeks">
+                    <div v-for="w in Math.ceil(calendarDays.length / 7)" :key="w" class="gk-cal-week">
+                        <div v-for="d in 7" :key="d" class="gk-cal-day">
+                            <i class="gk-cal-wait-bar gk-cal-wait-num"></i>
+                            @if (($tab ?? '') != 'availability')
+                            <i class="gk-cal-wait-bar gk-cal-wait-line"></i>
+                            <i class="gk-cal-wait-bar gk-cal-wait-line gk-cal-wait-short"></i>
+                            @endif
+                        </div>
                     </div>
-                    @endfor
                 </div>
             </div>
         </div>
@@ -701,167 +709,72 @@
             @endif
         </div>
         @endif
-        <div v-show="!isLoadingEvents" class="{{ ($tab ?? '') == 'availability' ? '' : 'hidden md:block' }} border border-gray-300 dark:border-gray-700 rounded-lg overflow-hidden">
-            <div
-                class="grid grid-cols-7 gap-px border-b border-gray-300 dark:border-gray-700 bg-gray-200 dark:bg-gray-700 text-center text-xs font-semibold leading-6 text-gray-700 dark:text-gray-300">
-                @php
-                    $dayKeys = ['sun', 'mon', 'tue', 'wed', 'thu', 'fri', 'sat'];
-                    $dayKeys = array_merge(array_slice($dayKeys, $firstDay), array_slice($dayKeys, 0, $firstDay));
-                @endphp
-                @foreach ($dayKeys as $day)
-                <div class="flex justify-center bg-white dark:bg-gray-900 py-2">
-                    {{ __('messages.' . $day) }}
-                </div>
+        @if (($tab ?? '') !== 'availability')
+        {{-- The month, on every page that shows one (a guest's page, the embed, the admin's
+             Schedule tab, the dashboard): role/partials/month, with its card and its day's
+             panel (month-peek) and the script that writes each day (month-script). --}}
+        @include('role.partials.month')
+        @else
+        {{-- The Availability tab: the same month with nothing on it but its days, where a day is
+             the thing that is pressed. The server draws it (the days and what is marked are known
+             when the page is made) on the month kit's own classes (partials/month-kit-styles,
+             .gk-cal-pick). A day keeps the names its script (role/show-admin) and the browser
+             tests know it by: .day-element, data-date, and the .day-x that marks it. It is shown
+             on a phone too, so the root carries no hidden class. --}}
+        @php
+            $pickDayKeys = ['sun', 'mon', 'tue', 'wed', 'thu', 'fri', 'sat'];
+            $pickDayKeys = array_merge(array_slice($pickDayKeys, $firstDay), array_slice($pickDayKeys, 0, $firstDay));
+            $pickToday = $today->format('Y-m-d');
+            $pickTodayCol = ($today->year == $year && $today->month == $month) ? ($today->dayOfWeek - $firstDay + 7) % 7 : -1;
+            // A day can be pressed where the script that marks it is on the page, and only there
+            // (role/show-admin gives it to everyone but a viewer: keep the two conditions one).
+            $pickMarks = $route == 'admin' && $role->email_verified_at && ! ($isViewer ?? false);
+            $pickMarked = is_array($datesUnavailable) ? $datesUnavailable : [];
+            $pickCol = 0;
+        @endphp
+        <div v-show="!isLoadingEvents" class="gk-cal gk-cal-pick" data-availability-grid role="group"
+             aria-label="{{ \Carbon\Carbon::create($year, $month, 1)->locale(app()->getLocale())->translatedFormat('F Y') }}">
+            <div class="gk-cal-head" aria-hidden="true">
+                @foreach ($pickDayKeys as $i => $pickKey)
+                <div class="gk-cal-wd {{ $i === $pickTodayCol ? 'gk-cal-wd-now' : '' }}">{{ __('messages.' . $pickKey) }}</div>
                 @endforeach
             </div>
-        <div class="bg-gray-200 dark:bg-gray-700 text-xs leading-6 text-gray-700 dark:text-gray-300">
-            @php
-            // Get first role for home route (only calculate once)
-            $firstRole = null;
-            if ($route == 'home' && auth()->check()) {
-                $firstRole = auth()->user()->member()->where('email_verified_at', '!=', null)->first();
-            }
-            @endphp
-            @if ($route === 'guest' && !request()->graphic)
-            {{-- Vue-driven calendar grid for guest route (supports AJAX month navigation) --}}
-            <div class="w-full grid grid-cols-7 gap-px" :style="{ gridTemplateRows: 'repeat(' + totalWeeksComputed + ', minmax(0, 1fr))' }">
-                <div v-for="day in calendarDays" :key="day.date"
-                    class="relative px-3 py-2 min-h-[100px] border-1 border-transparent"
-                    :class="day.isCurrentMonth ? 'bg-white dark:bg-gray-900' : 'bg-gray-50 dark:bg-gray-900 text-gray-500 dark:text-gray-400'">
-                    <div class="flex justify-between">
-                        <time :datetime="day.date"
-                            :style="day.isToday ? 'background-color: ' + accentColor + '; color: {{ accent_contrast_color($accentColor ?? '#4E81FA') }}' : ''"
-                            :class="day.isToday ? 'flex h-6 w-6 items-center justify-center rounded font-semibold' : ''"
-                            v-text="day.day">
-                        </time>
-                    </div>
-                    <ol class="mt-4 divide-y divide-gray-100 dark:divide-gray-700 text-sm leading-6 md:col-span-7 xl:col-span-8">
-                        <li v-for="event in getEventsForDate(day.date)" :key="event.id"
-                            class="relative group"
-                            :class="event.can_edit ? 'hover:pe-8' : ''"
-                            v-show="isEventVisible(event)">
-                            <a :href="getEventUrl(event, day.date)"
-                                class="flex event-link-popup"
-                                :data-event-id="event.id"
-                                @click.stop="countListTap()" @if (isset($embed) && $embed) target="_blank" @endif>
-                                <p class="flex-auto font-medium text-gray-900 dark:text-gray-100 {{ rtl_class($role ?? null, 'rtl', '', $isAdminRoute) }} truncate">
-                                    <span class="flex items-start gap-1.5">
-                                        <span v-if="getEventDotColor(event)" class="inline-block w-2 h-2 rounded-full flex-shrink-0 mt-1.5" :style="{ backgroundColor: getEventDotColor(event) }"></span>
-                                        <span :class="getEventsForDate(day.date).filter(e => isEventVisible(e)).length == 1 ? 'line-clamp-2' : 'line-clamp-1'"
-                                          class="hover:underline truncate" :dir="getEventDisplayDir(event)" v-text="getEventDisplayName(event)">
-                                        </span>
-                                    </span>
-                                    <span v-if="getEventsForDate(day.date).filter(e => isEventVisible(e)).length == 1"
-                                          class="text-gray-500 dark:text-gray-400 truncate" v-text="getEventTime(event)">
-                                    </span>
-                                </p>
-                            </a>
-                            <a v-if="event.can_edit" :href="event.edit_url"
-                                class="absolute end-0 top-0 hidden group-hover:inline-block text-gray-900 dark:text-white hover:underline"
-                                @click.stop>
-                                {{ __('messages.edit') }}
-                            </a>
-                        </li>
-                    </ol>
-                </div>
-            </div>
-            @else
-            {{-- PHP-rendered calendar grid for admin/home/graphic routes --}}
-            <div class="w-full grid grid-cols-7 grid-rows-{{ $totalWeeks }} gap-px">
+            <div class="gk-cal-weeks">
                 @while ($currentDate->lte($endOfMonth))
-                @if ($route == 'admin' && $tab == 'schedule' && $role->email_verified_at)
                 @php
-                $unavailable = [];
-                foreach ($datesUnavailable as $user => $dates) {
-                    if (is_array($dates) && in_array($currentDate->format('Y-m-d'), $dates)) {
-                        $unavailable[] = $user;
-                    }
-                }
+                    $pickDate = $currentDate->format('Y-m-d');
+                    $pickIsMarked = in_array($pickDate, $pickMarked);
+                    $pickClass = 'gk-cal-day'
+                        . ($currentDate->month == $month ? '' : ' gk-cal-day-out')
+                        . ($pickDate < $pickToday ? ' gk-cal-day-past' : '')
+                        . ($pickDate === $pickToday ? ' gk-cal-day-today' : '')
+                        . ($pickMarks ? ' day-element' : '');
                 @endphp
-                <div class="cursor-pointer relative calendar-day-navigate {{ count($unavailable) ? ($currentDate->month == $month ? 'bg-orange-50 dark:bg-orange-900/30 hover:bg-gray-100 dark:hover:bg-gray-700 hover:border-gray-300 dark:hover:border-gray-600' : 'bg-orange-50 dark:bg-orange-900/30 hover:bg-gray-100 dark:hover:bg-gray-700 hover:border-gray-300 dark:hover:border-gray-600 text-gray-500 dark:text-gray-400') : ($currentDate->month == $month ? 'bg-white dark:bg-gray-900 hover:bg-gray-100 dark:hover:bg-gray-700 hover:border-gray-300 dark:hover:border-gray-600' : 'bg-gray-50 dark:bg-gray-900 text-gray-500 dark:text-gray-400 hover:bg-gray-100 dark:hover:bg-gray-700 hover:border-gray-300 dark:hover:border-gray-600') }} px-3 py-2 min-h-[100px] border-1 border-transparent hover:border-gray-300 dark:hover:border-gray-600"
-                    data-href="{{ route('event.create', ['subdomain' => $role->subdomain, 'date' => $currentDate->format('Y-m-d')]) }}">
-                    @elseif ($route == 'admin' && $tab == 'availability' && $role->email_verified_at)
-                        <div class="cursor-pointer relative {{ $currentDate->month == $month ? 'bg-white dark:bg-gray-900 hover:bg-gray-100 dark:hover:bg-gray-700 hover:border-gray-300 dark:hover:border-gray-600' : 'bg-gray-50 dark:bg-gray-900 text-gray-500 dark:text-gray-400' }} px-1 py-1 md:px-3 md:py-2 min-h-[44px] md:min-h-[100px] border-1 border-transparent hover:border-gray-300 dark:hover:border-gray-600 day-element" data-date="{{ $currentDate->format('Y-m-d') }}">
-                        @if (is_array($datesUnavailable) && in_array($currentDate->format('Y-m-d'), $datesUnavailable))
-                            <div class="day-x" data-label="{{ __('messages.unavailable') }}"></div>
-                        @endif
-                    @elseif ($route == 'home' && auth()->check())
-                        @if ($firstRole)
-                        <div class="cursor-pointer relative calendar-day-navigate {{ $currentDate->month == $month ? 'bg-white dark:bg-gray-900 hover:bg-gray-100 dark:hover:bg-gray-700 hover:border-gray-300 dark:hover:border-gray-600' : 'bg-gray-50 dark:bg-gray-900 text-gray-500 dark:text-gray-400 hover:bg-gray-100 dark:hover:bg-gray-700 hover:border-gray-300 dark:hover:border-gray-600' }} px-3 py-2 min-h-[100px] border-1 border-transparent hover:border-gray-300 dark:hover:border-gray-600"
-                            data-href="{{ route('event.create', ['subdomain' => $firstRole->subdomain, 'date' => $currentDate->format('Y-m-d')]) }}">
-                        @else
-                        <div
-                            class="relative {{ $currentDate->month == $month ? 'bg-white dark:bg-gray-900' : 'bg-gray-50 dark:bg-gray-900 text-gray-500 dark:text-gray-400' }} px-3 py-2 min-h-[100px] border-1 border-transparent">
-                        @endif
-                    @else
-                    <div
-                        class="relative {{ $currentDate->month == $month ? 'bg-white dark:bg-gray-900' : 'bg-gray-50 dark:bg-gray-900 text-gray-500 dark:text-gray-400' }} px-3 py-2 min-h-[100px] border-1 border-transparent">
-                        @endif
-                        <div class="flex justify-between">
-                        @if ($route == 'admin' || $route == 'home')
-                        <time datetime="{{ $currentDate->format('Y-m-d') }}"
-                            class="{{ $currentDate->day == $today->day && $currentDate->month == $today->month && $currentDate->year == $today->year ? 'flex h-6 w-6 items-center justify-center rounded bg-[var(--brand-button-bg)] font-semibold text-white' : '' }}">{{ $currentDate->day }}</time>
-                        @else
-                        @php
-                            $isToday = $currentDate->day == $today->day && $currentDate->month == $today->month && $currentDate->year == $today->year;
-                            $todayAccent = $isAdminRoute ? '#4E81FA' : (isset($otherRole) && $otherRole->accent_color ? $otherRole->accent_color : (isset($role) && $role->accent_color ? $role->accent_color : '#4E81FA'));
-                        @endphp
-                        <time datetime="{{ $currentDate->format('Y-m-d') }}"
-                            style="{{ $isToday ? 'background-color: ' . $todayAccent . '; color: ' . accent_contrast_color($todayAccent) : '' }}"
-                            class="{{ $isToday ? 'flex h-6 w-6 items-center justify-center rounded font-semibold' : '' }}">{{ $currentDate->day }}</time>
-                        @endif
-                        @if (count($unavailable))
-                            <div class="has-tooltip" data-tooltip="{!! __('messages.unavailable') . ":<br/>" . implode("<br/>", $unavailable) !!}">
-                                <svg class="h-5 w-5" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="#888">
-                                    <path d="M11,9H13V7H11M12,20C7.59,20 4,16.41 4,12C4,7.59 7.59,4 12,4C16.41,4 20,7.59 20,12C20,16.41 16.41,20 12,20M12,2A10,10 0 0,0 2,12A10,10 0 0,0 12,22A10,10 0 0,0 22,12A10,10 0 0,0 12,2M11,17H13V11H11V17Z" />
-                                </svg>
-                            </div>
-                        @endif
+                @if ($pickCol % 7 === 0)
+                <div class="gk-cal-week">
+                @endif
+                    <div class="{{ $pickClass }}" data-date="{{ $pickDate }}"
+                         @if ($pickMarks) role="button" tabindex="0" aria-pressed="{{ $pickIsMarked ? 'true' : 'false' }}" @endif
+                         aria-label="{{ $currentDate->copy()->locale(app()->getLocale())->translatedFormat('l, F j') }}"
+                         @if ($pickDate === $pickToday) aria-current="date" @endif>
+                        <div class="gk-cal-dayhead">
+                            <span class="gk-cal-num"><time datetime="{{ $pickDate }}">{{ $currentDate->day }}</time></span>
+                            @if ($pickDate === $pickToday)
+                            <span class="gk-cal-word">{{ __('messages.today') }}</span>
+                            @endif
                         </div>
-                        @if (($tab ?? '') != 'availability')
-                        <ol class="mt-4 divide-y divide-gray-100 dark:divide-gray-700 text-sm leading-6 md:col-span-7 xl:col-span-8">
-                            <li v-for="event in getEventsForDate('{{ $currentDate->format('Y-m-d') }}')" :key="event.id"
-                                class="relative group"
-                                @if ($route != 'admin') :class="event.can_edit ? 'hover:pe-8' : ''" @endif
-                                v-show="isEventVisible(event)">
-                                <a :href="getEventUrl(event, '{{ $currentDate->format('Y-m-d') }}')"
-                                    class="flex event-link-popup"
-                                    :data-event-id="event.id"
-                                    @click.stop="countListTap()" {{ ($route != 'guest' || (isset($embed) && $embed)) ? "target='_blank'" : '' }}>
-                                    <p class="flex-auto min-w-0 font-medium text-gray-900 dark:text-gray-100 {{ rtl_class($role ?? null, 'rtl', '', $isAdminRoute) }} {{ $route == 'admin' ? '' : 'truncate' }}">
-                                        <span class="flex items-start gap-1.5">
-                                            <span v-if="getEventDotColor(event)" class="inline-block w-2 h-2 rounded-full flex-shrink-0 mt-1.5" :style="{ backgroundColor: getEventDotColor(event) }"></span>
-                                            <span :class="getEventsForDate('{{ $currentDate->format('Y-m-d') }}').filter(e => isEventVisible(e)).length == 1 ? 'line-clamp-2' : 'line-clamp-1'"
-                                              class="hover:underline {{ $route == 'admin' ? 'whitespace-normal break-words min-w-0' : 'truncate' }}" :dir="getEventDisplayDir(event)" v-text="getEventDisplayName(event)">
-                                            </span>
-                                        </span>
-                                        {{-- The list says which events are not public; the month did not. On a
-                                             schedule's own pages only: the dashboard's month and the public
-                                             calendar share this partial and are left as they were. --}}
-                                        @if ($route == 'admin')
-                                        <span v-if="event.is_internal" data-month-mark="internal" class="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-amber-100 text-amber-800 dark:bg-amber-900/50 dark:text-amber-200">{{ __('messages.internal') }}</span>
-                                        <span v-else-if="event.is_draft" data-month-mark="draft" class="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-blue-100 text-blue-800 dark:bg-blue-900/50 dark:text-blue-200">{{ __('messages.draft') }}</span>
-                                        @endif
-                                        <span v-if="getEventsForDate('{{ $currentDate->format('Y-m-d') }}').filter(e => isEventVisible(e)).length == 1"
-                                              class="block text-gray-500 dark:text-gray-400 truncate" v-text="getEventTime(event)">
-                                        </span>
-                                    </p>
-                                </a>
-                                <a v-if="event.can_edit" :href="event.edit_url"
-                                    class="absolute end-0 top-0 hidden group-hover:inline-block text-gray-900 dark:text-white hover:underline {{ $route == 'admin' ? 'ps-2 bg-gray-100 dark:bg-gray-700' : '' }}"
-                                    @click.stop>
-                                    {{ __('messages.edit') }}
-                                </a>
-                            </li>
-                        </ol>
+                        @if ($pickMarks && $pickIsMarked)
+                        <div class="day-x" data-label="{{ __('messages.unavailable') }}"></div>
                         @endif
                     </div>
-                    @php $currentDate->addDay(); @endphp
-                    @endwhile
+                @if ($pickCol % 7 === 6)
                 </div>
-            @endif
+                @endif
+                @php $currentDate->addDay(); $pickCol++; @endphp
+                @endwhile
             </div>
         </div>
+        @endif
         @endif
 
 
@@ -935,7 +848,7 @@
                 <section v-for="group in phoneGroups" :key="'pm-' + group.date" :id="'gk-day-' + group.date" class="gk-panel gk-day bg-white/95 dark:bg-gray-900/95 backdrop-blur-sm" :class="{ 'gk-day-past': group.past }">
                     <div class="gk-dayhead">
                         <span v-if="dayWord(group.date)" class="gk-dayhead-word" v-text="dayWord(group.date)"></span>
-                        <h2 class="gk-dayhead-title" v-text="formatDateHeader(group.date)" {{ rtl_class($role ?? null, 'dir=rtl', '', $isAdminRoute) }}></h2>
+                        <h2 class="gk-dayhead-title" v-text="formatDateHeader(group.date)" {{ rtl_class($role ?? null, 'dir=rtl', '', $ownPage) }}></h2>
                     </div>
                     <ul class="gk-rows">
                         <template v-for="event in group.events" :key="'pm-' + event.uniqueKey">
@@ -972,7 +885,7 @@
                             :class="isPastEvent(group.date) ? 'past-event hidden' : ''">
                             <div class="pb-5 pt-3 px-4 flex items-center gap-4">
                                 <div class="flex-1 h-px bg-gray-200 dark:bg-gray-600"></div>
-                                <div class="font-semibold text-gray-900 dark:text-gray-100 text-center" v-text="formatDateHeader(group.date)" {{ rtl_class($role ?? null, 'dir=rtl', '', $isAdminRoute) }}></div>
+                                <div class="font-semibold text-gray-900 dark:text-gray-100 text-center" v-text="formatDateHeader(group.date)" {{ rtl_class($role ?? null, 'dir=rtl', '', $ownPage) }}></div>
                                 <div class="flex-1 h-px bg-gray-200 dark:bg-gray-600"></div>
                             </div>
                         </div>
@@ -1081,7 +994,7 @@
         </div>
 
 {{-- List View (Desktop) --}}
-        <div {!! $guestRows ? 'v-if="currentView === \'list\' && !isLoadingEvents && !isNarrow"' : 'v-show="currentView === \'list\' && !isLoadingEvents"' !!} :data-list-anim="activeListAnimation !== 'none' ? activeListAnimation : null" :data-list-rtl="isRtl ? '' : null" style="--es-accent: {{ $accentColor }}" class="hidden md:block {{ rtl_class($role ?? null, 'rtl', '', $isAdminRoute) }}">
+        <div {!! $guestRows ? 'v-if="currentView === \'list\' && !isLoadingEvents && !isNarrow"' : 'v-show="currentView === \'list\' && !isLoadingEvents"' !!} :data-list-anim="activeListAnimation !== 'none' ? activeListAnimation : null" :data-list-rtl="isRtl ? '' : null" style="--es-accent: {{ $accentColor }}" class="hidden md:block {{ rtl_class($role ?? null, 'rtl', '', $ownPage) }}">
             {{-- Upcoming Events --}}
             <div v-if="allListGroups.length" class="space-y-8">
                 <template v-for="(group, groupIndex) in allListGroups" :key="'list-d-' + group.date">
@@ -1089,7 +1002,16 @@
                     <template v-if="groupIndex === firstPastGroupIndex">
                         @include('role/partials/list-more')
                     </template>
-                    {{-- Past Events Divider (once, before the first all-past group) --}}
+                    {{-- Past Events Divider (once, before the first all-past group). On a guest
+                         page it is the kit's marker (.gk-past), which reads on whatever the owner
+                         put behind the list; the admin's list is on the portal's own surface and
+                         keeps its hairlines. --}}
+                    @if ($guestRows)
+                    <div v-if="group.events.every(e => e._isPast) && (groupIndex === 0 || !allListGroups[groupIndex - 1].events.every(e => e._isPast))"
+                         class="gk-past" role="heading" aria-level="2">
+                        <span class="gk-past-label"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3.5 12a8.5 8.5 0 1 0 2.6-6.1"/><path d="M3.5 4.5v4h4"/><path d="M12 7.5V12l3 2"/></svg><span>{{ $label('past_events') }}</span></span>
+                    </div>
+                    @else
                     <div v-if="group.events.every(e => e._isPast) && (groupIndex === 0 || !allListGroups[groupIndex - 1].events.every(e => e._isPast))"
                          class="py-4 flex items-center gap-4">
                         <div class="flex-1 h-px bg-gray-300 dark:bg-gray-600"></div>
@@ -1098,6 +1020,7 @@
                         </span>
                         <div class="flex-1 h-px bg-gray-300 dark:bg-gray-600"></div>
                     </div>
+                    @endif
                     {{-- One date: header + its cards --}}
                     <div class="space-y-4">
                         {{-- Date Header: translucent card-style backing keeps the date + hairlines
@@ -1107,7 +1030,7 @@
                              class="flex items-center gap-4"
                              role="heading" aria-level="2">
                             <div class="flex-1 h-px bg-gray-200 dark:bg-gray-600"></div>
-                            <div class="rounded-xl bg-white/95 dark:bg-gray-900/95 backdrop-blur-sm px-5 py-2.5 text-center" {{ rtl_class($role ?? null, 'dir=rtl', '', $isAdminRoute) }}>
+                            <div class="rounded-xl bg-white/95 dark:bg-gray-900/95 backdrop-blur-sm px-5 py-2.5 text-center" {{ rtl_class($role ?? null, 'dir=rtl', '', $ownPage) }}>
                                 @if ($guestRows)
                                 <span v-if="dayWord(group.date)" class="me-2 text-sm font-bold uppercase tracking-wide text-gray-500 dark:text-gray-400" v-text="dayWord(group.date)"></span>
                                 @endif
@@ -1927,7 +1850,7 @@
         {{-- List View (Mobile) --}}
         {{-- v-if on a guest page, and only on a phone: a list that is not the one on screen is
              not in the page at all (the cards above are the list from a tablet up). --}}
-        <div {!! $guestRows ? 'v-if="currentView === \'list\' && !isLoadingEvents && isNarrow"' : 'v-show="currentView === \'list\' && !isLoadingEvents"' !!} :data-list-anim="activeListAnimation !== 'none' ? activeListAnimation : null" :data-list-rtl="isRtl ? '' : null" style="--es-accent: {{ $accentColor }}" class="{{ $guestRows ? 'gk-list' : 'md:hidden' }} {{ rtl_class($role ?? null, 'rtl', '', $isAdminRoute) }}">
+        <div {!! $guestRows ? 'v-if="currentView === \'list\' && !isLoadingEvents && isNarrow"' : 'v-show="currentView === \'list\' && !isLoadingEvents"' !!} :data-list-anim="activeListAnimation !== 'none' ? activeListAnimation : null" :data-list-rtl="isRtl ? '' : null" style="--es-accent: {{ $accentColor }}" class="{{ $guestRows ? 'gk-list' : 'md:hidden' }} {{ rtl_class($role ?? null, 'rtl', '', $ownPage) }}">
             @if ($guestRows)
             {{-- The guest list on a phone: a panel for each day, a row for each event
                  (partials/guest-kit-styles: .gk-day, .gk-row).
@@ -1943,8 +1866,8 @@
                         @include('role/partials/list-more')
                     </template>
                     {{-- Past Events Divider --}}
-                    <div v-if="group.events.every(e => e._isPast) && (groupIndex === 0 || !allListGroups[groupIndex - 1].events.every(e => e._isPast))" class="gk-days-past">
-                        <span>{{ $label('past_events') }}</span>
+                    <div v-if="group.events.every(e => e._isPast) && (groupIndex === 0 || !allListGroups[groupIndex - 1].events.every(e => e._isPast))" class="gk-past" role="heading" aria-level="2">
+                        <span class="gk-past-label"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3.5 12a8.5 8.5 0 1 0 2.6-6.1"/><path d="M3.5 4.5v4h4"/><path d="M12 7.5V12l3 2"/></svg><span>{{ $label('past_events') }}</span></span>
                     </div>
                     <section v-if="group.events.some(e => isEventVisible(e))" class="gk-panel gk-day bg-white/95 dark:bg-gray-900/95 backdrop-blur-sm" :class="{ 'gk-day-past': group.events.every(e => e._isPast) }">
                         {{-- The dateless group has no heading, so it never says "Invalid Date". --}}
@@ -1953,7 +1876,7 @@
                                  a day is a day because of where it happens. --}}
                             <span v-if="dayWord(group.date)" class="gk-dayhead-word" v-text="dayWord(group.date)"></span>
                             {{-- A heading, as the day is over the cards a wider screen gets. --}}
-                            <h2 class="gk-dayhead-title" v-text="formatDateHeader(group.date)" {{ rtl_class($role ?? null, 'dir=rtl', '', $isAdminRoute) }}></h2>
+                            <h2 class="gk-dayhead-title" v-text="formatDateHeader(group.date)" {{ rtl_class($role ?? null, 'dir=rtl', '', $ownPage) }}></h2>
                         </div>
                         <ul class="gk-rows">
                             <template v-for="event in group.events" :key="'list-mob-' + event.uniqueKey">
@@ -1984,7 +1907,7 @@
                     <div v-if="group.date && group.date !== 'no-date'" class="sticky top-0 z-10 {{ $stickyBleedClass }} bg-white dark:bg-gray-800">
                         <div class="pb-5 pt-3 px-4 flex items-center gap-4">
                             <div class="flex-1 h-px bg-gray-200 dark:bg-gray-600"></div>
-                            <div class="font-semibold text-gray-900 dark:text-gray-100 text-center" v-text="formatDateHeader(group.date)" {{ rtl_class($role ?? null, 'dir=rtl', '', $isAdminRoute) }}></div>
+                            <div class="font-semibold text-gray-900 dark:text-gray-100 text-center" v-text="formatDateHeader(group.date)" {{ rtl_class($role ?? null, 'dir=rtl', '', $ownPage) }}></div>
                             <div class="flex-1 h-px bg-gray-200 dark:bg-gray-600"></div>
                         </div>
                     </div>
@@ -2059,7 +1982,7 @@
 
     {{-- Bottom sheet panel --}}
     <div ref="mobileFilterPanel" tabindex="-1" role="dialog" aria-modal="true" aria-labelledby="filters-drawer-title"
-         class="fixed inset-x-0 bottom-0 bg-white dark:bg-gray-800 rounded-t-2xl shadow-xl max-h-[80vh] overflow-y-auto focus:outline-none {{ rtl_class($role ?? null, 'rtl', '', $isAdminRoute) }}">
+         class="fixed inset-x-0 bottom-0 bg-white dark:bg-gray-800 rounded-t-2xl shadow-xl max-h-[80vh] overflow-y-auto focus:outline-none {{ rtl_class($role ?? null, 'rtl', '', $ownPage) }}">
         {{-- Header --}}
         <div class="px-6 pt-5 pb-4 flex items-center justify-between border-b border-gray-200 dark:border-gray-700">
             <div>
@@ -2104,7 +2027,7 @@
             <label for="filter-group-m" class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">{{ $label('schedule') }}</label>
             <select id="filter-group-m" v-model="selectedGroup" style="font-family: sans-serif"
                     class="w-full py-2.5 px-3 border-gray-300 dark:border-gray-600 rounded-md shadow-sm
-                           bg-white dark:bg-gray-700 text-gray-900 dark:text-gray-100 text-sm {{ rtl_class($role ?? null, 'rtl', '', $isAdminRoute) }}">
+                           bg-white dark:bg-gray-700 text-gray-900 dark:text-gray-100 text-sm {{ rtl_class($role ?? null, 'rtl', '', $ownPage) }}">
                 <option value="">{{ $label('show_all') }}</option>
                 <option v-for="group in groups" :key="group.slug" :value="group.slug">
                     @{{ group.name }} (@{{ eventCountByGroup[group.slug] || 0 }})
@@ -2221,7 +2144,7 @@
     {{-- Modal panel --}}
     <div class="fixed inset-0 flex items-center justify-center p-4 z-[101] pointer-events-none">
         <div ref="desktopFilterPanel" tabindex="-1" role="dialog" aria-modal="true" aria-labelledby="filters-modal-title"
-             class="bg-white dark:bg-gray-800 rounded-xl shadow-xl w-full max-w-md max-h-[80vh] overflow-y-auto pointer-events-auto focus:outline-none {{ rtl_class($role ?? null, 'rtl', '', $isAdminRoute) }}">
+             class="bg-white dark:bg-gray-800 rounded-xl shadow-xl w-full max-w-md max-h-[80vh] overflow-y-auto pointer-events-auto focus:outline-none {{ rtl_class($role ?? null, 'rtl', '', $ownPage) }}">
             {{-- Header --}}
             <div class="px-6 py-4 flex items-center justify-between border-b border-gray-200 dark:border-gray-700 sticky top-0 bg-white dark:bg-gray-800 z-10">
                 <div>
@@ -2266,7 +2189,7 @@
                 <label for="filter-group-d" class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">{{ $label('schedule') }}</label>
                 <select id="filter-group-d" v-model="selectedGroup" style="font-family: sans-serif"
                         class="w-full py-2.5 px-3 border-gray-300 dark:border-gray-600 rounded-md shadow-sm
-                               bg-white dark:bg-gray-700 text-gray-900 dark:text-gray-100 text-sm {{ rtl_class($role ?? null, 'rtl', '', $isAdminRoute) }}">
+                               bg-white dark:bg-gray-700 text-gray-900 dark:text-gray-100 text-sm {{ rtl_class($role ?? null, 'rtl', '', $ownPage) }}">
                     <option value="">{{ $label('show_all') }}</option>
                     <option v-for="group in groups" :key="group.slug" :value="group.slug">
                         @{{ group.name }} (@{{ eventCountByGroup[group.slug] || 0 }})
@@ -2374,39 +2297,9 @@
 </div>
 </Teleport>
 
-<!-- Event Popup Component -->
-<div id="event-popup" class="event-popup">
-    <div class="event-popup-content">
-        <img id="event-popup-image" class="event-popup-image" style="display: none;" />
-        <div class="event-popup-body">
-            <h3 id="event-popup-title" class="event-popup-title">
-                <svg id="event-popup-lock" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" style="display: none; width: 16px; height: 16px; vertical-align: middle; margin-inline-end: 6px; color: #9ca3af; flex-shrink: 0;" class="inline-block"><path stroke-linecap="round" stroke-linejoin="round" d="M16.5 10.5V6.75a4.5 4.5 0 10-9 0v3.75m-.75 11.25h10.5a2.25 2.25 0 002.25-2.25v-6.75a2.25 2.25 0 00-2.25-2.25H6.75a2.25 2.25 0 00-2.25 2.25v6.75a2.25 2.25 0 002.25 2.25z" /></svg>
-                <span id="event-popup-title-text"></span>
-            </h3>
-            <div class="event-popup-details">
-                <div id="event-popup-venue" class="event-popup-detail" style="display: none;">
-                    <svg class="event-popup-icon" viewBox="0 0 24 24" fill="currentColor">
-                        <path fill-rule="evenodd" clip-rule="evenodd" d="M12 2C7.58172 2 4 6.00258 4 10.5C4 14.9622 6.55332 19.8124 10.5371 21.6744C11.4657 22.1085 12.5343 22.1085 13.4629 21.6744C17.4467 19.8124 20 14.9622 20 10.5C20 6.00258 16.4183 2 12 2ZM12 12C13.1046 12 14 11.1046 14 10C14 8.89543 13.1046 8 12 8C10.8954 8 10 8.89543 10 10C10 11.1046 10.8954 12 12 12Z" />
-                    </svg>
-                    <span id="event-popup-venue-text"></span>
-                </div>
-                <div id="event-popup-time" class="event-popup-detail" style="display: none;">
-                    <svg class="event-popup-icon" viewBox="0 0 20 20" fill="currentColor">
-                        <path fill-rule="evenodd" d="M5.75 2a.75.75 0 01.75.75V4h7V2.75a.75.75 0 011.5 0V4h.25A2.75 2.75 0 0118 6.75v8.5A2.75 2.75 0 0115.25 18H4.75A2.75 2.75 0 012 15.25v-8.5A2.75 2.75 0 014.75 4H5V2.75A.75.75 0 015.75 2zm-1 5.5c-.69 0-1.25.56-1.25 1.25v6.5c0 .69.56 1.25 1.25 1.25h10.5c.69 0 1.25-.56 1.25-1.25v-6.5c0-.69-.56-1.25-1.25-1.25H4.75z" clip-rule="evenodd" />
-                    </svg>
-                    <span id="event-popup-time-text"></span>
-                </div>
-                <div id="event-popup-price" class="event-popup-detail" style="display: none;">
-                    <svg class="event-popup-icon" viewBox="0 0 20 20" fill="currentColor">
-                        <path fill-rule="evenodd" d="M5.5 3A2.5 2.5 0 003 5.5v2.879a2.5 2.5 0 00.732 1.767l7.5 7.5a2.5 2.5 0 003.536 0l2.878-2.878a2.5 2.5 0 000-3.536l-7.5-7.5A2.5 2.5 0 008.38 3H5.5zM6 7a1 1 0 100-2 1 1 0 000 2z" clip-rule="evenodd" />
-                    </svg>
-                    <span id="event-popup-price-text"></span><span id="event-popup-coupon-text" style="display: none;"></span>
-                </div>
-            </div>
-            <p id="event-popup-description" class="event-popup-description" style="display: none;"></p>
-        </div>
-    </div>
-</div>
+@if (! request()->graphic && ($tab ?? '') !== 'availability')
+@include('role.partials.month-peek')
+@endif
 
 {{-- A schedule page passes $hasActivePolls: its $events are only the next 50 public ones, while the
      list's cards take votes on whatever the calendar fetches. Other callers (?graphic=1, the
@@ -2416,6 +2309,7 @@
 <script src="{{ asset('js/poll-confetti.js') }}" {!! nonce_attr() !!}></script>
 @endif
 <script src="{{ asset('js/vue.global.prod.js') }}" {!! nonce_attr() !!}></script>
+@include('role.partials.month-script')
 <script {!! nonce_attr() !!}>
 if (typeof Vue !== 'undefined') {
 const { createApp } = Vue;
@@ -2610,6 +2504,8 @@ const listReveal = (() => {
 })();
 
 const calendarApp = createApp({
+    // The month, its card and its day's panel: role/partials/month-script.
+    mixins: [window.monthMixin],
     data() {
         return {
             selectedGroup: '{{ isset($selectedGroup) ? $selectedGroup->slug : "" }}',
@@ -2645,7 +2541,10 @@ const calendarApp = createApp({
             // the address asked for, and the event's way back returns to that view.
             layoutFromUrl: @json(requested_event_layout()),
             directRegistration: {{ isset($role) && $role->direct_registration ? 'true' : 'false' }},
-            isRtl: {{ $isAdminRoute ? (auth()->check() && auth()->user()->isRtl() ? 'true' : 'false') : (isset($role) && $role->isRtl() ? 'true' : 'false') }},
+            {{-- The dashboard is the person's own page, as the admin's are: its direction and its
+                 language are theirs. Left to the schedule's (there is none there), the month was
+                 forced left to right and wrote its dates in English for every other language. --}}
+            isRtl: {{ $ownPage ? (auth()->check() && auth()->user()->isRtl() ? 'true' : 'false') : (isset($role) && $role->isRtl() ? 'true' : 'false') }},
             durationLabels: {
                 h: @json(__('messages.duration_hour_short')),
                 d: @json(__('messages.duration_day_short')),
@@ -2653,7 +2552,7 @@ const calendarApp = createApp({
             },
             {{-- Also the language forwarded to the guest calendar endpoints, so their payload can no
                  longer disagree with the server-rendered chrome around it. --}}
-            languageCode: '{{ $isAdminRoute && auth()->check() ? app()->getLocale() : (isset($role) ? $role->displayLanguageCode() : 'en') }}',
+            languageCode: '{{ $ownPage && auth()->check() ? app()->getLocale() : (isset($role) ? $role->displayLanguageCode() : 'en') }}',
             {{-- The zone the past-event filters resolve "today" in. Must be the same one $today
                  above uses: these compare against occurrenceDate, which is the SCHEDULE's calendar
                  date, so a viewer-anchored today hides an event that is still running. --}}
@@ -2668,7 +2567,6 @@ const calendarApp = createApp({
             phoneMonth: @json($guestRows && ! $guestEmbed),
             // What the list was left as, when this page is come back to (see the watcher).
             listToRestore: null,
-            popupTimeout: null,
             showFiltersDrawer: false,
             showDesktopFiltersModal: false,
             showOnlineOnly: false,
@@ -2767,9 +2665,6 @@ const calendarApp = createApp({
                 current.setDate(current.getDate() + 1);
             }
             return days;
-        },
-        totalWeeksComputed() {
-            return Math.ceil(this.calendarDays.length / 7);
         },
         monthYearLabel() {
             const date = new Date(this.pageYear, this.pageMonth - 1, 1);
@@ -3921,46 +3816,12 @@ const calendarApp = createApp({
                     }
                 }
             });
-            const listBtn = document.getElementById('toggle-list-btn');
-            const calBtn = document.getElementById('toggle-calendar-btn');
-            const accentColor = (listBtn && listBtn.dataset.accent) || (calBtn && calBtn.dataset.accent) || '{{ $accentColor ?? "#4E81FA" }}';
-            const contrastColor = (listBtn && listBtn.dataset.contrast) || (calBtn && calBtn.dataset.contrast) || '{{ $contrastColor ?? "#FFFFFF" }}';
-            if (listBtn) {
-                listBtn.style.borderColor = accentColor;
-                if (view !== 'list') {
-                    listBtn.style.backgroundColor = accentColor;
-                    listBtn.style.color = contrastColor;
-                    listBtn.className = listBtn.className.replace(/\btext-gray-900\b/g, '').replace(/\bdark:text-white\b/g, '').replace(/\bhover:bg-gray-50\b/g, '').replace(/\bdark:hover:bg-gray-700\b/g, '');
-                    if (!listBtn.className.includes('hover:scale-105')) {
-                        listBtn.className += ' hover:scale-105 hover:shadow-md';
-                    }
-                } else {
-                    listBtn.style.backgroundColor = '';
-                    listBtn.style.color = '';
-                    listBtn.className = listBtn.className.replace(/\bhover:scale-105\b/g, '').replace(/\bhover:shadow-md\b/g, '');
-                    if (!listBtn.className.includes('text-gray-900')) {
-                        listBtn.className += ' text-gray-900 dark:text-white';
-                    }
-                }
-            }
-            if (calBtn) {
-                calBtn.style.borderColor = accentColor;
-                if (view !== 'calendar') {
-                    calBtn.style.backgroundColor = accentColor;
-                    calBtn.style.color = contrastColor;
-                    calBtn.className = calBtn.className.replace(/\btext-gray-900\b/g, '').replace(/\bdark:text-white\b/g, '').replace(/\bhover:bg-gray-50\b/g, '').replace(/\bdark:hover:bg-gray-700\b/g, '');
-                    if (!calBtn.className.includes('hover:scale-105')) {
-                        calBtn.className += ' hover:scale-105 hover:shadow-md';
-                    }
-                } else {
-                    calBtn.style.backgroundColor = '';
-                    calBtn.style.color = '';
-                    calBtn.className = calBtn.className.replace(/\bhover:scale-105\b/g, '').replace(/\bhover:shadow-md\b/g, '');
-                    if (!calBtn.className.includes('text-gray-900')) {
-                        calBtn.className += ' text-gray-900 dark:text-white';
-                    }
-                }
-            }
+            // The view switch in the schedule's header says which view is on; how a pressed
+            // button looks is the stylesheet's (partials/guest-kit-styles, .gk-head-seg-btn).
+            ['list', 'calendar'].forEach((name) => {
+                const btn = document.getElementById('toggle-' + name + '-btn');
+                if (btn) { btn.setAttribute('aria-pressed', view === name ? 'true' : 'false'); }
+            });
         },
         getHeaderImage(event) {
             if (event.venue_header_image) return event.venue_header_image;
@@ -4601,25 +4462,6 @@ const calendarApp = createApp({
                 window.location.href = url;
             }
         },
-        getEventPopupData(event) {
-            const time = this.getEventTime(event);
-            return {
-                name: event.name || '',
-                dir: event.dir || 'auto',
-                venue_name: event.venue_name || '',
-                venue_dir: event.venue_dir || 'auto',
-                time: time || '',
-                // A 160px column: the card-size derivative when there is one.
-                image_url: event.image_thumb_url || event.image_url || '',
-                description: '', // Description not currently in event data
-                ticket_price: event.ticket_price,
-                ticket_currency_code: event.ticket_currency_code || '',
-                registration_url: event.registration_url || '',
-                coupon_code: event.coupon_code || '',
-                coupon_discount_label: event.coupon_discount_label || '',
-                is_password_protected: event.is_password_protected || false
-            };
-        },
         // Mirrors getEventDisplayName below: that method shows the VENUE name when you are
         // looking at a talent's own schedule, so the cell must not always use the event
         // name's direction.
@@ -4818,193 +4660,6 @@ const calendarApp = createApp({
                 default: return 'th';
             }
         },
-        initPopups() {
-            // Initialize popup event listeners after Vue updates
-            this.$nextTick(() => {
-                const eventLinks = document.querySelectorAll('.event-link-popup');
-                eventLinks.forEach(el => {
-                    // This runs again whenever filteredEvents changes - on every search keystroke -
-                    // and Vue keeps the surviving elements, so bind each one once. The handlers
-                    // read data-event-id when they fire, so a reused element stays correct.
-                    if (el.dataset.popupBound) return;
-                    el.dataset.popupBound = '1';
-                    el.addEventListener('mouseenter', () => {
-                        const eventId = el.getAttribute('data-event-id');
-                        const event = this.allEvents.find(ev => ev.id === eventId);
-                        if (event) {
-                            this.showEventPopup(event, el);
-                        }
-                    });
-                    el.addEventListener('mouseleave', () => {
-                        this.hideEventPopup();
-                    });
-                });
-            });
-        },
-        showEventPopup(event, element) {
-            // Clear any existing timeout
-            if (this.popupTimeout) {
-                clearTimeout(this.popupTimeout);
-            }
-
-            // Get popup data
-            const popupData = this.getEventPopupData(event);
-
-            // Update popup content
-            const popup = document.getElementById('event-popup');
-            if (!popup) return;
-
-            const titleEl = document.getElementById('event-popup-title');
-            const imageEl = document.getElementById('event-popup-image');
-            const venueEl = document.getElementById('event-popup-venue');
-            const venueTextEl = document.getElementById('event-popup-venue-text');
-            const timeEl = document.getElementById('event-popup-time');
-            const timeTextEl = document.getElementById('event-popup-time-text');
-            const descriptionEl = document.getElementById('event-popup-description');
-
-            const lockEl = document.getElementById('event-popup-lock');
-            const titleTextEl = document.getElementById('event-popup-title-text');
-            if (lockEl) lockEl.style.display = popupData.is_password_protected ? 'inline-block' : 'none';
-            if (titleTextEl) {
-                titleTextEl.textContent = popupData.name || '';
-                titleTextEl.dir = popupData.dir || 'auto';
-            }
-
-            if (imageEl) {
-                if (popupData.image_url) {
-                    imageEl.src = popupData.image_url;
-                    imageEl.style.display = 'block';
-                } else {
-                    imageEl.style.display = 'none';
-                }
-            }
-
-            if (venueEl && venueTextEl) {
-                if (popupData.venue_name) {
-                    venueTextEl.textContent = popupData.venue_name;
-                    venueTextEl.dir = popupData.venue_dir || 'auto';
-                    venueEl.style.display = 'flex';
-                } else {
-                    venueEl.style.display = 'none';
-                }
-            }
-
-            if (timeEl && timeTextEl) {
-                if (popupData.time) {
-                    timeTextEl.textContent = popupData.time;
-                    timeEl.style.display = 'flex';
-                } else {
-                    timeEl.style.display = 'none';
-                }
-            }
-
-            const priceEl = document.getElementById('event-popup-price');
-            const priceTextEl = document.getElementById('event-popup-price-text');
-            const couponTextEl = document.getElementById('event-popup-coupon-text');
-
-            if (priceEl && priceTextEl) {
-                if (popupData.registration_url && popupData.ticket_price != null) {
-                    priceTextEl.textContent = popupData.ticket_price == 0
-                        ? @json($label('free_entry'))
-                        : this.formatPrice(popupData.ticket_price, popupData.ticket_currency_code);
-                    priceEl.style.display = 'flex';
-                } else {
-                    priceEl.style.display = 'none';
-                }
-            }
-
-            if (couponTextEl) {
-                const couponBits = [popupData.coupon_code, popupData.coupon_discount_label].filter(Boolean);
-                if (couponBits.length && popupData.registration_url && popupData.ticket_price != null) {
-                    // Each bit is user text sitting between bullet separators, so isolate it or
-                    // a Latin coupon code drags the bullets to the wrong side of an RTL line.
-                    // FSI (U+2068), not LRI: this list also carries coupon_discount_label, which
-                    // is a translated string and is Hebrew on a Hebrew locale - LRI would force
-                    // it left-to-right. FSI resolves each bit first-strong, matching the <bdi>
-                    // the cards use. Control characters rather than markup because this writes
-                    // through textContent; the popup is pointer-events:none so nothing here can
-                    // reach a clipboard.
-                    couponTextEl.textContent = ' \u2022 ' + couponBits.map(b => '\u2068' + b + '\u2069').join(' \u2022 ');
-                    couponTextEl.style.display = 'inline';
-                } else {
-                    couponTextEl.style.display = 'none';
-                }
-            }
-
-            if (descriptionEl) {
-                if (popupData.description) {
-                    descriptionEl.textContent = popupData.description;
-                    descriptionEl.style.display = 'block';
-                } else {
-                    descriptionEl.style.display = 'none';
-                }
-            }
-
-            // Move popup to body to avoid backdrop-filter containing block issues
-            if (popup.parentElement !== document.body) {
-                document.body.appendChild(popup);
-            }
-
-            // Show popup
-            this.popupElement = element;
-            popup.classList.add('show');
-            this.updatePopupPosition();
-        },
-        hideEventPopup() {
-            if (this.popupTimeout) {
-                clearTimeout(this.popupTimeout);
-            }
-            const popup = document.getElementById('event-popup');
-            if (popup) {
-                popup.classList.remove('show');
-            }
-        },
-        updatePopupPosition() {
-            const popup = document.getElementById('event-popup');
-            if (!popup || !popup.classList.contains('show') || !this.popupElement) return;
-
-            // 1. One-time setup for performance (GPU acceleration)
-            if (popup.style.position !== 'fixed') {
-                Object.assign(popup.style, {
-                    position: 'fixed',
-                    top: '0',
-                    left: '0',
-                    willChange: 'transform',
-                    pointerEvents: 'none' // Prevents flickering when mouse overlaps popup
-                });
-            }
-
-            const content = popup.querySelector('.event-popup-content') || popup;
-            const rect = this.popupElement.getBoundingClientRect();
-
-            // 2. Cache dimensions
-            const pW = content.offsetWidth || 320;
-            const pH = content.offsetHeight || 200;
-            const vW = window.innerWidth;
-            const vH = window.innerHeight;
-            const gap = 8;
-
-            // 3. Position below the element, left-aligned
-            let left = rect.left;
-            let top = rect.bottom + gap;
-
-            // 4. Flip above if not enough space below
-            if (top + pH > vH - 10) {
-                top = rect.top - pH - gap;
-            }
-
-            // 5. Flip left if not enough space on the right
-            if (left + pW > vW - 10) {
-                left = rect.right - pW;
-            }
-
-            // 6. Hard Constraints (Keep inside viewport)
-            left = Math.max(10, Math.min(left, vW - pW - 10));
-            top = Math.max(10, Math.min(top, vH - pH - 10));
-
-            // 7. Apply via Transform (GPU Composite instead of Layout/Reflow)
-            popup.style.transform = `translate3d(${Math.round(left)}px, ${Math.round(top)}px, 0)`;
-        },
         getTalentHeaderImages(event) {
             if (!event.talent) return [];
             return event.talent.filter(t => t.header_image).map(t => ({ name: t.name, image: t.header_image }));
@@ -5041,7 +4696,6 @@ const calendarApp = createApp({
         },
         onEventsReady() {
             this.$nextTick(() => {
-                this.initPopups();
                 const showPastEventsBtn = document.getElementById('showPastEventsBtn');
                 const pastEventEls = document.querySelectorAll('.past-event');
                 if (pastEventEls.length > 0 && showPastEventsBtn) {
@@ -5060,9 +4714,11 @@ const calendarApp = createApp({
             let newYear = this.pageYear;
 
             if (direction === 0) {
-                const now = new Date();
-                newMonth = now.getMonth() + 1;
-                newYear = now.getFullYear();
+                // The schedule's month, not the browser's: around the turn of a month a visitor
+                // in another zone was sent to the month the schedule is not in yet, or has left.
+                const [todayYear, todayMonth] = this.scheduleDay(0).split('-').map(Number);
+                newMonth = todayMonth;
+                newYear = todayYear;
             } else {
                 newMonth += direction;
                 if (newMonth > 12) {
@@ -5322,9 +4978,7 @@ const calendarApp = createApp({
                 this.fetchCalendarEvents();
             }
         } else {
-            // Graphic mode: data already server-rendered, init popups immediately
-            this.initPopups();
-
+            // Graphic mode: data already server-rendered
             this.$nextTick(() => {
                 const showPastEventsBtn = document.getElementById('showPastEventsBtn');
                 const pastEvents = document.querySelectorAll('.past-event');
@@ -5343,11 +4997,6 @@ const calendarApp = createApp({
                 }
             });
         }
-
-        // Reinitialize popups when events change
-        this.$watch('filteredEvents', () => {
-            this.initPopups();
-        });
 
         // Handle browser back/forward for AJAX month navigation
         @if ($route === 'guest' && !request()->graphic)
@@ -5392,92 +5041,27 @@ const calendarApp = createApp({
     }
 });
 
+// How the month prints a name (role/partials/month-script).
+calendarApp.directive('clamp', window.monthClamp);
+
 if (typeof FileReader !== 'undefined') {
     calendarApp.config.globalProperties.FileReader = FileReader;
 }
 calendarApp.directive('list-reveal', listReveal);
-const calendarAppInstance = calendarApp.mount('#calendar-app');
+const calendarAppInstance = calendarApp.mount('#calendar-app[data-vue-root]');
 window.calendarVueApp = calendarAppInstance;
 
-// Update hero filters button visibility and badge (for GP/guest view)
+// The filter buttons in the schedule's header (role/partials/headers/tools): a badge on each
+// says how many filters are on. The buttons are drawn by the server and shown by the stylesheet.
 function updateHeroFiltersButton() {
-    const btn = document.getElementById('hero-filters-btn');
-    const badge = document.getElementById('hero-filters-badge');
-    const btnMobile = document.getElementById('hero-filters-btn-mobile');
-    const badgeMobile = document.getElementById('hero-filters-badge-mobile');
-    if (window.calendarVueApp) {
-        const showBtn = true;
-        const count = window.calendarVueApp.activeFilterCount;
-        const active = count > 0;
-
-        // Desktop hero button
-        if (btn) {
-            if (showBtn) {
-                btn.classList.add('md:flex');
-                btn.style.display = '';
-            } else {
-                btn.classList.remove('md:flex');
-                btn.style.display = 'none';
-            }
-            // Always filled with the schedule accent, matching the Follow button;
-            // the count badge is what signals active filters.
-            const accent = btn.dataset.accent;
-            const contrast = btn.dataset.contrast;
-            btn.style.borderColor = accent;
-            btn.style.backgroundColor = accent;
-            btn.style.color = contrast;
-        }
-        if (badge) {
-            if (active) {
-                badge.textContent = count;
-                // Legible inverse pill against the accent-filled button
-                if (btn) {
-                    badge.style.backgroundColor = btn.dataset.contrast;
-                    badge.style.color = btn.dataset.accent;
-                }
-                badge.classList.remove('hidden');
-                badge.classList.add('flex');
-            } else {
-                badge.classList.add('hidden');
-                badge.classList.remove('flex');
-            }
-        }
-
-        // Mobile hero button
-        if (btnMobile) {
-            if (showBtn) {
-                btnMobile.style.display = ''; // Let CSS classes control display (md:hidden)
-            } else {
-                btnMobile.style.display = 'none';
-            }
-            // Active = filled accent; inactive = fall back to default white/gray classes
-            const accentM = btnMobile.dataset.accent;
-            const contrastM = btnMobile.dataset.contrast;
-            if (active) {
-                btnMobile.style.backgroundColor = accentM;
-                btnMobile.style.color = contrastM;
-                btnMobile.style.borderColor = accentM;
-            } else {
-                btnMobile.style.backgroundColor = '';
-                btnMobile.style.color = '';
-                btnMobile.style.borderColor = '';
-            }
-        }
-        if (badgeMobile) {
-            if (active) {
-                badgeMobile.textContent = count;
-                if (btnMobile) {
-                    badgeMobile.style.backgroundColor = btnMobile.dataset.contrast;
-                    badgeMobile.style.color = btnMobile.dataset.accent;
-                }
-                badgeMobile.classList.remove('hidden');
-                badgeMobile.classList.add('inline-flex');
-            } else {
-                badgeMobile.classList.add('hidden');
-                badgeMobile.classList.remove('inline-flex');
-            }
-        }
-    }
+    if (! window.calendarVueApp) return;
+    const count = window.calendarVueApp.activeFilterCount;
+    ['hero-filters-badge', 'hero-filters-badge-mobile'].forEach((id) => {
+        const badge = document.getElementById(id);
+        if (! badge) return;
+        badge.textContent = count > 0 ? count : '';
+        badge.hidden = ! (count > 0);
+    });
 }
 
 // Initial update and watch for changes
@@ -5486,15 +5070,6 @@ calendarAppInstance.$watch('activeFilterCount', updateHeroFiltersButton);
 }
 </script>
 
-<script {!! nonce_attr() !!}>
-document.addEventListener('DOMContentLoaded', function() {
-    document.querySelectorAll('.calendar-day-navigate').forEach(function(el) {
-        el.addEventListener('click', function() {
-            window.location = this.getAttribute('data-href');
-        });
-    });
-});
-</script>
 {{-- v-pre is load-bearing, not decoration. This block sits INSIDE #calendar-app, and a browser
      with scripting on parses <noscript> as raw text and serializes it back verbatim into
      innerHTML - which is exactly what Vue's runtime compiler is handed. Vue does not treat

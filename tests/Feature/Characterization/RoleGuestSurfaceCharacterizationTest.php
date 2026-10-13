@@ -189,7 +189,9 @@ class RoleGuestSurfaceCharacterizationTest extends TestCase
         $role = $this->createRole($owner, 'venue');
         $fan = $this->createOwner();
 
-        $this->actingAs($fan)->get('/'.$role->subdomain.'/follow')->assertRedirect();
+        // Posted, as the Follow button does: since 2026-10 opening the address changes nothing
+        // (StateChangingAddressTest).
+        $this->actingAs($fan)->post('/'.$role->subdomain.'/follow')->assertRedirect();
 
         $this->assertDatabaseHas('role_user', [
             'role_id' => $role->id,
@@ -197,7 +199,7 @@ class RoleGuestSurfaceCharacterizationTest extends TestCase
             'level' => 'follower',
         ]);
 
-        $this->actingAs($fan)->get('/'.$role->subdomain.'/unfollow')->assertRedirect();
+        $this->actingAs($fan)->post('/'.$role->subdomain.'/unfollow')->assertRedirect();
 
         $this->assertDatabaseMissing('role_user', [
             'role_id' => $role->id,
@@ -210,7 +212,7 @@ class RoleGuestSurfaceCharacterizationTest extends TestCase
         $owner = $this->createOwner();
         $role = $this->createRole($owner, 'venue');
 
-        $response = $this->get('/'.$role->subdomain.'/follow');
+        $response = $this->post('/'.$role->subdomain.'/follow');
 
         $response->assertRedirect();
         $this->assertStringContainsString('/sign_up', $response->headers->get('Location'));
@@ -358,6 +360,29 @@ class RoleGuestSurfaceCharacterizationTest extends TestCase
         $this->get('/'.$role->subdomain.'/'.$event->slug.'?date[]=x')
             ->assertOk()
             ->assertSee('Array Date Event');
+    }
+
+    /**
+     * ?id[]=1 hands UrlUtils::decodeId() an array, which Sqids::decode() refused with a TypeError
+     * (Sentry EVENTSCHEDULE-PHP-4G). An id that cannot be one is no id: the page renders as it
+     * does without the parameter.
+     */
+    public function test_view_guest_survives_an_array_id_query_param(): void
+    {
+        $owner = $this->createOwner();
+        $role = $this->createRole($owner, 'venue', ['name' => 'Array Id Venue']);
+        $event = $this->createEvent($role, [
+            'name' => 'Array Id Event',
+            'creator_role_id' => $role->id,
+        ]);
+
+        $this->get('/'.$role->subdomain.'?id[]=1')
+            ->assertOk()
+            ->assertSee('Array Id Venue');
+
+        $this->get('/'.$role->subdomain.'/'.$event->slug.'?id[]=1')
+            ->assertOk()
+            ->assertSee('Array Id Event');
     }
 
     /**

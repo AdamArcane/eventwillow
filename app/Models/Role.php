@@ -1280,6 +1280,23 @@ class Role extends Model implements MustVerifyEmail
     }
 
     /**
+     * The events this schedule OWNS: made on it, or, for an event from before
+     * events.creator_role_id, first put on it. Narrower than events(), which is every event the
+     * schedule is linked to, a curator's listings and a venue's declined requests included.
+     * What a schedule does to "all its events" at once goes through this.
+     */
+    public function ownEvents()
+    {
+        return $this->events()->where(function ($query) {
+            $query->where('events.creator_role_id', $this->id)
+                ->orWhere(function ($query) {
+                    $query->whereNull('events.creator_role_id')
+                        ->whereRaw('event_role.id = (select min(first_link.id) from event_role as first_link where first_link.event_id = events.id)');
+                });
+        });
+    }
+
+    /**
      * Get non-owner members who have Google Calendar sync enabled
      */
     public function getMembersWithCalendarSync()
@@ -1287,7 +1304,8 @@ class Role extends Model implements MustVerifyEmail
         return $this->belongsToMany(User::class)
             ->withPivot('level', 'google_calendar_id')
             ->whereNotNull('role_user.google_calendar_id')
-            ->where('level', '!=', 'owner')
+            // Team members: a follower's row could carry a calendar until 2026-10.
+            ->whereNotIn('level', ['owner', 'follower'])
             ->get();
     }
 
@@ -1300,9 +1318,9 @@ class Role extends Model implements MustVerifyEmail
             ->filter(function ($user) use ($type) {
                 $settings = json_decode($user->pivot->notification_settings ?? '{}', true);
 
-                // new_request, installment_due and weekly_digest default to opt-in when the user
-                // has not explicitly set a preference (RoleController::edit() renders them on).
-                if (in_array($type, ['new_request', 'installment_due', 'weekly_digest'], true) && ! array_key_exists($type, $settings)) {
+                // new_request, installment_due, weekly_digest and feed default to opt-in when the
+                // user has not explicitly set a preference (RoleController::edit() renders them on).
+                if (in_array($type, ['new_request', 'installment_due', 'weekly_digest', 'feed'], true) && ! array_key_exists($type, $settings)) {
                     return true;
                 }
 
@@ -1315,7 +1333,7 @@ class Role extends Model implements MustVerifyEmail
      * NotifyFanContentChanges only ever mails the event's own creator, so there is no
      * schedule-level notice to copy.
      */
-    public const NOTIFICATION_EMAIL_TYPES = ['new_request', 'new_sale', 'new_feedback', 'new_poll_option', 'installment_due'];
+    public const NOTIFICATION_EMAIL_TYPES = ['new_request', 'new_sale', 'new_feedback', 'new_poll_option', 'installment_due', 'feed'];
 
     private const NOTIFICATION_EMAIL_DEFAULTS = [
         'new_request' => true,
@@ -1323,6 +1341,9 @@ class Role extends Model implements MustVerifyEmail
         'new_feedback' => false,
         'new_poll_option' => false,
         'installment_due' => false,
+        // What a feed needs somebody for (FeedNotifier): on, like requests, because nothing
+        // else tells a team that drafts are waiting or that a feed stopped being read.
+        'feed' => true,
     ];
 
     /**
@@ -2599,7 +2620,11 @@ class Role extends Model implements MustVerifyEmail
 
         // Unclaimed roles can be cleaned up by anyone who follows them.
         // Mirrors the rule already used in GeminiUtils for venue_is_editable.
-        return ! $this->isClaimed() && $user->isFollowing($this->subdomain);
+        //
+        // "Unclaimed" here has to mean that NOBODY runs it. isClaimed() also asks for a verified
+        // contact, and on hosted every change of email clears that stamp, so an owned schedule
+        // read as a placeholder: a follower could edit it and merge it away.
+        return ! $this->isClaimed() && ! $this->hasRealOwner() && $user->isFollowing($this->subdomain);
     }
 
     /**
@@ -2702,9 +2727,19 @@ class Role extends Model implements MustVerifyEmail
     public const BUILT_IN_HEADER_SIZE = [1536, 768];
 
     /**
+     * The header_image values that name no picture: 'none'; 'gradient', a wash of the accent
+     * colour across the top of the banner header (the owner's choice, drawn by the stylesheet);
+     * and 'logos', the logo wall. Any other value names a built-in header, a file under
+     * public/images/headers, and a blank one means the owner's own upload. Every place that
+     * turns header_image into a file's address asks this list first: a new value that is missing
+     * from it is requested as a picture that does not exist.
+     */
+    public const HEADER_IMAGE_KEYWORDS = ['none', 'gradient', 'logos'];
+
+    /**
      * The URL of the header this schedule shows, or null when it shows none.
      *
-     * Mirrors role/partials/headers/banner.blade.php: 'none' and 'logos' (the logo wall) are no
+     * Mirrors role/partials/headers/banner.blade.php: the values in HEADER_IMAGE_KEYWORDS are no
      * image; any other header_image names a built-in header, served as its bundled WebP; a blank
      * header_image with an upload in header_image_url is the owner's own header, which the edit
      * form's "custom" option saves.
@@ -2721,7 +2756,7 @@ class Role extends Model implements MustVerifyEmail
     {
         $builtIn = $this->header_image;
 
-        if (in_array($builtIn, ['none', 'logos'], true)) {
+        if (in_array($builtIn, self::HEADER_IMAGE_KEYWORDS, true)) {
             return null;
         }
 
@@ -4911,8 +4946,23 @@ class Role extends Model implements MustVerifyEmail
      */
     public function canCreateEvent(?User $actingUser = null): bool
     {
+        return $this->eventCreateAllowance($actingUser) !== 0;
+    }
+
+    /**
+     * How many more events may be created against this schedule today: what is left of the
+     * two caps canCreateEvent() describes, whichever is less. Null when neither applies
+     * (selfhost, where the limit helpers answer null), never below zero.
+     *
+     * canCreateEvent() is "this is not zero" and stays the gate saveEvent() checks. This is for
+     * a caller that creates many at once (a feed's first read) and has to stop while there is
+     * still room for the owner to add an event by hand, instead of finding the gate shut.
+     */
+    public function eventCreateAllowance(?User $actingUser = null): ?int
+    {
         $today = now()->toDateString();
         $operation = \App\Services\UsageTrackingService::EVENT_CREATE;
+        $left = null;
 
         $scheduleLimit = $this->eventCreateDailyLimit();
 
@@ -4922,9 +4972,7 @@ class Role extends Model implements MustVerifyEmail
                 ->where('operation', $operation)
                 ->sum('count');
 
-            if ($scheduleCount >= $scheduleLimit) {
-                return false;
-            }
+            $left = max(0, $scheduleLimit - $scheduleCount);
         }
 
         if ($actingUser) {
@@ -4939,14 +4987,13 @@ class Role extends Model implements MustVerifyEmail
                         ->where('operation', $operation)
                         ->sum('count');
 
-                    if ($userCount >= $userLimit) {
-                        return false;
-                    }
+                    $userLeft = max(0, $userLimit - $userCount);
+                    $left = is_null($left) ? $userLeft : min($left, $userLeft);
                 }
             }
         }
 
-        return true;
+        return $left;
     }
 
     /**
@@ -5125,6 +5172,12 @@ class Role extends Model implements MustVerifyEmail
         return $this->hasMany(\App\Models\Group::class);
     }
 
+    /** The addresses this schedule keeps reading for events. */
+    public function feeds()
+    {
+        return $this->hasMany(\App\Models\EventFeed::class);
+    }
+
     public function eventTemplates()
     {
         return $this->hasMany(\App\Models\EventTemplate::class)->orderByDesc('created_at');
@@ -5180,6 +5233,18 @@ class Role extends Model implements MustVerifyEmail
         }
 
         return (bool) ($field['filter'] ?? self::customFieldFilterDefault($type));
+    }
+
+    /**
+     * Whether a field's answer is printed on the public event page ("On event page").
+     *
+     * Off unless the owner ticked it, and an absent flag is off: until 2026-10 no page printed an
+     * answer, and a request form's answers are somebody else's words, so nothing a schedule
+     * already holds is published by this flag arriving. A private field never is.
+     */
+    public static function isEventCustomFieldOnEventPage(array $field): bool
+    {
+        return empty($field['private']) && ! empty($field['show_on_event']);
     }
 
     public function filterPublicCustomFieldValues(?array $values): array

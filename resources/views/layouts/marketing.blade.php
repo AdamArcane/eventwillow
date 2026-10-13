@@ -56,7 +56,7 @@
             // The blog by route name, as the breadcrumb does: on the blog host the index's path
             // is "/" (which read as the homepage) and a post's is its bare slug (which could match
             // an unrelated section, pricing-* reading as /pricing).
-            $pathSlug = request()->routeIs('blog.index', 'blog.show') ? 'blog' : (trim(request()->path(), '/') ?: 'home');
+            $pathSlug = request()->routeIs('blog.index', 'blog.category', 'blog.show') ? 'blog' : (trim(request()->path(), '/') ?: 'home');
             $pathSlug = str_replace('/', '-', $pathSlug);
             // Fall back from an exact page image to a section image (e.g. docs-getting-started -> docs), then home.
             $section = explode('-', $pathSlug)[0];
@@ -209,8 +209,15 @@
         // and the path-based /blog) use these names.
         if (request()->routeIs('blog.index')) {
             $breadcrumbs[] = ['name' => 'Blog', 'url' => blog_url()];
+        } elseif (request()->routeIs('blog.category')) {
+            $breadcrumbs[] = ['name' => 'Blog', 'url' => blog_url()];
+            $breadcrumbs[] = ['name' => $pageName, 'url' => $selfUrl];
         } elseif (request()->routeIs('blog.show')) {
             $breadcrumbs[] = ['name' => 'Blog', 'url' => blog_url()];
+            // The post's section, when the page names one (blog/show does).
+            if (isset($breadcrumbSection, $breadcrumbSectionUrl)) {
+                $breadcrumbs[] = ['name' => trim((string) $breadcrumbSection), 'url' => trim((string) $breadcrumbSectionUrl)];
+            }
             $breadcrumbs[] = ['name' => $pageName, 'url' => $selfUrl];
         } elseif ($path === 'docs') {
             $breadcrumbs[] = ['name' => 'Documentation', 'url' => $selfUrl];
@@ -269,6 +276,9 @@
     @include('partials.google-analytics')
 
     {{ $preload ?? '' }}
+    @if ($hp)
+        @include('marketing.partials.hp-head')
+    @endif
 
     @vite(array_merge([
         'resources/css/marketing-app.css',
@@ -324,7 +334,15 @@
          value makes it the containing block for `position: fixed`, so the guest
          CTA bar stays fixed (see CLAUDE.md on filter/transform and fixed). --}}
     <main id="main-content" class="[overflow-x:clip]">
-        {{ $slot }}
+        @if ($hp)
+            {{-- The house style (partials/hp-kit): everything it does is scoped to this element. --}}
+            <div id="hp">
+                @include('marketing.partials.hp-kit')
+                {{ $slot }}
+            </div>
+        @else
+            {{ $slot }}
+        @endif
     </main>
 
     @include('marketing.partials.footer')

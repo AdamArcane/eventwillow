@@ -28,6 +28,7 @@ use App\Utils\SponsorUtils;
 use App\Utils\UrlUtils;
 use Carbon\Carbon;
 use Illuminate\Database\QueryException;
+use Illuminate\Http\UploadedFile;
 use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Storage;
@@ -447,12 +448,182 @@ class EventRepo
     }
 
     /**
+     * Tell the outside that a PUBLISHED event was saved: the calendars its schedule is connected
+     * to, and whoever listens for event webhooks.
+     *
+     * The end of every save, and of a feed's update of an event it made (FeedEventWriter), which
+     * writes the model directly because a save reads everything a request does not carry as
+     * emptied.
+     *
+     * @param  bool  $isNewOrJustPublished  The outside has not seen this event before.
+     */
+    public function announceSave(Event $event, ?Role $currentRole, bool $isNewOrJustPublished): void
+    {
+        // A cancelled event has been taken off connected calendars (EventLifecycleService::
+        // cancel()), and the calendar jobs create the entry when they find no mapping for it:
+        // saving a cancelled event used to put it straight back. It returns when it is restored.
+        if (! $event->is_cancelled) {
+            // Sync to Google Calendar for the current role
+            if ($currentRole && $currentRole->syncsToGoogle()) {
+                if ($isNewOrJustPublished) {
+                    $event->syncToGoogleCalendar('create');
+                } else {
+                    $event->syncToGoogleCalendar('update');
+                }
+            } elseif ($currentRole) {
+                // Sync for members even when owner sync is not enabled
+                $memberAction = $isNewOrJustPublished ? 'create' : 'update';
+                foreach ($currentRole->getMembersWithCalendarSync() as $member) {
+                    if ($member->google_token) {
+                        SyncEventToGoogleCalendar::dispatchSync(
+                            $event, $currentRole, $memberAction, $member, $member->pivot->google_calendar_id
+                        );
+                    }
+                }
+            }
+
+            // Sync to Outlook / Microsoft calendar for the current role
+            if ($currentRole && $currentRole->syncsToMicrosoft()) {
+                if ($isNewOrJustPublished) {
+                    $event->syncToMicrosoftCalendar('create');
+                } else {
+                    $event->syncToMicrosoftCalendar('update');
+                }
+            }
+
+            // Sync to CalDAV for the current role
+            if ($currentRole && $currentRole->syncsToCalDAV()) {
+                if ($isNewOrJustPublished) {
+                    $event->syncToCalDAV('create');
+                } else {
+                    $event->syncToCalDAV('update');
+                }
+            }
+        }
+
+        // Dispatch webhook
+        WebhookService::dispatch(
+            $isNewOrJustPublished ? 'event.created' : 'event.updated',
+            $event
+        );
+    }
+
+    /**
+     * A venue schedule for a place no schedule stands for yet: unclaimed, with the look every
+     * new venue gets, in the country and language of the schedule it is made for.
+     *
+     * Only the row. Who follows it, and whether somebody claims it, is the caller's: saveEvent()
+     * decides that from the request, and a feed (FeedVenueResolver) has its own answer.
+     *
+     * @param  array{name?: ?string, name_en?: ?string, email?: ?string, phone?: ?string, address1?: ?string, address2?: ?string, city?: ?string, state?: ?string, postal_code?: ?string, country_code?: ?string, language_code?: ?string, website?: ?string}  $details
+     */
+    public function makeVenue(array $details, ?Role $for, ?string $timezone): Role
+    {
+        $countryCode = ($details['country_code'] ?? null) ?: $for?->country_code;
+
+        $venue = new Role;
+        $venue->name = $details['name'] ?? null;
+        $venue->name_en = $details['name_en'] ?? null;
+        $venue->email = $details['email'] ?? null;
+        $venue->phone = ($details['phone'] ?? null) ?: null;
+        $venue->subdomain = Role::generateSubdomain($details['name'] ?? null, $details['name_en'] ?? null);
+        $venue->type = 'venue';
+        $venue->address1 = $details['address1'] ?? null;
+        $venue->address2 = $details['address2'] ?? null;
+        $venue->city = $details['city'] ?? null;
+        $venue->state = $details['state'] ?? null;
+        $venue->postal_code = $details['postal_code'] ?? null;
+        $venue->country_code = $countryCode ? strtolower($countryCode) : null;
+        $venue->language_code = ($details['language_code'] ?? null) ?: $for?->language_code;
+        $venue->timezone = $timezone;
+        $venue->website = $details['website'] ?? null;
+        $venue->background_colors = ColorUtils::randomGradient();
+        $venue->background_rotation = rand(0, 359);
+        $venue->font_color = '#ffffff';
+        $venue->save();
+        $venue->refresh();
+
+        return $venue;
+    }
+
+    /**
+     * Make $file the event's flyer: checked, the flyer it replaces deleted, resized, stored, saved.
+     *
+     * One implementation for the three ways a flyer arrives as a file: the event form's upload,
+     * the API's upload endpoint, and a picture the API fetched from an address. The API's
+     * endpoint used to keep a copy of this that deleted the old flyer before it had checked the
+     * new one and never resized, so a 6000px poster sent that way was stored whole.
+     *
+     * The type is read from the name's extension AND from the bytes: either alone is whatever
+     * the sender says.
+     *
+     * @throws ValidationException
+     */
+    public function storeFlyer(Event $event, UploadedFile $file): void
+    {
+        $allowedExtensions = ['jpg', 'jpeg', 'png', 'gif', 'webp'];
+        $allowedMimeTypes = ['image/jpeg', 'image/png', 'image/gif', 'image/webp'];
+        $extension = strtolower($file->getClientOriginalExtension());
+        if (! in_array($extension, $allowedExtensions) || ! in_array($file->getMimeType(), $allowedMimeTypes)) {
+            throw ValidationException::withMessages([
+                'flyer_image' => 'Invalid file type. Allowed: jpg, jpeg, png, gif, webp',
+            ]);
+        }
+
+        $this->deleteFlyerFile($event);
+
+        // Resize oversized flyers before storage. Graphic generation
+        // decodes these via GD, which OOMs on multi-megapixel images on
+        // small PHP-FPM workers (e.g. DigitalOcean App Platform's 128MB
+        // cap). We resize the temp file in place so storeAs() uploads
+        // the smaller version, which works for both local and S3 disks.
+        // An animated flyer is stored whole, since a re-encode keeps one
+        // frame; graphic generation budgets that decode itself
+        // (AbstractEventDesign::safeImageCreateFromString()).
+        ImageUtils::resizeImageToMax($file->getRealPath(), 2000);
+
+        $filename = strtolower('flyer_'.Str::random(32).'.'.$extension);
+        $file->storeAs(config('filesystems.default') == 'local' ? '/public' : '/', $filename);
+
+        $event->flyer_image_url = $filename;
+        $event->save();
+    }
+
+    /** Take the flyer off an event. The model's saving hook removes its resized copies. */
+    public function removeFlyer(Event $event): void
+    {
+        if (! ($event->getAttributes()['flyer_image_url'] ?? null)) {
+            return;
+        }
+
+        $this->deleteFlyerFile($event);
+
+        $event->flyer_image_url = null;
+        $event->save();
+    }
+
+    private function deleteFlyerFile(Event $event): void
+    {
+        $path = $event->getAttributes()['flyer_image_url'] ?? null;
+
+        if (! $path) {
+            return;
+        }
+
+        if (config('filesystems.default') == 'local') {
+            $path = 'public/'.$path;
+        }
+
+        Storage::delete($path);
+    }
+
+    /**
      * $allowExistingVenueClaim lets this caller honour "I manage this venue" for a venue that
      * ALREADY EXISTS (ownerless ones only - see claimVenueOwnership()). It is a capability the
      * caller grants explicitly, and it defaults to false, because there is nothing about the
      * request itself that can tell the two cases apart safely - see the gate below.
      */
-    public function saveEvent($currentRole, $request, $event = null, $followNewRoles = true, ?string $timezoneOverride = null, bool $allowExistingVenueClaim = false, ?string $importSource = null, ?string $importBatch = null)
+    public function saveEvent($currentRole, $request, $event = null, $followNewRoles = true, ?string $timezoneOverride = null, bool $allowExistingVenueClaim = false, ?string $importSource = null, ?string $importBatch = null, ?string $externalId = null, ?UploadedFile $flyer = null)
     {
         $this->aiImageRejected = false;
 
@@ -587,29 +758,20 @@ class EventRepo
                 // its details. Save the event without a venue rather than resurrecting the row
                 // the user just got rid of - the venue_* fields here are a stale echo of it.
             } elseif (! $venue) {
-                $venue = new Role;
-                $venue->name = $request->venue_name ?? null;
-                $venue->name_en = $request->venue_name_en ?? null;
-                $venue->email = $request->venue_email ?? null;
-                $venue->phone = $request->venue_phone ?: null;
-                $venue->subdomain = Role::generateSubdomain($request->venue_name, $request->venue_name_en);
-                $venue->type = 'venue';
-                $venue->name = $request->venue_name ?? null;
-                $venue->address1 = $request->venue_address1;
-                $venue->address2 = $request->venue_address2;
-                $venue->city = $request->venue_city;
-                $venue->state = $request->venue_state;
-                $venue->postal_code = $request->venue_postal_code;
-                $countryCode = $request->venue_country_code ? $request->venue_country_code : $currentRole->country_code;
-                $venue->country_code = $countryCode ? strtolower($countryCode) : null;
-                $venue->language_code = $request->venue_language_code ? $request->venue_language_code : $currentRole->language_code;
-                $venue->timezone = $captureTimezone;
-                $venue->website = $request->venue_website;
-                $venue->background_colors = ColorUtils::randomGradient();
-                $venue->background_rotation = rand(0, 359);
-                $venue->font_color = '#ffffff';
-                $venue->save();
-                $venue->refresh();
+                $venue = $this->makeVenue([
+                    'name' => $request->venue_name,
+                    'name_en' => $request->venue_name_en,
+                    'email' => $request->venue_email,
+                    'phone' => $request->venue_phone,
+                    'address1' => $request->venue_address1,
+                    'address2' => $request->venue_address2,
+                    'city' => $request->venue_city,
+                    'state' => $request->venue_state,
+                    'postal_code' => $request->venue_postal_code,
+                    'country_code' => $request->venue_country_code,
+                    'language_code' => $request->venue_language_code,
+                    'website' => $request->venue_website,
+                ], $currentRole, $captureTimezone);
 
                 // Authenticated user explicitly claimed ownership via the AI import checkbox.
                 // Wins over the email/phone auto-match below.
@@ -866,6 +1028,13 @@ class EventRepo
             if (in_array($importSource, Event::IMPORT_SOURCES, true)) {
                 $event->import_source = $importSource;
                 $event->import_batch = $importBatch;
+            }
+            // The id the caller's own system knows this event by. Here rather than after the
+            // save, so that the event.created webhook built further down already carries it.
+            // Like the two above it is only mentioned when there is one: a new row that names
+            // the column would fail on an install that has not run the migration yet.
+            if ($externalId !== null && $externalId !== '') {
+                $event->external_id = $externalId;
             }
         }
 
@@ -1680,42 +1849,13 @@ class EventRepo
 
         $this->restoreAutoSourcedPivots($event, $pivotBefore);
 
-        if ($request->hasFile('flyer_image')) {
-            $file = $request->file('flyer_image');
+        // A flyer the caller hands over as a file of its own (the API, for a picture it fetched
+        // from an address) stands where an uploaded one would, and outranks the two below
+        // exactly as an upload does.
+        $flyerFile = $flyer ?? ($request->hasFile('flyer_image') ? $request->file('flyer_image') : null);
 
-            // Validate file extension and MIME type
-            $allowedExtensions = ['jpg', 'jpeg', 'png', 'gif', 'webp'];
-            $allowedMimeTypes = ['image/jpeg', 'image/png', 'image/gif', 'image/webp'];
-            $extension = strtolower($file->getClientOriginalExtension());
-            if (! in_array($extension, $allowedExtensions) || ! in_array($file->getMimeType(), $allowedMimeTypes)) {
-                throw ValidationException::withMessages([
-                    'flyer_image' => 'Invalid file type. Allowed: jpg, jpeg, png, gif, webp',
-                ]);
-            }
-
-            if ($event->flyer_image_url) {
-                $path = $event->getAttributes()['flyer_image_url'];
-                if (config('filesystems.default') == 'local') {
-                    $path = 'public/'.$path;
-                }
-                Storage::delete($path);
-            }
-
-            // Resize oversized flyers before storage. Graphic generation
-            // decodes these via GD, which OOMs on multi-megapixel images on
-            // small PHP-FPM workers (e.g. DigitalOcean App Platform's 128MB
-            // cap). We resize the temp file in place so storeAs() uploads
-            // the smaller version, which works for both local and S3 disks.
-            // An animated flyer is stored whole, since a re-encode keeps one
-            // frame; graphic generation budgets that decode itself
-            // (AbstractEventDesign::safeImageCreateFromString()).
-            ImageUtils::resizeImageToMax($file->getRealPath(), 2000);
-
-            $filename = strtolower('flyer_'.Str::random(32).'.'.$extension);
-            $path = $file->storeAs(config('filesystems.default') == 'local' ? '/public' : '/', $filename);
-
-            $event->flyer_image_url = $filename;
-            $event->save();
+        if ($flyerFile) {
+            $this->storeFlyer($event, $flyerFile);
         }
 
         // The name EventController::generateFlyer() wrote, posted back by the form. It is stored and
@@ -1723,7 +1863,7 @@ class EventRepo
         // is saved under (AiImageIssuance). The shape check alone accepted any PNG flyer, which an
         // uploaded one is too, and refused every AI flyer saved as a JPEG or WebP. Anything else is
         // ignored and deletes nothing; the name already stored is the same form posted again.
-        if (! $request->hasFile('flyer_image') && $request->input('ai_flyer_image')) {
+        if (! $flyerFile && $request->input('ai_flyer_image')) {
             $aiFilename = $request->input('ai_flyer_image');
 
             if ($aiFilename !== ($event->getAttributes()['flyer_image_url'] ?? null)) {
@@ -1757,7 +1897,7 @@ class EventRepo
         // Read + re-write (not Storage::copy) so the destination inherits the disk's default
         // public visibility - the same write path as a normal upload. Storage::copy() would
         // instead retain the source ACL, which is unreliable on S3/Spaces and could 403.
-        if (! $request->hasFile('flyer_image') && ! $request->input('ai_flyer_image') && $request->input('clone_flyer_image')) {
+        if (! $flyerFile && ! $request->input('ai_flyer_image') && $request->input('clone_flyer_image')) {
             $cloneFilename = $request->input('clone_flyer_image');
             if (is_string($cloneFilename) && preg_match('/^flyer_[a-z0-9]+\.(jpg|jpeg|png|gif|webp)$/', $cloneFilename)) {
                 $sourcePath = config('filesystems.default') == 'local' ? 'public/'.$cloneFilename : $cloneFilename;
@@ -2408,48 +2548,7 @@ class EventRepo
         if (! $event->is_draft) {
             $isNewOrJustPublished = $event->wasRecentlyCreated || $wasDraftBeforeSave;
 
-            // Sync to Google Calendar for the current role
-            if ($currentRole && $currentRole->syncsToGoogle()) {
-                if ($isNewOrJustPublished) {
-                    $event->syncToGoogleCalendar('create');
-                } else {
-                    $event->syncToGoogleCalendar('update');
-                }
-            } elseif ($currentRole) {
-                // Sync for members even when owner sync is not enabled
-                $memberAction = $isNewOrJustPublished ? 'create' : 'update';
-                foreach ($currentRole->getMembersWithCalendarSync() as $member) {
-                    if ($member->google_token) {
-                        SyncEventToGoogleCalendar::dispatchSync(
-                            $event, $currentRole, $memberAction, $member, $member->pivot->google_calendar_id
-                        );
-                    }
-                }
-            }
-
-            // Sync to Outlook / Microsoft calendar for the current role
-            if ($currentRole && $currentRole->syncsToMicrosoft()) {
-                if ($isNewOrJustPublished) {
-                    $event->syncToMicrosoftCalendar('create');
-                } else {
-                    $event->syncToMicrosoftCalendar('update');
-                }
-            }
-
-            // Sync to CalDAV for the current role
-            if ($currentRole && $currentRole->syncsToCalDAV()) {
-                if ($isNewOrJustPublished) {
-                    $event->syncToCalDAV('create');
-                } else {
-                    $event->syncToCalDAV('update');
-                }
-            }
-
-            // Dispatch webhook
-            WebhookService::dispatch(
-                $isNewOrJustPublished ? 'event.created' : 'event.updated',
-                $event
-            );
+            $this->announceSave($event, $currentRole, $isNewOrJustPublished);
         } elseif ($wasJustUnpublished) {
             // Remove from external calendars when un-publishing
             if ($currentRole && $currentRole->syncsToGoogle()) {
@@ -2896,9 +2995,13 @@ class EventRepo
      * Dates are in each event's schedule timezone (Event::scheduleTimezone()), like every other
      * occurrence date.
      *
+     * $seriesHorizonDays is how far ahead a series' next occurrence may be. The page keeps to 60: a
+     * newsletter asks for a year, because it announces a weekly night months before its first date
+     * as readily as it does a one-off, which has no horizon here at all.
+     *
      * @return \Illuminate\Support\Collection<int, array{event: Event, date: string}>
      */
-    public function upcomingForGuest(Role $role, ?\App\Models\Group $group = null, int $limit = 50): \Illuminate\Support\Collection
+    public function upcomingForGuest(Role $role, ?\App\Models\Group $group = null, int $limit = 50, int $seriesHorizonDays = 60): \Illuminate\Support\Collection
     {
         $base = fn () => Event::query()
             ->where('events.is_draft', false)
@@ -2951,7 +3054,7 @@ class EventRepo
             $series = collect();
         }
 
-        $seriesDates = $this->upcomingSeriesDates($role, $group, $series);
+        $seriesDates = $this->upcomingSeriesDates($role, $group, $series, $seriesHorizonDays);
 
         $series = $series
             ->map(fn (Event $event) => ['event' => $event, 'date' => $seriesDates[$event->id] ?? null])
@@ -2977,7 +3080,7 @@ class EventRepo
      * @param  \Illuminate\Support\Collection<int, Event>  $series
      * @return array<int, ?string>
      */
-    private function upcomingSeriesDates(Role $role, ?\App\Models\Group $group, \Illuminate\Support\Collection $series): array
+    private function upcomingSeriesDates(Role $role, ?\App\Models\Group $group, \Illuminate\Support\Collection $series, int $horizonDays = 60): array
     {
         if ($series->isEmpty()) {
             return [];
@@ -2987,25 +3090,28 @@ class EventRepo
             ->map(fn (Event $event) => $event->id.'@'.$event->updated_at?->getTimestamp())
             ->implode(',');
         $today = Carbon::now($role->timezone ?: config('app.timezone'))->format('Y-m-d');
-        $key = 'guest_upcoming_series:'.$role->id.':'.($group?->id ?? 0).':'.$today.':'.md5($fingerprint);
+        // The horizon is part of the key: the page's 60 days must never be answered from a
+        // newsletter's year, or the other way round.
+        $key = 'guest_upcoming_series:'.$role->id.':'.($group?->id ?? 0).':'.$today.':'.$horizonDays.':'.md5($fingerprint);
 
         return Cache::remember($key, self::UPCOMING_CACHE_SECONDS, fn () => $series
-            ->mapWithKeys(fn (Event $event) => [$event->id => $this->nextOccurrenceOrNull($event)])
+            ->mapWithKeys(fn (Event $event) => [$event->id => $this->nextOccurrenceOrNull($event, $horizonDays)])
             ->all());
     }
 
     /**
-     * nextOccurrenceFrom() within 60 days, or null when the series' recurrence cannot be read.
+     * nextOccurrenceFrom() within $days (60 for the page), or null when the series' recurrence
+     * cannot be read.
      *
      * matchesDate() trusts what saveEvent() writes, and a restored backup never went through it:
      * an on_date end or an exclude date that is not a date, an every_n_weeks interval of 0 (a
      * modulo by zero) and a days_of_week shorter than seven characters all throw. One such series
      * is reported and left out, rather than taking the schedule page down with it.
      */
-    private function nextOccurrenceOrNull(Event $event): ?string
+    private function nextOccurrenceOrNull(Event $event, int $days = 60): ?string
     {
         try {
-            return $event->nextOccurrenceFrom(null, 60);
+            return $event->nextOccurrenceFrom(null, $days);
         } catch (\Throwable $e) {
             report($e);
 

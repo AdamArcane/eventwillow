@@ -5,7 +5,7 @@
     @endphp
 
     <x-slot name="title">REST API for AI Agents & Developers - Event Schedule</x-slot>
-    <x-slot name="description">27 REST endpoints, an OpenAPI 3.0 spec, llms.txt and agents.json. One POST creates an event with its tickets; one PUT refunds a sale.</x-slot>
+    <x-slot name="description">29 REST endpoints, an OpenAPI 3.0 spec, llms.txt and agents.json. One POST creates an event with its tickets; one PUT refunds a sale.</x-slot>
     <x-slot name="breadcrumbTitle">For AI Agents</x-slot>
 
     <x-slot name="structuredData">
@@ -797,11 +797,13 @@
                 ['DELETE', '/api/schedules/{subdomain}/groups/{group_id}', 'Events survive; their sub-schedule reference is cleared.'],
             ]],
             ['Events', 'The big one. Tickets, agenda parts, members and recurrence all ride along.', [
-                ['GET', '/api/events', 'Paginated, newest first. Ten filters, including tickets_enabled and rsvp_enabled.'],
+                ['GET', '/api/events', 'Paginated, newest first. Twelve filters, including tickets_enabled, is_cancelled and your own external_id.'],
                 ['GET', '/api/events/{id}', 'One event with its tickets, members and agenda parts.'],
-                ['POST', '/api/events/{subdomain}', 'Create an event on a schedule. Carries its own 30-per-minute throttle.'],
+                ['POST', '/api/events/{subdomain}', 'Create an event on a schedule, or with an external_id and upsert, update the one you made last time. Carries its own 30-per-minute throttle.'],
                 ['PUT', '/api/events/{id}', 'Partial update. Recurrence, tickets and agenda parts survive being omitted.'],
                 ['DELETE', '/api/events/{id}', 'Delete it, and withdraw it from any synced calendar.'],
+                ['POST', '/api/events/{id}/cancel', 'Call it off and keep its sales. Optionally email the people registered, with a note.'],
+                ['POST', '/api/events/{id}/restore', 'Undo a cancellation. Nobody is emailed.'],
                 ['POST', '/api/events/flyer/{event_id}', 'Multipart upload of a flyer_image for an existing event.'],
             ]],
             ['Categories', 'Read-only lookups so you can send a category_id you know exists.', [
@@ -1111,13 +1113,13 @@ HTML,
                             <span class="ax-type ax-type-2">show is <span class="ax-em">on sale.</span><span class="ax-caret" aria-hidden="true"></span></span>
                         </h1>
                         <div class="ax-cta es-fade-up es-d-3">
-                            <a href="{{ route('marketing.docs.developer.api') }}" class="ax-btn">
-                                Read the API reference
-                                {!! $axArrow !!}
-                            </a>
                             <a href="#ledger" class="ax-btn ax-btn-alt">
                                 See all {{ $endpointCount }} endpoints
                                 <i aria-hidden="true">&darr;</i>
+                            </a>
+                            <a href="{{ route('marketing.docs.developer.api') }}" class="ax-btn">
+                                Read the API reference
+                                {!! $axArrow !!}
                             </a>
                         </div>
                     </div>
@@ -1125,7 +1127,7 @@ HTML,
                     <div class="ax-hero-desc">
                         <span class="ax-name" aria-hidden="true">DESCRIPTION</span>
                         <p class="ax-prose es-fade-up es-d-2">
-                            {{ $endpointCount }} REST endpoints over the whole product: three to get a key, then twenty-four behind it covering schedules, sub-schedules, events, recurrences, ticket types, sales and refunds, feedback and fan content. JSON in, JSON out, one header.
+                            {{ $endpointCount }} REST endpoints over the whole product: three to get a key, then twenty-six behind it covering schedules, sub-schedules, events, recurrences, ticket types, sales and refunds, feedback and fan content. JSON in, JSON out, one header.
                         </p>
                         <p class="ax-prose es-fade-up es-d-2">
                             An OpenAPI 3.0 spec, <span class="ax-k">llms.txt</span> and <span class="ax-k">agents.json</span> ship with it, so an agent can discover this API and drive it without a human reading the docs first.
@@ -1381,7 +1383,7 @@ HTML,
                                     </div>
                                 </div>
                                 <p class="ax-call-note" data-reveal>
-                                    Ten filters on the events list, including whether tickets or RSVP are switched on, a venue, a sub-schedule and a date window. You narrow server-side rather than pulling a year and filtering in the agent.
+                                    Twelve filters on the events list, including whether tickets or RSVP are switched on, whether an event is cancelled, a venue, a sub-schedule, a date window and the id your own system gave the event. You narrow server-side rather than pulling a year and filtering in the agent.
                                 </p>
                             </div>
 
@@ -1545,9 +1547,9 @@ HTML,
                             <div class="ax-note-tags">
                                 <span class="ax-tag ax-tag-pro">pro</span>
                             </div>
-                            <h3>Flyers, as a second call</h3>
+                            <h3>Flyers, by address or as a file</h3>
                             <p>
-                                Artwork is multipart, so it gets its own request. Create the event, then POST a <span class="ax-k">flyer_image</span> to the flyer endpoint with the returned ID.
+                                Send a <span class="ax-k">flyer_image_url</span> with the event and the picture is fetched and stored with it, in the same call. A file of your own is multipart, so it gets its own request: POST a <span class="ax-k">flyer_image</span> to the flyer endpoint with the returned ID.
                             </p>
                             <div class="ax-box">
 <pre class="ax-code" dir="ltr" data-clip-ok>{!! $axPre['flyer'] !!}</pre>
@@ -1728,6 +1730,7 @@ HTML,
                             $axFeatures = [
                                 ['Ticketing', 'Ticket types, QR check-in and zero platform fees', marketing_url('/features/ticketing')],
                                 ['Calendar Sync', 'Two-way Google, Outlook and CalDAV sync on every plan', marketing_url('/features/calendar-sync')],
+                                ['Integrations', 'Every port in and out, with the plan each one needs', marketing_url('/features/integrations')],
                                 ['Embed Calendar', 'Put the schedule on the site you already run', marketing_url('/features/embed-calendar')],
                                 ['Analytics', 'Page views, devices and traffic sources, free on every plan', marketing_url('/features/analytics')],
                             ];
@@ -1837,7 +1840,7 @@ HTML,
                                     <span class="ax-host">.eventschedule.com</span>
                                 </div>
                                 <a href="{{ app_url('/sign_up') }}" class="ax-btn">
-                                    Get started free
+                                    Start for free
                                     <kbd aria-hidden="true">&crarr;</kbd>
                                 </a>
                             </div>
@@ -1876,7 +1879,6 @@ HTML,
         </section>
 
         <div class="ax-keep">
-            <x-marketing.related-pages />
         </div>
     </div>
 
