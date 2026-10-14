@@ -2828,7 +2828,7 @@ return [
     'verification_code_sent_to_phone' => 'Er is een verificatiecode naar uw telefoon verzonden',
     'phone_verification_code_invalid' => 'De verificatiecode is ongeldig of verlopen',
     'phone_required_for_boost' => 'Een geverifieerd telefoonnummer is vereist om Boost te gebruiken. Verifieer uw telefoonnummer in uw profielinstellingen.',
-    'your_verification_code_is' => 'Je EventWillow-verificatiecode is: :code',
+    'your_verification_code_is' => 'Je EventWillow-verificatiecode is: :code. Deel deze code niet. Antwoord STOP om je af te melden.',
     'phone_verify_sms_disclosure' => 'Door een verificatiecode aan te vragen, ga je ermee akkoord eenmalig een sms te ontvangen van EventWillow (Arcane Technology Solutions, LLC) op dit nummer. Er kunnen kosten voor berichten en data in rekening worden gebracht. Maximaal 5 berichten per uur. Antwoord HELP voor hulp of STOP om je af te melden. Zie :terms en :privacy.',
     'failed_to_send_sms' => 'Het versturen van de sms is mislukt. Probeer het later opnieuw.',
     'verify' => 'Verifiëren',

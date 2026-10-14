@@ -2842,7 +2842,7 @@ return [
     'verification_code_sent_to_phone' => 'Un cod de verificare a fost trimis pe telefonul dumneavoastră',
     'phone_verification_code_invalid' => 'Codul de verificare este invalid sau a expirat',
     'phone_required_for_boost' => 'Un număr de telefon verificat este necesar pentru a folosi Promovarea. Vă rugăm verificați-vă numărul de telefon în setările profilului.',
-    'your_verification_code_is' => 'Codul tău de verificare EventWillow este: :code',
+    'your_verification_code_is' => 'Codul tău de verificare EventWillow este: :code. Nu distribui acest cod. Răspunde STOP pentru dezabonare.',
     'phone_verify_sms_disclosure' => 'Prin solicitarea unui cod de verificare, ești de acord să primești un mesaj text unic de la EventWillow (Arcane Technology Solutions, LLC) pe acest număr. Se pot aplica tarife pentru mesaje și date. Cel mult 5 mesaje pe oră. Răspunde HELP pentru ajutor sau STOP pentru dezabonare. Consultă :terms și :privacy.',
     'failed_to_send_sms' => 'Trimiterea SMS-ului a eșuat. Vă rugăm încercați mai târziu.',
     'verify' => 'Verifică',

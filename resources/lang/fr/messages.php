@@ -2829,7 +2829,7 @@ return [
     'verification_code_sent_to_phone' => 'Un code de vérification a été envoyé sur votre téléphone',
     'phone_verification_code_invalid' => 'Le code de vérification est invalide ou expiré',
     'phone_required_for_boost' => 'Un numéro de téléphone vérifié est requis pour utiliser Boost. Veuillez vérifier votre numéro de téléphone dans les paramètres de votre profil.',
-    'your_verification_code_is' => 'Votre code de vérification EventWillow est : :code',
+    'your_verification_code_is' => 'Votre code de vérification EventWillow est : :code. Ne partagez pas ce code. Répondez STOP pour vous désabonner.',
     'phone_verify_sms_disclosure' => 'En demandant un code de vérification, vous acceptez de recevoir un SMS unique envoyé par EventWillow (Arcane Technology Solutions, LLC) à ce numéro. Des frais de messages et de données peuvent s\'appliquer. Jusqu\'à 5 messages par heure. Répondez HELP pour obtenir de l\'aide ou STOP pour vous désabonner. Consultez :terms et :privacy.',
     'failed_to_send_sms' => 'Échec de l\'envoi du SMS. Veuillez réessayer plus tard.',
     'verify' => 'Vérifier',

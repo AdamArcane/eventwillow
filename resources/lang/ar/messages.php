@@ -2890,7 +2890,7 @@ return [
     'verification_code_sent_to_phone' => 'تم إرسال رمز التحقق إلى هاتفك',
     'phone_verification_code_invalid' => 'رمز التحقق غير صالح أو منتهي الصلاحية',
     'phone_required_for_boost' => 'يلزم رقم هاتف مُتحقق منه لاستخدام التعزيز. يرجى التحقق من رقم هاتفك في إعدادات ملفك الشخصي.',
-    'your_verification_code_is' => 'رمز التحقق الخاص بك في EventWillow هو: :code',
+    'your_verification_code_is' => 'رمز التحقق الخاص بك في EventWillow هو: :code. لا تشارك هذا الرمز. أرسل STOP لإلغاء الاشتراك.',
     'phone_verify_sms_disclosure' => 'بطلبك رمز التحقق، فإنك توافق على تلقي رسالة نصية لمرة واحدة من EventWillow (Arcane Technology Solutions, LLC) على هذا الرقم. قد تُطبَّق رسوم الرسائل والبيانات. بحد أقصى 5 رسائل في الساعة. أرسل HELP للمساعدة أو STOP لإلغاء الاشتراك. اطّلع على :terms و:privacy.',
     'failed_to_send_sms' => 'فشل إرسال الرسالة النصية. يرجى المحاولة مرة أخرى لاحقًا.',
     'verify' => 'تحقق',

@@ -2885,7 +2885,7 @@ return [
     'verification_code_sent_to_phone' => 'קוד אימות נשלח לטלפון שלך',
     'phone_verification_code_invalid' => 'קוד האימות אינו תקף או שפג תוקפו',
     'phone_required_for_boost' => 'נדרש מספר טלפון מאומת לשימוש בהגברה. אנא אמת את מספר הטלפון שלך בהגדרות הפרופיל.',
-    'your_verification_code_is' => 'קוד האימות שלך ב-EventWillow הוא: :code',
+    'your_verification_code_is' => 'קוד האימות שלך ב-EventWillow הוא: :code. אל תשתף את הקוד הזה. השב STOP להפסקת קבלת הודעות.',
     'phone_verify_sms_disclosure' => 'בבקשת קוד אימות, אתה מסכים לקבל הודעת טקסט חד-פעמית מ-EventWillow (Arcane Technology Solutions, LLC) למספר זה. ייתכנו חיובים עבור הודעות ונתונים. עד 5 הודעות בשעה. השב HELP לעזרה או STOP להפסקת קבלת הודעות. ראה :terms ו-:privacy.',
     'failed_to_send_sms' => 'שליחת ה-SMS נכשלה. אנא נסה שוב מאוחר יותר.',
     'verify' => 'אמת',

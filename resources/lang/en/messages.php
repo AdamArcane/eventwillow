@@ -3179,7 +3179,7 @@ return [
     'verification_code_sent_to_phone' => 'A verification code has been sent to your phone',
     'phone_verification_code_invalid' => 'The verification code is invalid or expired',
     'phone_required_for_boost' => 'A verified phone number is required to use Boost. Please verify your phone number in your profile settings.',
-    'your_verification_code_is' => 'Your EventWillow verification code is: :code',
+    'your_verification_code_is' => 'Your EventWillow verification code is: :code. Do not share this code. Reply STOP to opt out.',
     'phone_verify_sms_disclosure' => 'By requesting a verification code, you agree to receive a one-time text message from EventWillow (Arcane Technology Solutions, LLC) at this number. Msg & data rates may apply. Up to 5 messages per hour. Reply HELP for help or STOP to opt out. See our :terms and :privacy.',
     'failed_to_send_sms' => 'Failed to send SMS. Please try again later.',
     'verify' => 'Verify',

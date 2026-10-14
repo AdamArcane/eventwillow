@@ -2825,7 +2825,7 @@ return [
     'verification_code_sent_to_phone' => 'Kinnituskood on saadetud teie telefonile',
     'phone_verification_code_invalid' => 'Kinnituskood on kehtetu või aegunud',
     'phone_required_for_boost' => 'Boost\'i kasutamiseks on vajalik kinnitatud telefoninumber. Palun kinnitage oma telefoninumber profiiliseadetes.',
-    'your_verification_code_is' => 'Teie EventWillow kinnituskood on: :code',
+    'your_verification_code_is' => 'Teie EventWillow kinnituskood on: :code. Ärge jagage seda koodi. Loobumiseks vastake STOP.',
     'phone_verify_sms_disclosure' => 'Kinnituskoodi taotledes nõustute saama sellel numbril EventWillow\'lt (Arcane Technology Solutions, LLC) ühekordse tekstisõnumi. Võidakse rakendada sõnumi- ja andmetasusid. Kuni 5 sõnumit tunnis. Abi saamiseks vastake HELP, loobumiseks STOP. Vt :terms ja :privacy.',
     'failed_to_send_sms' => 'SMS-i saatmine ebaõnnestus. Palun proovige hiljem uuesti.',
     'verify' => 'Kinnita',

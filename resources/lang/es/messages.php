@@ -2828,7 +2828,7 @@ return [
     'verification_code_sent_to_phone' => 'Se ha enviado un código de verificación a tu teléfono',
     'phone_verification_code_invalid' => 'El código de verificación es inválido o ha expirado',
     'phone_required_for_boost' => 'Se requiere un número de teléfono verificado para usar Boost. Por favor, verifica tu número de teléfono en la configuración de tu perfil.',
-    'your_verification_code_is' => 'Tu código de verificación de EventWillow es: :code',
+    'your_verification_code_is' => 'Tu código de verificación de EventWillow es: :code. No compartas este código. Responde STOP para cancelar.',
     'phone_verify_sms_disclosure' => 'Al solicitar un código de verificación, aceptas recibir un mensaje de texto único de EventWillow (Arcane Technology Solutions, LLC) en este número. Pueden aplicarse tarifas de mensajes y datos. Hasta 5 mensajes por hora. Responde HELP para obtener ayuda o STOP para cancelar. Consulta :terms y :privacy.',
     'failed_to_send_sms' => 'No se pudo enviar el SMS. Inténtalo de nuevo más tarde.',
     'verify' => 'Verificar',
