@@ -24,6 +24,13 @@ class SiteApiTest extends TestCase {
         $role->accent_color = 'invalid';
         $this->assertSame('#4E81FA', Serializer::channel($role)['accent_color']);
     }
+    public function test_event_description_exposes_the_sanitized_markdown_html_for_site_rendering(): void {
+        [$role, $event, $id] = $this->fixture(['description' => "## Lineup\n\n**The Willow Trio**"]);
+        $event->refresh();
+        $this->getJson($this->prefix.'events/'.$id)->assertOk()
+            ->assertJsonPath('data.description', "## Lineup\n\n**The Willow Trio**")
+            ->assertJsonPath('data.description_html', '<h2 id="lineup">Lineup</h2>\n<p><strong>The Willow Trio</strong></p>\n');
+    }
     protected function setUp(): void {
         parent::setUp();
         config(['eventwillow-public.enforce_ip_allowlist'=>true, 'eventwillow-public.site_key'=>'fixture-site-key','eventwillow-public.allowed_ips'=>['127.0.0.1'], 'eventwillow-public.trusted_proxy_ips'=>[], 'app.search_exclude_country'=>'']);

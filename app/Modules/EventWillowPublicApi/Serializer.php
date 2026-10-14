@@ -99,7 +99,9 @@ final class Serializer
         return [
             'id' => UrlUtils::encodeId($event->id), 'key' => UrlUtils::encodeId($event->id).':'.$date,
             'slug' => \Illuminate\Support\Str::slug($event->name), 'name' => $event->name,
-            'description' => strip_tags($event->description ?? ''),
+            // Keep plain text for search, cards and native text controls. The HTML is rendered
+            // from the same Markdown at save time and already passes through HTMLPurifier.
+            'description' => strip_tags($event->description ?? ''), 'description_html' => $event->description_html ?? '',
             'summary' => strip_tags($event->short_description ?: ($event->description ?? '')),
             'image' => $image, 'category' => $event->resolveCategoryName() ?? '',
             'starts_at' => $start->toIso8601String(), 'ends_at' => $start->copy()->addMinutes($event->durationInMinutes())->toIso8601String(),
