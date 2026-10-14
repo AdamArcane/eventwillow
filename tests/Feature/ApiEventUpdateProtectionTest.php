@@ -307,6 +307,38 @@ class ApiEventUpdateProtectionTest extends TestCase
         $this->assertSame([$new->id], $venues(), 'the next update moved it back');
     }
 
+    public function test_an_api_update_keeps_a_saved_venue_in_separate_location_fields(): void
+    {
+        $owner = $this->createOwner();
+        $schedule = $this->createRole($owner, 'curator');
+        $venue = tap(new Role, function (Role $venue) {
+            $venue->forceFill([
+                'type' => 'venue', 'name' => 'Connecticut Museum of Culture and History',
+                'address1' => '1 Elizabeth Street, Hartford, CT 06105',
+                'subdomain' => 'venue'.strtolower(Str::random(10)), 'timezone' => 'America/New_York',
+            ])->save();
+        });
+        $event = $this->createEvent($schedule, ['creator_role_id' => $schedule->id]);
+        $event->roles()->attach($venue->id, ['is_accepted' => true]);
+
+        $this->rename($event, $this->keyFor($owner), [
+            'venue_id' => UrlUtils::encodeId($venue->id),
+            'venue_name' => 'Connecticut Museum of Culture and History',
+            'venue_address1' => '1 Elizabeth Street',
+            'venue_city' => 'Hartford',
+            'venue_state' => 'CT',
+            'venue_postal_code' => '06105',
+            'venue_country_code' => 'US',
+        ])->assertOk();
+
+        $venue->refresh();
+        $this->assertSame('1 Elizabeth Street', $venue->address1);
+        $this->assertSame('Hartford', $venue->city);
+        $this->assertSame('CT', $venue->state);
+        $this->assertSame('06105', $venue->postal_code);
+        $this->assertSame('us', $venue->country_code);
+    }
+
     public function test_a_pass_keeps_its_named_events_whichever_schedule_the_update_runs_through(): void
     {
         $owner = $this->createOwner();

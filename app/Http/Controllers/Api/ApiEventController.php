@@ -242,6 +242,10 @@ class ApiEventController extends Controller
                 'venue_id' => 'nullable',
                 'venue_name' => 'nullable|string|max:255',
                 'venue_address1' => 'nullable|string|max:255',
+                'venue_city' => 'nullable|string|max:255',
+                'venue_state' => 'nullable|string|max:255',
+                'venue_postal_code' => 'nullable|string|max:255',
+                'venue_country_code' => 'nullable|string|size:2',
                 'members' => 'nullable|array',
                 'schedule' => 'nullable|string|max:255',
                 'tickets' => 'nullable|array',
@@ -286,7 +290,8 @@ class ApiEventController extends Controller
             'payment_method', 'payment_instructions',
             'schedule_type', 'recurring_frequency', 'recurring_interval',
             'recurring_end_type', 'recurring_end_value', 'days_of_week',
-            'venue_id', 'venue_name', 'venue_address1',
+            'venue_id', 'venue_name', 'venue_address1', 'venue_city', 'venue_state',
+            'venue_postal_code', 'venue_country_code',
             'members', 'schedule', 'tickets', 'event_parts', 'addons',
         ]));
 
@@ -441,6 +446,10 @@ class ApiEventController extends Controller
                 'venue_id' => 'nullable',
                 'venue_name' => 'nullable|string|max:255',
                 'venue_address1' => 'nullable|string|max:255',
+                'venue_city' => 'nullable|string|max:255',
+                'venue_state' => 'nullable|string|max:255',
+                'venue_postal_code' => 'nullable|string|max:255',
+                'venue_country_code' => 'nullable|string|size:2',
                 'members' => 'nullable|array',
                 'schedule' => 'nullable|string|max:255',
                 'tickets' => 'nullable|array',
@@ -516,7 +525,8 @@ class ApiEventController extends Controller
             'payment_method', 'payment_instructions',
             'schedule_type', 'recurring_frequency', 'recurring_interval',
             'recurring_end_type', 'recurring_end_value', 'days_of_week',
-            'venue_id', 'venue_name', 'venue_address1',
+            'venue_id', 'venue_name', 'venue_address1', 'venue_city', 'venue_state',
+            'venue_postal_code', 'venue_country_code',
             'members', 'schedule', 'tickets', 'event_parts', 'addons',
         ]));
 
