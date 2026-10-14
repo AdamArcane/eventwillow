@@ -1035,7 +1035,7 @@ class ApiEventController extends Controller
         // Resolve venue by name/address for non-venue schedules
         // filled(), not has(): a read-and-write-back sends both as null for an event with no venue,
         // and looking those up answered 422 "Venue not found: ".
-        if (! $role->isVenue() && $request->filled('venue_address1') && $request->filled('venue_name')) {
+        if (! $role->isVenue() && ! $request->filled('venue_id') && $request->filled('venue_address1') && $request->filled('venue_name')) {
             $roleIds = RoleUser::where('user_id', auth()->user()->id)
                 ->whereIn('level', ['owner', 'follower'])
                 ->orderBy('id')->pluck('role_id')->toArray();
