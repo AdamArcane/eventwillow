@@ -60,7 +60,7 @@ class ExportUserDocs extends Command
             ->mapWithKeys(fn (array $page, string $key) => [$this->normalizePath($page['path']) => $key])
             ->all();
 
-        $outputDirectory = base_path('docs/user');
+        $outputDirectory = base_path('userdocs');
         $files->ensureDirectoryExists($outputDirectory);
 
         foreach ($selected as $key => $page) {
@@ -76,7 +76,7 @@ class ExportUserDocs extends Command
 
             $destination = $outputDirectory.'/'.$key.'.md';
             $files->put($destination, $markdown);
-            $this->info("Exported {$key} to app/docs/user/{$key}.md");
+            $this->info("Exported {$key} to userdocs/{$key}.md");
 
             foreach (array_unique($this->warnings) as $warning) {
                 $this->warn("{$key}: {$warning}");
