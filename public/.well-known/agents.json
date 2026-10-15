@@ -1,16 +1,16 @@
 {
   "version": "0.1.0",
-  "name": "Event Schedule API",
-  "description": "API for creating and managing events, schedules, tickets, and sales. Supports venue, talent, and curator schedule types with automatic translation to 11 languages.",
-  "url": "https://eventschedule.com",
+  "name": "EventWillow API",
+  "description": "API for creating and managing events, channels (aka schedules), tickets, and sales. Supports venue, talent, and curator schedule types with automatic translation to 11 languages.",
+  "url": "https://eventwillow.com",
   "source": {
     "type": "openapi",
-    "url": "https://eventschedule.com/api/openapi.json"
+    "url": "https://eventwillow.com/api/openapi.json"
   },
   "flows": [
     {
       "name": "register_and_setup",
-      "description": "Register a new account, create a schedule, and add your first event. In hosted mode, email verification is required before registration.",
+      "description": "Register a new account, create a channel, and add your first event. In hosted mode, email verification is required before registration.",
       "steps": [
         {
           "operationId": "send_verification_code",
@@ -38,7 +38,7 @@
         },
         {
           "operationId": "create_schedule",
-          "description": "Create a schedule to organize events under",
+          "description": "Create a channel to organize events under",
           "parameters": {
             "headers": {
               "X-API-Key": "$steps.register.outputs.api_key"
@@ -54,7 +54,7 @@
         },
         {
           "operationId": "create_event",
-          "description": "Create the first event under the new schedule",
+          "description": "Create the first event under the new channel",
           "parameters": {
             "headers": {
               "X-API-Key": "$steps.register.outputs.api_key"
@@ -72,7 +72,7 @@
     },
     {
       "name": "create_event_with_tickets",
-      "description": "Create an event with ticket types configured, and optionally upload a flyer image. Requires an existing schedule and API key.",
+      "description": "Create an event with ticket types configured, and optionally upload a flyer image. Requires an existing channel and API key.",
       "steps": [
         {
           "operationId": "create_event",
@@ -140,18 +140,18 @@
     },
     {
       "name": "manage_schedule",
-      "description": "List, view, update, or delete schedules owned by the authenticated user.",
+      "description": "List, view, update, or delete channels owned by the authenticated user.",
       "steps": [
         {
           "operationId": "list_schedules",
-          "description": "List all schedules owned or administered by the user",
+          "description": "List all channels owned or administered by the user",
           "outputs": {
             "subdomain": "data[0].subdomain"
           }
         },
         {
           "operationId": "show_schedule",
-          "description": "View details of a specific schedule",
+          "description": "View details of a specific channels",
           "parameters": {
             "path": {
               "subdomain": "$steps.list_schedules.outputs.subdomain"
@@ -160,7 +160,7 @@
         },
         {
           "operationId": "update_schedule",
-          "description": "Update schedule details such as name, description, or contact info",
+          "description": "Update channel details such as name, description, or contact info",
           "parameters": {
             "path": {
               "subdomain": "$steps.list_schedules.outputs.subdomain"
@@ -170,7 +170,7 @@
         },
         {
           "operationId": "delete_schedule",
-          "description": "Permanently delete a schedule and all its data (owner only)",
+          "description": "Permanently delete a channel and all its data (owner only)",
           "parameters": {
             "path": {
               "subdomain": "$steps.list_schedules.outputs.subdomain"

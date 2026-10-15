@@ -1,16 +1,16 @@
 {
   "openapi": "3.0.3",
   "info": {
-    "title": "Event Schedule API",
+    "title": "EventWillow API",
     "version": "1.0",
-    "description": "API for managing events, schedules, and tickets on Event Schedule. To get started, register an account, then create a schedule before adding events. Write operations require a Pro plan. New accounts get a trial period."
+    "description": "API for managing events, channels/schedules, and tickets on EventWillow. To get started, register an account, then create a channel before adding events. Write operations require a Pro plan. New accounts get a trial period."
   },
   "servers": [
     {
       "url": "{baseUrl}/api",
       "variables": {
         "baseUrl": {
-          "default": "https://eventschedule.com"
+          "default": "https://eventwillow.com"
         }
       }
     }
