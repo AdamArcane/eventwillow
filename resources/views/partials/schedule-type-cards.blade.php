@@ -7,24 +7,24 @@
     $cards = [
         'talent' => [
             'icon' => 'M15.75 6a3.75 3.75 0 11-7.5 0 3.75 3.75 0 017.5 0zM4.501 20.118a7.5 7.5 0 0114.998 0A17.933 17.933 0 0112 21.75c-2.676 0-5.216-.584-7.499-1.632z',
-            'iconTile' => 'bg-blue-50 text-blue-600 dark:bg-blue-500/10 dark:text-blue-400',
-            'rule' => 'bg-blue-50/80 dark:bg-blue-500/[0.08]',
-            'check' => 'text-blue-500 dark:text-blue-400',
-            'cta' => 'bg-blue-50 text-blue-700 dark:bg-blue-500/10 dark:text-blue-300 group-hover:bg-blue-600 group-hover:text-white group-focus-visible:bg-blue-600 group-focus-visible:text-white',
+            'iconTile' => 'schedule-type-icon-tile',
+            'rule' => 'schedule-type-rule-tint',
+            'check' => 'schedule-type-check',
+            'cta' => 'schedule-type-cta',
         ],
         'venue' => [
             'icon' => 'M15 10.5a3 3 0 11-6 0 3 3 0 016 0z M19.5 10.5c0 7.142-7.5 11.25-7.5 11.25S4.5 17.642 4.5 10.5a7.5 7.5 0 1115 0z',
-            'iconTile' => 'bg-sky-50 text-sky-600 dark:bg-sky-500/10 dark:text-sky-400',
-            'rule' => 'bg-sky-50/80 dark:bg-sky-500/[0.08]',
-            'check' => 'text-sky-600 dark:text-sky-400',
-            'cta' => 'bg-sky-50 text-sky-800 dark:bg-sky-500/10 dark:text-sky-300 group-hover:bg-sky-700 group-hover:text-white group-focus-visible:bg-sky-700 group-focus-visible:text-white',
+            'iconTile' => 'schedule-type-icon-tile',
+            'rule' => 'schedule-type-rule-tint',
+            'check' => 'schedule-type-check',
+            'cta' => 'schedule-type-cta',
         ],
         'curator' => [
             'icon' => 'M6.75 3v2.25M17.25 3v2.25M3 18.75V7.5a2.25 2.25 0 012.25-2.25h13.5A2.25 2.25 0 0121 7.5v11.25m-18 0A2.25 2.25 0 005.25 21h13.5A2.25 2.25 0 0021 18.75m-18 0v-7.5A2.25 2.25 0 015.25 9h13.5A2.25 2.25 0 0121 11.25v7.5',
-            'iconTile' => 'bg-indigo-50 text-indigo-600 dark:bg-indigo-500/10 dark:text-indigo-400',
-            'rule' => 'bg-indigo-50/80 dark:bg-indigo-500/[0.08]',
-            'check' => 'text-indigo-500 dark:text-indigo-400',
-            'cta' => 'bg-indigo-50 text-indigo-700 dark:bg-indigo-500/10 dark:text-indigo-300 group-hover:bg-indigo-600 group-hover:text-white group-focus-visible:bg-indigo-600 group-focus-visible:text-white',
+            'iconTile' => 'schedule-type-icon-tile',
+            'rule' => 'schedule-type-rule-tint',
+            'check' => 'schedule-type-check',
+            'cta' => 'schedule-type-cta',
         ],
     ];
 @endphp

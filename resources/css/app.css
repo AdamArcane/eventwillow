@@ -937,12 +937,32 @@ input[type="search"], textarea, select {
    replaces the whole list - dropping it would lose the card's inset highlight.
    --st-ink is the accent darkened (light) or lightened (dark) far enough to pass
    AA as small text on the card's tinted band. */
-.schedule-type-card[data-type="talent"]  { --st-accent: 59 130 246; --st-ink: 29 78 216; }
-.schedule-type-card[data-type="venue"]   { --st-accent: 14 165 233; --st-ink: 3 105 161; }
-.schedule-type-card[data-type="curator"] { --st-accent: 99 102 241; --st-ink: 79 70 229; }
-.dark .schedule-type-card[data-type="talent"]  { --st-ink: 147 197 253; }
-.dark .schedule-type-card[data-type="venue"]   { --st-ink: 125 211 252; }
-.dark .schedule-type-card[data-type="curator"] { --st-ink: 165 180 252; }
+.schedule-type-card {
+    --st-accent: var(--brand-blue);
+    --st-ink: var(--brand-blue-dark);
+}
+.dark .schedule-type-card { --st-ink: var(--brand-blue-light); }
+
+.schedule-type-icon-tile {
+    color: var(--brand-blue);
+    background: color-mix(in srgb, var(--brand-blue) 8%, transparent);
+}
+.dark .schedule-type-icon-tile { color: var(--brand-blue-light); }
+.schedule-type-rule-tint {
+    background: color-mix(in srgb, var(--brand-blue) 6%, transparent);
+}
+.schedule-type-check { color: var(--brand-blue); }
+.dark .schedule-type-check { color: var(--brand-blue-light); }
+.schedule-type-cta {
+    color: var(--brand-blue-dark);
+    background: color-mix(in srgb, var(--brand-blue) 8%, transparent);
+}
+.dark .schedule-type-cta { color: var(--brand-blue-light); }
+.schedule-type-card:hover .schedule-type-cta,
+.schedule-type-card:focus-visible .schedule-type-cta {
+    color: #fff;
+    background: var(--brand-button-bg-hover);
+}
 
 .schedule-type-card {
     transition: transform 0.2s ease, box-shadow 0.2s ease;
@@ -954,8 +974,8 @@ input[type="search"], textarea, select {
 .schedule-type-card:focus-visible {
     transform: translateY(-3px);
     box-shadow: var(--ap-shadow-card),
-                0 0 0 1px rgb(var(--st-accent) / 0.45),
-                0 18px 36px -18px rgb(var(--st-accent) / 0.55);
+                0 0 0 1px color-mix(in srgb, var(--st-accent) 45%, transparent),
+                0 18px 36px -18px color-mix(in srgb, var(--st-accent) 55%, transparent);
 }
 .schedule-type-card:focus-visible {
     outline: 2px solid var(--brand-blue);
@@ -977,7 +997,7 @@ input[type="search"], textarea, select {
 
 .schedule-type-rule b {
     font-weight: 600;
-    color: rgb(var(--st-ink));
+    color: var(--st-ink);
 }
 .schedule-type-rule i {
     font-style: normal;
