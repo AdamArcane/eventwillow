@@ -2,6 +2,7 @@
 
 namespace App\Models;
 
+use App\Services\Payments\PaymentGatewayManager;
 use App\Utils\UrlUtils;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Support\Str;
@@ -89,6 +90,8 @@ class AppointmentType extends Model
         'custom_fields' => 'array',
         'price' => 'decimal:2',
         'paid_grandfathered_at' => 'datetime',
+        'host_released_at' => 'datetime',
+        'host_user_id' => 'integer',
         'duration_minutes' => 'integer',
         'slot_interval_minutes' => 'integer',
         'buffer_before_minutes' => 'integer',
@@ -111,6 +114,50 @@ class AppointmentType extends Model
     public function events()
     {
         return $this->hasMany(Event::class);
+    }
+
+    /**
+     * The team member this type is booked with, or none (AppointmentHostService). Not fillable:
+     * set only by AppointmentTypeController, which checks the person is an owner or admin here.
+     */
+    public function host()
+    {
+        return $this->belongsTo(User::class, 'host_user_id');
+    }
+
+    /**
+     * Per-instance answers to hostIsCurrent(), keyed by the host they were asked about: a list
+     * page asks it of every type more than once, and a save may change the host in between.
+     *
+     * @var array<int, bool>
+     */
+    protected array $hostIsCurrentCache = [];
+
+    /**
+     * Whether the type's host may still host it: an owner or admin of this schedule. True for a
+     * type with no host. Asked again at booking (AppointmentService::book()), because a host can
+     * leave between the page and the post.
+     */
+    public function hostIsCurrent(): bool
+    {
+        $hostId = (int) $this->host_user_id;
+        if (! $hostId) {
+            return true;
+        }
+
+        return $this->hostIsCurrentCache[$hostId] ??= \App\Services\AppointmentHostService::isEligible((int) $this->role_id, $hostId);
+    }
+
+    /** The host's name as a guest sees it ("with Sam"), or null. Never their address. */
+    public function hostName(): ?string
+    {
+        if (! $this->host_user_id) {
+            return null;
+        }
+
+        $name = trim((string) $this->host?->name);
+
+        return $name !== '' ? $name : null;
     }
 
     public function scopeActive($query)
@@ -169,21 +216,38 @@ class AppointmentType extends Model
     }
 
     /**
-     * Hours an unpaid hold survives before app:release-tickets frees the slot.
-     * Cash/free never auto-expire (ReleaseTickets has no cash exclusion).
+     * Whether a booking on this method waits for an online payment: unconfirmed, not remindable
+     * and not reschedulable until paid, and released if the hold lapses. True for every registered
+     * gateway except one paid by the owner's own instructions (cash today), which is settled by hand
+     * and confirms at booking time. Asked of the driver rather than of a name, as
+     * PaymentGatewayManager asks every capability.
+     *
+     * Takes the stored method rather than a type because callers hold an event or a sale, whose
+     * payment_method was copied from the type when the booking was made.
      */
-    public function expireHours(): int
+    public static function paysOnline(?string $method): bool
     {
-        return match ($this->payment_method) {
-            'stripe' => 1,
-            'payment_url' => 24,
-            default => 0,
-        };
+        $driver = app(PaymentGatewayManager::class)->get($method);
+
+        return $driver !== null && ! $driver->usesPaymentInstructions();
     }
 
     /**
-     * Whether the configured paid method is usable by the owner. Mirrors
-     * Role::giftCardPaymentMethodAvailable(); appointments support stripe / payment_url / cash.
+     * Hours an unpaid hold survives before app:release-tickets frees the slot, as the gateway
+     * decides (PaymentGatewayDriver::appointmentHoldHours()): an hour for Stripe, a day for the
+     * payment URL and Payfast, never for cash/free (ReleaseTickets has no cash exclusion).
+     */
+    public function expireHours(): int
+    {
+        return app(PaymentGatewayManager::class)->get($this->payment_method)?->appointmentHoldHours() ?? 0;
+    }
+
+    /**
+     * Whether the configured paid method is usable by the owner. Stripe and the payment URL keep
+     * their appointment-specific checks (the URL also needs its secret, for the success callback);
+     * any other gateway must take bookings at all, and be connected and able to take this currency
+     * and price, which is the same test the event Payment dropdown applies
+     * (PaymentGatewayManager::availableFor()).
      */
     public function paymentMethodAvailable(): bool
     {
@@ -193,10 +257,25 @@ class AppointmentType extends Model
         }
 
         return match ($this->payment_method) {
-            'stripe' => $user->canAcceptStripePayments(),
+            // Stripe's floor as well: below it the session cannot be created, and the booking
+            // would hold its slot and fail at checkout.
+            'stripe' => $user->canAcceptStripePayments() && $this->clearsFloorOf('stripe'),
             'payment_url' => (bool) ($user->payment_url && $user->payment_secret),
-            default => true, // cash
+            null, 'cash' => true,
+            default => app(PaymentGatewayManager::class)->get($this->payment_method)?->supportsAppointments()
+                && array_key_exists(
+                    $this->payment_method,
+                    app(PaymentGatewayManager::class)->availableFor($user, $this->currency_code, (float) $this->price),
+                ),
         };
+    }
+
+    /** Whether the price is at least the gateway's own minimum in this currency, if it has one. */
+    private function clearsFloorOf(string $gateway): bool
+    {
+        [$minimum] = app(PaymentGatewayManager::class)->get($gateway)?->amountLimits(strtoupper((string) ($this->currency_code ?: 'USD'))) ?? [null];
+
+        return $minimum === null || (float) $this->price >= $minimum;
     }
 
     /**
@@ -212,6 +291,13 @@ class AppointmentType extends Model
     public function isBookable(): bool
     {
         if (! $this->is_active || $this->is_deleted) {
+            return false;
+        }
+
+        // A host who has left the team: releaseHost() switches such a type off, so this only
+        // matters in the moment between the two. No plan check here: a schedule that dropped
+        // from Enterprise keeps its host types bookable, because a booking is not team access.
+        if (! $this->hostIsCurrent()) {
             return false;
         }
 

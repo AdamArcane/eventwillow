@@ -267,6 +267,30 @@ abstract class PaymentGatewayDriver
     }
 
     /**
+     * May an owner pick this gateway for a paid appointment type?
+     *
+     * Every booking is an event of its own, so a gateway that sets something up per event leaves
+     * one behind for every booking. False where that is so.
+     */
+    public function supportsAppointments(): bool
+    {
+        return true;
+    }
+
+    /**
+     * Hours an unpaid appointment booking holds its slot before app:release-tickets frees it
+     * (copied to events.expire_unpaid_tickets when the booking is made). Zero never releases.
+     *
+     * A payment that arrives after the release does not bring the booking back - the slot may
+     * already be someone else's - so a gateway whose confirmation can come late must hold at least
+     * that long. The default suits a gateway that confirms within the checkout or soon after it.
+     */
+    public function appointmentHoldHours(): int
+    {
+        return $this->expiresUnpaidSales() ? 1 : 0;
+    }
+
+    /**
      * When refund() is given a null amount, does this gateway send back what is LEFT of the
      * capture, or the WHOLE original capture?
      *
@@ -546,6 +570,18 @@ abstract class PaymentGatewayDriver
         return null;
     }
 
+    /**
+     * What the Payment Methods row says after "Connected" for an owner's own credentials, beyond
+     * that they are there: test keys, a missing optional part that costs something. Each entry is
+     * already translated; the row joins them. Empty by default.
+     *
+     * @return list<string>
+     */
+    public function settingsStatusNotes(?User $owner): array
+    {
+        return [];
+    }
+
     // ---------------------------------------------------------------- checkout
 
     /**
@@ -606,7 +642,7 @@ abstract class PaymentGatewayDriver
     /**
      * The buyer has just been sent back from a payment page to these sales' tickets.
      *
-     * Kept in the session for a minute and a half, not flashed for one request: the ticket says
+     * Read from the session for a minute and a half, not flashed for one request: the ticket says
      * "Confirming your payment" while a confirmation is on its way (awaitsConfirmation()), and a
      * flash was gone on the first reload and never reached a ticket opened from the order page of
      * a several-event checkout. Both showed NOT PAID across a code that had just been paid for.
@@ -615,13 +651,21 @@ abstract class PaymentGatewayDriver
 
     public const LANDED_SECONDS = 90;
 
+    /**
+     * How long a landing stays noted, which is longer than it says "Confirming": a booking reads the
+     * note (hasLanded()) for as long as its payment may still arrive, and the longest hold is a day
+     * (Payfast, the payment URL). Tidied at LANDED_SECONDS instead, the next checkout in the same
+     * browser erased the note and offered a second payment for a booking whose EFT was clearing.
+     */
+    public const LANDED_KEEP_SECONDS = 86400;
+
     public static function markLanded(Sale $sale): void
     {
         // now(), not time(): a test moves the clock to see the seconds run out.
         $now = now()->getTimestamp();
         $landed = array_filter(
             (array) session(self::LANDED_SESSION, []),
-            fn ($at) => is_int($at) && $now - $at < self::LANDED_SECONDS
+            fn ($at) => is_int($at) && $now - $at < self::LANDED_KEEP_SECONDS
         );
 
         foreach ($sale->orderLegs() as $leg) {
@@ -643,6 +687,19 @@ abstract class PaymentGatewayDriver
     }
 
     /**
+     * Whether the buyer was sent back here from the payment page for this sale at all, however long
+     * ago. A booking's manage page reads it once the confirming window has closed: a guest who came
+     * back from paying is not asked to pay again while the confirmation is still on its way.
+     *
+     * As long as the session's note of the landing lasts: a day (LANDED_KEEP_SECONDS), or the
+     * session itself if that ends first.
+     */
+    public static function hasLanded(Sale $sale): bool
+    {
+        return is_int(((array) session(self::LANDED_SESSION, []))[$sale->id] ?? null);
+    }
+
+    /**
      * The signal, if it is for this event (event/partials/payment-cancelled, event/tickets).
      *
      * @return array{event_id: string, charge_unknown: bool}|null
@@ -659,6 +716,16 @@ abstract class PaymentGatewayDriver
      */
     public function handleCancel(Request $request, Sale $sale): Response
     {
+        // A booking keeps its hold. The guest goes back to the booking's own page, which says the
+        // payment was cancelled and nothing was charged, how long the time is held, and offers to
+        // pay again or cancel - as a Stripe booking always has (its cancel_url is that page). The
+        // hold lapses on its own clock (ReleaseTickets). No landing is marked: Payfast always
+        // reports awaitsConfirmation(), and a landing would say "Confirming your payment" to
+        // somebody who has just backed out.
+        if ($sale->event?->appointment_type_id) {
+            return redirect($this->appointmentManageUrl($sale).'?payment=cancelled');
+        }
+
         $expired = DB::transaction(function () use ($sale) {
             $locked = Sale::lockForUpdate()->find($sale->id);
             if (! $locked || $locked->status !== 'unpaid') {
@@ -765,6 +832,26 @@ abstract class PaymentGatewayDriver
     }
 
     /**
+     * Refuse a checkout this gateway cannot start, with a message for the buyer.
+     *
+     * A ticket sale gives its seats back first (releaseAbandonedSale()) and returns the buyer to the
+     * form. A booking keeps its hold and goes back to its own page, which offers to pay again: its
+     * event always carries a hold that ReleaseTickets sweeps, so nothing is held forever, and a
+     * refusal is often a passing one (PayPal's API timing out) that used to cancel a booking the
+     * guest had kept by backing out. No landing is marked, or Payfast would say "Confirming".
+     */
+    protected function refuseCheckout(Sale $sale, string $reason, string $message): Response
+    {
+        if ($sale->event?->appointment_type_id) {
+            return redirect($this->appointmentManageUrl($sale))->with('error', $message);
+        }
+
+        $this->releaseAbandonedSale($sale, $reason);
+
+        return back()->withInput()->with('error', $message);
+    }
+
+    /**
      * Where a buyer lands after a purchase: the order page when the checkout covered several events,
      * that leg's own ticket otherwise.
      *
@@ -781,6 +868,14 @@ abstract class PaymentGatewayDriver
         return $isEmbed ? $url.'?embed=true' : $url;
     }
 
+    protected function appointmentManageUrl(Sale $sale): string
+    {
+        return route('appointments.manage', [
+            'event_id' => UrlUtils::encodeId($sale->event_id),
+            'secret' => $sale->secret,
+        ]);
+    }
+
     /**
      * Redirect to the purchase landing page, telling the guest cart what was just bought.
      *
@@ -791,6 +886,18 @@ abstract class PaymentGatewayDriver
      */
     protected function redirectToPurchaseLanding(Sale $sale, Event $event, bool $isEmbed = false): Response
     {
+        // An appointment booking has no ticket to show. Its page is the secret manage URL, which
+        // reads the sale as it now stands: confirming, confirmed, pending approval, or still
+        // awaiting payment. The landing is marked for its "Confirming your payment" state; the rest
+        // of this method belongs to ticket checkout. A booking never counts checkout_start, so a
+        // checkout_done here would be an end with no beginning in the guest funnel, and it never
+        // goes through the guest cart.
+        if ($event->appointment_type_id) {
+            self::markLanded($sale);
+
+            return redirect($this->appointmentManageUrl($sale).'?new=1');
+        }
+
         GuestFunnel::countCheckoutDone(request(), $sale);
         self::markLanded($sale);
 

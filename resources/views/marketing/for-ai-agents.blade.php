@@ -5,7 +5,7 @@
     @endphp
 
     <x-slot name="title">REST API for AI Agents & Developers - Event Schedule</x-slot>
-    <x-slot name="description">27 REST endpoints, an OpenAPI 3.0 spec, llms.txt and agents.json. One POST creates an event with its tickets; one PUT refunds a sale.</x-slot>
+    <x-slot name="description">41 REST endpoints, an OpenAPI 3.0 spec, llms.txt and agents.json. One POST creates an event with its tickets; one PUT refunds a sale.</x-slot>
     <x-slot name="breadcrumbTitle">For AI Agents</x-slot>
 
     <x-slot name="structuredData">
@@ -797,11 +797,13 @@
                 ['DELETE', '/api/schedules/{subdomain}/groups/{group_id}', 'Events survive; their sub-schedule reference is cleared.'],
             ]],
             ['Events', 'The big one. Tickets, agenda parts, members and recurrence all ride along.', [
-                ['GET', '/api/events', 'Paginated, newest first. Ten filters, including tickets_enabled and rsvp_enabled.'],
+                ['GET', '/api/events', 'Paginated, newest first. Twelve filters, including tickets_enabled, is_cancelled and your own external_id.'],
                 ['GET', '/api/events/{id}', 'One event with its tickets, members and agenda parts.'],
-                ['POST', '/api/events/{subdomain}', 'Create an event on a schedule. Carries its own 30-per-minute throttle.'],
+                ['POST', '/api/events/{subdomain}', 'Create an event on a schedule, or with an external_id and upsert, update the one you made last time. Carries its own 30-per-minute throttle.'],
                 ['PUT', '/api/events/{id}', 'Partial update. Recurrence, tickets and agenda parts survive being omitted.'],
                 ['DELETE', '/api/events/{id}', 'Delete it, and withdraw it from any synced calendar.'],
+                ['POST', '/api/events/{id}/cancel', 'Call it off and keep its sales. Optionally email the people registered, with a note.'],
+                ['POST', '/api/events/{id}/restore', 'Undo a cancellation. Nobody is emailed.'],
                 ['POST', '/api/events/flyer/{event_id}', 'Multipart upload of a flyer_image for an existing event.'],
             ]],
             ['Categories', 'Read-only lookups so you can send a category_id you know exists.', [
@@ -812,12 +814,28 @@
                 ['GET', '/api/sales', 'Filter by event, subdomain, status, buyer email or occurrence date.'],
                 ['GET', '/api/sales/{id}', 'One sale with its ticket lines.'],
                 ['POST', '/api/sales', 'Book a sale by hand. Created unpaid; free tickets are marked paid straight away.'],
-                ['PUT', '/api/sales/{id}', 'mark_paid, cancel or refund. A refund sends Stripe or PayPal money back, in full or an amount you name; an idempotency_key makes a retry safe.'],
+                ['PUT', '/api/sales/{id}', 'mark_paid, cancel or refund. A refund sends Stripe, PayPal or Razorpay money back, in full or an amount you name; an idempotency_key makes a retry safe.'],
                 ['DELETE', '/api/sales/{id}', 'Soft delete. It stops appearing in listings.'],
             ]],
             ['Feeds', 'Read-only, for pulling audience content onto a site you already run.', [
                 ['GET', '/api/feedback', 'Post-event star ratings and comments. Filter by minimum rating and date range.'],
                 ['GET', '/api/fan-content', 'Approved comments, photos and videos. Submitter email addresses are never included.'],
+            ]],
+            ['Appointments', 'For an agent that books on a guest\'s behalf, a voice agent on the phone line most often.', [
+                ['GET', '/api/schedules/{subdomain}/appointment-types', 'The types a guest can book, with price, host, questions and the next open time.'],
+                ['GET', '/api/appointment-types/{id}/slots', 'Open times as UTC instants, each with a sentence in the schedule\'s timezone to read out.'],
+                ['POST', '/api/appointment-types/{id}/bookings', 'Book one. A taken time answers 409 with the three nearest; an Idempotency-Key makes a retry safe.'],
+            ]],
+            ['Boosts', 'For a network that runs its schedules\' boosts under its own Facebook Page and ad account, with the account\'s own key.', [
+                ['GET', '/api/boosts', 'Every request on the network\'s schedules. updated_since keeps a checkout in step without polling each one.'],
+                ['GET', '/api/boosts/{id}', 'One request: the exact ad and its version, the approval, the payment, the spend.'],
+                ['POST', '/api/boosts/{id}/approve', 'Approve a named version. A stale version answers 409, so earlier wording can never launch later wording.'],
+                ['POST', '/api/boosts/{id}/decline', 'Send it back with a note the business reads.'],
+                ['POST', '/api/boosts/{id}/confirm-payment', 'Record your own Stripe reference and amount. Approved and paid launches it.'],
+                ['DELETE', '/api/boosts/{id}/confirm-payment', 'Withdraw a payment confirmation before launch.'],
+                ['POST', '/api/boosts/{id}/stop', 'Pause it at Meta and end it.'],
+                ['GET', '/api/boost-statements', 'The monthly statements of the fee on actual spend.'],
+                ['GET', '/api/boost-statements/{period}', 'One month: each campaign\'s spend, fee and adjustment.'],
             ]],
         ];
 
@@ -845,8 +863,8 @@
                 'The whole reference in one file, so an agent never has to follow a link to finish a task. Every endpoint, every parameter, every error shape.',
             ],
             [
-                '/.well-known/agents.json', '/.well-known/agents.json', '4 flows',
-                'Named multi-step flows: register_and_setup, create_event_with_tickets, sell_tickets and manage_schedule. Each one lists its calls in order, so a plan is data rather than prompt engineering.',
+                '/.well-known/agents.json', '/.well-known/agents.json', '5 flows',
+                'Named multi-step flows: register_and_setup, create_event_with_tickets, sell_tickets, manage_schedule and book_appointment. Each one lists its calls in order, so a plan is data rather than prompt engineering.',
             ],
             [
                 '/api/openapi.json', '/api/openapi.json', 'OpenAPI 3.0',
@@ -857,7 +875,7 @@
         // The heading below counts these, so the two have to be changed together.
         $webhookEvents = [
             ['sale.created', 'A sale is created, still unpaid.'],
-            ['sale.paid', 'Confirmed paid, whether by Stripe, PayPal, Payfast, Invoice Ninja, by hand or free.'],
+            ['sale.paid', 'Confirmed paid, whether by Stripe, PayPal, Payfast, Razorpay, Invoice Ninja, by hand or free.'],
             ['sale.refunded', 'A paid sale is refunded in full. A partial refund leaves it paid and fires nothing.'],
             ['sale.cancelled', 'A sale is cancelled.'],
             ['installment.paid', 'A payment of an installment plan is collected.'],
@@ -899,11 +917,11 @@
             ],
             [
                 'q' => 'What can I actually do with it?',
-                'a' => $endpointCount.' endpoints across registration, schedules, sub-schedules, events, categories and sales, plus two read-only feeds for post-event feedback and fan-submitted content. Schedules, sub-schedules, events and sales have full create, read, update and delete; categories are read-only lookups. A single create call can carry ticket types, agenda parts, performing members, a venue and a recurrence pattern, so publishing a run of shows is one request rather than six.',
+                'a' => $endpointCount.' endpoints across registration, schedules, sub-schedules, events, categories, sales, appointment booking and boost requests, plus two read-only feeds for post-event feedback and fan-submitted content. A network that boosts its schedules under its own Facebook Page approves, declines, records payment for and stops those boosts, and reads its monthly fee statements, with its own key. Schedules, sub-schedules, events and sales have full create, read, update and delete; categories are read-only lookups. A single create call can carry ticket types, agenda parts, performing members, a venue and a recurrence pattern, so publishing a run of shows is one request rather than six.',
             ],
             [
                 'q' => 'Can the API refund a sale?',
-                'a' => 'Yes: PUT /api/sales/{id} with the action refund. On a Stripe or PayPal sale the money goes back through the provider before the status changes. Send an amount to return part of it, and the sale stays paid with its tickets valid; leave it out and the whole remaining balance goes back, the sale becomes refunded, its places return to stock and sale.refunded fires. Send an idempotency_key of your own so a retry returns the first attempt\'s outcome instead of refunding twice. A refund whose outcome could not be confirmed returns 409 and is never retried for you. Invoice Ninja, Payfast, payment-link and cash sales are only recorded as refunded, so return that money yourself, and a payment plan is refunded in full only.',
+                'a' => 'Yes: PUT /api/sales/{id} with the action refund. On a Stripe, PayPal or Razorpay sale the money goes back through the provider before the status changes. Send an amount to return part of it, and the sale stays paid with its tickets valid; leave it out and the whole remaining balance goes back, the sale becomes refunded, its places return to stock and sale.refunded fires. Send an idempotency_key of your own so a retry returns the first attempt\'s outcome instead of refunding twice. A refund whose outcome could not be confirmed returns 409 and is never retried for you. Invoice Ninja, Payfast, payment-link and cash sales are only recorded as refunded, so return that money yourself, and a payment plan is refunded in full only.',
             ],
             [
                 'q' => 'What is llms.txt, and why are there two of them?',
@@ -911,7 +929,7 @@
             ],
             [
                 'q' => 'What are the rate limits?',
-                'a' => '300 GET requests a minute and 30 POST, PUT or DELETE requests a minute, counted per IP address. Creating an event carries its own 30-per-minute throttle on top of that, and the auth endpoints have their own tighter limits. Going over returns 429 with an error body.',
+                'a' => '300 GET requests a minute and 30 POST, PUT or DELETE requests a minute, counted per account, so callers that share an address do not share a budget. Requests with no key or a wrong one are counted per IP address. Creating an event carries its own 30-per-minute throttle on top of that, and the auth endpoints have their own tighter limits. Going over returns 429 with an error body.',
             ],
             [
                 'q' => 'Are there webhooks, or do I have to poll?',
@@ -1111,13 +1129,13 @@ HTML,
                             <span class="ax-type ax-type-2">show is <span class="ax-em">on sale.</span><span class="ax-caret" aria-hidden="true"></span></span>
                         </h1>
                         <div class="ax-cta es-fade-up es-d-3">
-                            <a href="{{ route('marketing.docs.developer.api') }}" class="ax-btn">
-                                Read the API reference
-                                {!! $axArrow !!}
-                            </a>
                             <a href="#ledger" class="ax-btn ax-btn-alt">
                                 See all {{ $endpointCount }} endpoints
                                 <i aria-hidden="true">&darr;</i>
+                            </a>
+                            <a href="{{ route('marketing.docs.developer.api') }}" class="ax-btn">
+                                Read the API reference
+                                {!! $axArrow !!}
                             </a>
                         </div>
                     </div>
@@ -1125,7 +1143,7 @@ HTML,
                     <div class="ax-hero-desc">
                         <span class="ax-name" aria-hidden="true">DESCRIPTION</span>
                         <p class="ax-prose es-fade-up es-d-2">
-                            {{ $endpointCount }} REST endpoints over the whole product: three to get a key, then twenty-four behind it covering schedules, sub-schedules, events, recurrences, ticket types, sales and refunds, feedback and fan content. JSON in, JSON out, one header.
+                            {{ $endpointCount }} REST endpoints over the whole product: three to get a key, then thirty-eight behind it covering schedules, sub-schedules, events, recurrences, ticket types, sales and refunds, appointment booking, boost requests, feedback and fan content. JSON in, JSON out, one header.
                         </p>
                         <p class="ax-prose es-fade-up es-d-2">
                             An OpenAPI 3.0 spec, <span class="ax-k">llms.txt</span> and <span class="ax-k">agents.json</span> ship with it, so an agent can discover this API and drive it without a human reading the docs first.
@@ -1193,7 +1211,7 @@ HTML,
                             <dt>300 / 30</dt>
                             <dd>
                                 <strong>Requests a minute</strong>
-                                <p>300 reads and 30 writes a minute, per IP. Over the line you get a 429, not a silent drop.</p>
+                                <p>300 reads and 30 writes a minute, per account. Over the line you get a 429, not a silent drop.</p>
                             </dd>
                         </div>
                         <div class="ax-fact" data-reveal>
@@ -1381,7 +1399,7 @@ HTML,
                                     </div>
                                 </div>
                                 <p class="ax-call-note" data-reveal>
-                                    Ten filters on the events list, including whether tickets or RSVP are switched on, a venue, a sub-schedule and a date window. You narrow server-side rather than pulling a year and filtering in the agent.
+                                    Twelve filters on the events list, including whether tickets or RSVP are switched on, whether an event is cancelled, a venue, a sub-schedule, a date window and the id your own system gave the event. You narrow server-side rather than pulling a year and filtering in the agent.
                                 </p>
                             </div>
 
@@ -1430,7 +1448,7 @@ HTML,
                                     </div>
                                 </div>
                                 <p class="ax-call-note" data-reveal>
-                                    Three actions, and which ones are legal depends on where the sale is: <span class="ax-k">mark_paid</span> from unpaid, <span class="ax-k">refund</span> from paid, <span class="ax-k">cancel</span> from either. On a Stripe or PayPal sale, <span class="ax-k">refund</span> sends the money back before the status moves, and an <span class="ax-k">amount</span> makes it partial, which leaves the sale paid. You can also create a sale outright for a buyer who paid you off-platform.
+                                    Three actions, and which ones are legal depends on where the sale is: <span class="ax-k">mark_paid</span> from unpaid, <span class="ax-k">refund</span> from paid, <span class="ax-k">cancel</span> from either. On a Stripe, PayPal or Razorpay sale, <span class="ax-k">refund</span> sends the money back before the status moves, and an <span class="ax-k">amount</span> makes it partial, which leaves the sale paid. You can also create a sale outright for a buyer who paid you off-platform.
                                 </p>
                             </div>
 
@@ -1545,9 +1563,9 @@ HTML,
                             <div class="ax-note-tags">
                                 <span class="ax-tag ax-tag-pro">pro</span>
                             </div>
-                            <h3>Flyers, as a second call</h3>
+                            <h3>Flyers, by address or as a file</h3>
                             <p>
-                                Artwork is multipart, so it gets its own request. Create the event, then POST a <span class="ax-k">flyer_image</span> to the flyer endpoint with the returned ID.
+                                Send a <span class="ax-k">flyer_image_url</span> with the event and the picture is fetched and stored with it, in the same call. A file of your own is multipart, so it gets its own request: POST a <span class="ax-k">flyer_image</span> to the flyer endpoint with the returned ID.
                             </p>
                             <div class="ax-box">
 <pre class="ax-code" dir="ltr" data-clip-ok>{!! $axPre['flyer'] !!}</pre>
@@ -1577,12 +1595,13 @@ HTML,
                             </div>
                             <h3>Money, without a middleman</h3>
                             <p>
-                                Ticket types created through the API sell through your own Stripe or PayPal account, or through Invoice Ninja, Payfast for rand prices, a payment URL, or by hand. Event Schedule takes zero platform fees on ticket sales: the only deduction is your processor's. Sales come back through the sales endpoints and through <span class="ax-s">sale.paid</span> webhooks, with the ticket lines attached, and a Stripe or PayPal refund goes back through the provider.
+                                Ticket types created through the API sell through your own Stripe or PayPal account, or through Invoice Ninja, Payfast for rand prices, Razorpay for Indian rupee (INR) prices, a payment URL, or by hand. Event Schedule takes zero platform fees on ticket sales: the only deduction is your processor's. Sales come back through the sales endpoints and through <span class="ax-s">sale.paid</span> webhooks, with the ticket lines attached, and a Stripe, PayPal or Razorpay refund goes back through the provider.
                             </p>
                             <div class="ax-chips" dir="ltr">
                                 <span class="ax-chip">stripe</span>
                                 <span class="ax-chip">paypal</span>
                                 <span class="ax-chip">payfast</span>
+                                <span class="ax-chip">razorpay</span>
                                 <span class="ax-chip">invoiceninja</span>
                                 <span class="ax-chip">payment_url</span>
                                 <span class="ax-chip">cash</span>
@@ -1728,6 +1747,7 @@ HTML,
                             $axFeatures = [
                                 ['Ticketing', 'Ticket types, QR check-in and zero platform fees', marketing_url('/features/ticketing')],
                                 ['Calendar Sync', 'Two-way Google, Outlook and CalDAV sync on every plan', marketing_url('/features/calendar-sync')],
+                                ['Integrations', 'Every port in and out, with the plan each one needs', marketing_url('/features/integrations')],
                                 ['Embed Calendar', 'Put the schedule on the site you already run', marketing_url('/features/embed-calendar')],
                                 ['Analytics', 'Page views, devices and traffic sources, free on every plan', marketing_url('/features/analytics')],
                             ];
@@ -1837,7 +1857,7 @@ HTML,
                                     <span class="ax-host">.eventschedule.com</span>
                                 </div>
                                 <a href="{{ app_url('/sign_up') }}" class="ax-btn">
-                                    Get started free
+                                    Start for free
                                     <kbd aria-hidden="true">&crarr;</kbd>
                                 </a>
                             </div>
@@ -1876,7 +1896,6 @@ HTML,
         </section>
 
         <div class="ax-keep">
-            <x-marketing.related-pages />
         </div>
     </div>
 

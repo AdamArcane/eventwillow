@@ -1,6 +1,8 @@
 <?php
 
+use App\Http\Controllers\Api\ApiAppointmentController;
 use App\Http\Controllers\Api\ApiAuthController;
+use App\Http\Controllers\Api\ApiBoostController;
 use App\Http\Controllers\Api\ApiEventController;
 use App\Http\Controllers\Api\ApiFederationController;
 use App\Http\Controllers\Api\ApiFeedbackController;
@@ -82,6 +84,8 @@ Route::middleware([ApiAuthentication::class])->group(function () {
     // Events
     Route::get('/events', [ApiEventController::class, 'index']);
     Route::post('/events/flyer/{event_id}', [ApiEventController::class, 'flyer']);
+    Route::post('/events/{id}/cancel', [ApiEventController::class, 'cancel']);
+    Route::post('/events/{id}/restore', [ApiEventController::class, 'restore']);
     Route::post('/events/{subdomain}', [ApiEventController::class, 'store'])->middleware('throttle:30,1');
     Route::get('/events/{id}', [ApiEventController::class, 'show']);
     Route::put('/events/{id}', [ApiEventController::class, 'update']);
@@ -101,4 +105,20 @@ Route::middleware([ApiAuthentication::class])->group(function () {
     Route::get('/sales/{id}', [ApiSaleController::class, 'show']);
     Route::put('/sales/{id}', [ApiSaleController::class, 'update']);
     Route::delete('/sales/{id}', [ApiSaleController::class, 'destroy']);
+
+    // Appointments: the bookable types, their open times, and a booking
+    Route::get('/schedules/{subdomain}/appointment-types', [ApiAppointmentController::class, 'types']);
+    Route::get('/appointment-types/{id}/slots', [ApiAppointmentController::class, 'slots']);
+    Route::post('/appointment-types/{id}/bookings', [ApiAppointmentController::class, 'book']);
+
+    // Boost partners: the requests on a partner's schedules, its decisions, and its statements
+    Route::get('/boosts', [ApiBoostController::class, 'index']);
+    Route::get('/boosts/{id}', [ApiBoostController::class, 'show']);
+    Route::post('/boosts/{id}/approve', [ApiBoostController::class, 'approve']);
+    Route::post('/boosts/{id}/decline', [ApiBoostController::class, 'decline']);
+    Route::post('/boosts/{id}/confirm-payment', [ApiBoostController::class, 'confirmPayment']);
+    Route::delete('/boosts/{id}/confirm-payment', [ApiBoostController::class, 'withdrawPayment']);
+    Route::post('/boosts/{id}/stop', [ApiBoostController::class, 'stop']);
+    Route::get('/boost-statements', [ApiBoostController::class, 'statements']);
+    Route::get('/boost-statements/{period}', [ApiBoostController::class, 'statement']);
 });

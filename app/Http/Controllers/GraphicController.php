@@ -9,6 +9,7 @@ use App\Services\GraphicEmailService;
 use App\Services\UsageTrackingService;
 use App\Utils\EventTextGenerator;
 use App\Utils\GeminiUtils;
+use App\Utils\ListWording;
 use App\Utils\OpenAIUtils;
 use Illuminate\Database\Eloquent\Collection as EloquentCollection;
 use Illuminate\Http\Request;
@@ -74,7 +75,89 @@ class GraphicController extends Controller
                 ->count();
         }
 
-        return view('graphic.show', compact('role', 'layout', 'isPro', 'isEnterprise', 'graphicSettings', 'hasRecurringEvents', 'headerImagePreviewUrl', 'timezoneMismatchCount'));
+        // Saving, the header image and the scheduled email are an editor's; a viewer may look and try.
+        $canEdit = auth()->user()->isEditor($subdomain);
+        // AI can rewrite the caption only where a key for it is set (the hosted install; a selfhoster's own).
+        $aiReady = $isEnterprise && (config('services.google.gemini_key') || config('services.openai.api_key'));
+        $pageSettings = self::pageSettings($role);
+        $lastSent = self::lastSentLabel($role);
+
+        return view('graphic.show', compact('role', 'layout', 'isPro', 'isEnterprise', 'graphicSettings', 'hasRecurringEvents', 'headerImagePreviewUrl', 'timezoneMismatchCount', 'canEdit', 'aiReady', 'pageSettings', 'lastSent'));
+    }
+
+    /**
+     * The settings the page starts from: what is stored, read so that the page can post it
+     * straight back.
+     *
+     * Three stored shapes used to make every later save fail, or lose a choice on reload:
+     * - send_days is the week's days (0 to 6) and nothing else. A row from before it existed
+     *   kept one weekly day in send_day, and a monthly row's day 15 is not a day of the week:
+     *   posted back as one, saveSettings() answered 422 on every save.
+     * - send_day here is the MONTHLY day only, held to the 1 to 28 the page offers. A weekly
+     *   Sunday is 0, which the monthly select cannot show and the cron reads as "already passed".
+     * - An hour of 0 (midnight) and a day of 0 (Sunday) are real choices: never read with "or".
+     */
+    public static function pageSettings(Role $role): array
+    {
+        $saved = $role->graphic_settings ?? [];
+
+        $weekDays = $saved['send_days'] ?? null;
+        if (! is_array($weekDays)) {
+            $weekDays = ($saved['frequency'] ?? 'weekly') === 'weekly' ? [(int) ($saved['send_day'] ?? 1)] : [];
+        }
+        $weekDays = array_values(array_unique(array_filter(
+            array_map('intval', $weekDays),
+            fn ($day) => $day >= 0 && $day <= 6
+        )));
+
+        return [
+            'layout' => in_array($saved['layout'] ?? '', ['grid', 'row', 'list'], true) ? $saved['layout'] : 'grid',
+            'image_size' => in_array($saved['image_size'] ?? '', ['square', 'portrait', 'story', 'landscape'], true) ? $saved['image_size'] : 'auto',
+            'max_per_row' => (string) ($saved['max_per_row'] ?? ''),
+            'event_count' => (string) ($saved['event_count'] ?? ''),
+            'max_per_schedule' => (string) ($saved['max_per_schedule'] ?? ''),
+            'exclude_recurring' => (bool) ($saved['exclude_recurring'] ?? false),
+            'date_position' => in_array($saved['date_position'] ?? '', ['overlay', 'above'], true) ? $saved['date_position'] : '',
+            'overlay_text' => (string) ($saved['overlay_text'] ?? ''),
+            'number_events' => (bool) ($saved['number_events'] ?? false),
+            'header_text' => (string) ($saved['header_text'] ?? ''),
+            'footer_text' => (string) ($saved['footer_text'] ?? ''),
+            // The wording the page shows is the wording it previews and saves, as it always has.
+            'text_template' => ($saved['text_template'] ?? '') ?: EventTextGenerator::getDefaultTemplate(),
+            'text_show_all' => (bool) ($saved['text_show_all'] ?? false),
+            'force_english' => $role->canForceEnglish() && ($saved['force_english'] ?? false),
+            'url_include_https' => (bool) ($saved['url_include_https'] ?? false),
+            'url_include_id' => (bool) ($saved['url_include_id'] ?? false),
+            'ai_prompt' => (string) ($saved['ai_prompt'] ?? ''),
+            'enabled' => (bool) ($saved['enabled'] ?? false),
+            'frequency' => in_array($saved['frequency'] ?? '', ['daily', 'weekly', 'monthly'], true) ? $saved['frequency'] : 'weekly',
+            'send_days' => $weekDays,
+            'send_day' => min(28, max(1, (int) ($saved['send_day'] ?? 1))),
+            'send_hour' => min(23, max(0, (int) ($saved['send_hour'] ?? 9))),
+            'recipient_emails' => (string) ($saved['recipient_emails'] ?? ''),
+        ];
+    }
+
+    /**
+     * When the scheduled email last went, in the schedule's own clock, or null if it never has.
+     * The one thing the page can say about a send that did not arrive: only a successful send is
+     * recorded (SendGraphicEmails), never a skipped one.
+     */
+    public static function lastSentLabel(Role $role): ?string
+    {
+        $sentAt = ($role->graphic_settings ?? [])['last_sent_at'] ?? null;
+
+        if (! $sentAt) {
+            return null;
+        }
+
+        try {
+            return \Carbon\Carbon::parse($sentAt)
+                ->setTimezone($role->timezone ?: 'UTC')
+                ->translatedFormat('D j M, '.($role->use_24_hour_time ? 'H:i' : 'g:i A'));
+        } catch (\Throwable $e) {
+            return null;
+        }
     }
 
     public function getSettings($subdomain)
@@ -133,11 +216,15 @@ class GraphicController extends Controller
         $currentSettings = $role->graphic_settings ?? [];
         $newSettings = array_merge($currentSettings, $validated);
 
-        // Require recipient_emails when enabled is true
+        // Require recipient_emails when enabled is true. Only when the request is about the email
+        // at all: the page leaves these keys out for a schedule whose plan no longer shows the
+        // email row, and what is stored there (switched on, perhaps with a legacy day and no
+        // send_days) must not refuse a save that only changed the layout.
         $isEnabled = $newSettings['enabled'] ?? false;
         $recipientEmails = trim($newSettings['recipient_emails'] ?? '');
+        $aboutEmail = $request->hasAny(['enabled', 'frequency', 'send_days', 'send_day', 'send_hour', 'recipient_emails']);
 
-        if ($isEnabled) {
+        if ($isEnabled && $aboutEmail) {
             if (empty($recipientEmails)) {
                 return response()->json([
                     'success' => false,
@@ -226,7 +313,7 @@ class GraphicController extends Controller
                 // upcoming events to render.
                 return response()->json([
                     'success' => false,
-                    'message' => __('messages.no_events_found'),
+                    'message' => __('messages.graphic_nothing_to_send'),
                 ], 400);
             }
 
@@ -471,6 +558,55 @@ class GraphicController extends Controller
         return response()->json($response);
     }
 
+    /**
+     * The schedule form's preview of "Event list wording" (App\Utils\ListWording): the next three
+     * events of the schedule's list, with the time and picture the list gives them, in the wording
+     * being chosen ('wording', null when that wording names no event) and as the standard card
+     * says them ('name', 'about', 'where'). Nothing is saved: the form posts the choice on Save.
+     *
+     * The caption's wording is the one stored on the Events graphic page; a wording of the list's
+     * own is the one being typed. The language is the one the wording is written in, which is the
+     * only one whose visitors see it.
+     */
+    public function listWordingPreview(Request $request, $subdomain)
+    {
+        $role = Role::subdomain($subdomain)->firstOrFail();
+
+        if (! auth()->user()->isEditor($subdomain)) {
+            return response()->json(['error' => __('messages.not_authorized')], 403);
+        }
+
+        $validated = $request->validate([
+            'mode' => 'required|in:caption,custom',
+            'template' => 'nullable|string|max:2000',
+        ]);
+
+        $settings = $role->graphic_settings ?? [];
+        $template = $validated['mode'] === 'custom'
+            ? (string) ($validated['template'] ?? '')
+            : (($settings['text_template'] ?? '') ?: EventTextGenerator::getDefaultTemplate());
+        $english = $validated['mode'] === 'caption' && $role->canForceEnglish() && ! empty($settings['force_english']);
+        $lang = $english ? 'en' : ($role->language_code ?: 'en');
+        $format = get_use_24_hour_time($role) ? 'H:i' : 'g:i A';
+
+        $rows = app(\App\Repos\EventRepo::class)->upcomingForGuest($role, null, 3);
+
+        return response()->json(['cards' => $rows->map(function (array $row) use ($role, $template, $lang, $format) {
+            $event = $row['event'];
+            $where = ($event->venue && (int) $event->venue->id === (int) $role->id) ? '' : $event->getVenueDisplayName(true, $lang);
+
+            return [
+                'time' => $event->getStartDateTime($row['date'], true, $event->scheduleTimezone())->format($format),
+                'image' => $event->flyer_image_url ? ($event->getImageUrl(480) ?: null) : null,
+                'name' => $event->nameInLanguage($lang, $role),
+                'about' => (string) $event->shortDescriptionInLanguage($lang, $role),
+                'where' => (string) $where,
+                'dir' => content_dir_for_language(null, $lang),
+                'wording' => ListWording::render($template, $event, $role, $lang),
+            ];
+        })->values()->all()]);
+    }
+
     public function processGraphicAIText(Request $request, $subdomain)
     {
         $role = Role::subdomain($subdomain)->firstOrFail();
@@ -480,7 +616,7 @@ class GraphicController extends Controller
         }
 
         if (! $role->isEnterprise()) {
-            return response()->json(['error' => 'Enterprise feature'], 403);
+            return response()->json(['error' => __('messages.enterprise_feature_ai_prompt')], 403);
         }
 
         if (! $role->canMakeAiContentRequest()) {
@@ -494,7 +630,7 @@ class GraphicController extends Controller
         $forceEnglish = $role->canForceEnglish() && $request->boolean('force_english', false);
 
         if (empty($aiPrompt) || empty($text)) {
-            return response()->json(['error' => 'Missing text or AI prompt']);
+            return response()->json(['error' => __('messages.graphic_ai_failed')]);
         }
 
         // Re-query events for metadata (same filters as generateGraphicData)

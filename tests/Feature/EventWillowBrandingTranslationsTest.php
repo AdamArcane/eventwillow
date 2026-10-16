@@ -20,6 +20,16 @@ class EventWillowBrandingTranslationsTest extends TestCase
         $this->assertSame($upstream['log_in'], __('messages.log_in'));
     }
 
+    public function test_organizer_replaces_the_schedule_type_label_not_the_performer_label(): void
+    {
+        $upstream = require resource_path('lang/en/messages.php');
+
+        $this->assertSame('Talent', $upstream['talent']);
+        $this->assertSame('Organizer', __('messages.talent'));
+        $this->assertSame('Organizer Channels', __('messages.talent_schedules'));
+        $this->assertSame('Talents', __('messages.talents'));
+    }
+
     public function test_the_translations_editor_uses_the_branded_default(): void
     {
         $defaults = app(TranslationOverrideService::class)->readShipped('en', 'messages');

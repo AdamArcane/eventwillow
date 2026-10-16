@@ -608,16 +608,13 @@
       font-size: 0.8125rem;
       color: rgb(var(--ap-ink-3));
     }
+    /* The key to the Availability grid: the mark's own colours (partials/month-kit-styles, .day-x). */
     .page-legend i {
       width: 1rem;
       height: 1rem;
-      border: 1px solid rgba(220, 38, 38, 0.45);
+      border: 1px solid var(--gk-bad-line, rgba(220, 38, 38, 0.45));
       border-radius: 0.25rem;
-      background: rgba(239, 68, 68, 0.2);
-    }
-    .dark .page-legend i {
-      border-color: rgba(252, 165, 165, 0.6);
-      background: rgba(239, 68, 68, 0.35);
+      background: var(--gk-bad-bg, rgba(239, 68, 68, 0.2));
     }
 
     /* ------------------------------------------------------------------------------------------
@@ -1430,5 +1427,24 @@
     }
     .page-card .page-form-actions {
       margin-top: 1.25rem;
+    }
+    /* The arrow inside a name on the overview pages that opens its guest page
+       (components/public-page-icon): it turns brand blue as the name is underlined. The arrow that
+       stands on its own (components/public-page-link) does the same with its own hover. */
+    .public-page-name:hover .public-page-icon,
+    .public-page-name:focus-visible .public-page-icon {
+      color: var(--brand-blue);
+    }
+    /* A watched word inside the text it was found in (SpamWatch::highlight(), on /admin/blocked
+       and an account's page), in amber, the colour of the alert that leads there. No padding:
+       inside an address it would read as a space. */
+    .spam-word {
+      background: rgb(254 243 199);
+      color: rgb(120 53 15);
+      border-radius: 0.125rem;
+    }
+    .dark .spam-word {
+      background: rgb(120 53 15 / 0.55);
+      color: rgb(253 230 138);
     }
 </style>

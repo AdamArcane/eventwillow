@@ -1,4 +1,4 @@
-<x-marketing-layout>
+<x-marketing-layout :hp="true">
     <x-slot name="title">Event Polls: Let Your Audience Vote on the Event Page</x-slot>
     <x-slot name="description">Add a poll to any event: a question, two to ten choices, one vote per signed-in guest. Guests read no count until they have voted. A Pro feature.</x-slot>
     <x-slot name="breadcrumbTitle">Event Polls</x-slot>
@@ -1057,7 +1057,7 @@
                                 <h3 class="es-vote-ink text-xl font-bold">In a newsletter</h3>
                                 <span class="es-vote-plan">Pro</span>
                             </div>
-                            <p class="es-vote-muted">Drop a poll block into a newsletter and it fills itself with the first open poll on your next event that has one: the question, the choices, and a Vote now button back to the event.</p>
+                            <p class="es-vote-muted">Drop a poll block into a newsletter and it fills itself with the first open poll on your next event that has one: the question, and each choice as a link back to the event, where the vote is cast.</p>
                         </div>
                         <div class="es-glare" aria-hidden="true"></div>
                         <div class="es-ring-glow" aria-hidden="true"></div>

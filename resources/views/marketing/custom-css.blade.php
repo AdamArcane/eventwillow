@@ -1,4 +1,4 @@
-<x-marketing-layout>
+<x-marketing-layout :hp="true">
     <x-slot name="title">Custom CSS | Advanced Schedule Styling - Event Schedule</x-slot>
     <x-slot name="description">Add your own CSS to your schedule page, event pages and embeds. It loads right after the built-in styles, so a tie goes to you. 10,000 characters on Pro.</x-slot>
     <x-slot name="breadcrumbTitle">Custom CSS</x-slot>
@@ -36,8 +36,9 @@
 
            DEVICES THIS PAGE MUST NOT BUILD. /for-ai-agents owns "The
            Console" (a request/response ledger on an always-dark code
-           surface); /open-source owns "The Commit Log" (a spine, path
-           chips, a unified diff); /embed-calendar owns "The Paste" (a
+           surface); /open-source owns "View source" (quotations of the
+           app's own code with line numbers and a marked line, one
+           switch); /embed-calendar owns "The Paste" (a
            slip of paper that is white in both modes); /selfhost owns
            "The Terminal". So there is NO window chrome with three
            traffic lights (the first-wave version of this page had one,

@@ -145,7 +145,9 @@ class HomeController extends Controller
         if ($subdomain) {
             $role = Role::whereSubdomain($subdomain)->firstOrFail();
 
-            return redirect()->route('role.follow', ['subdomain' => $subdomain]);
+            // Done here, not by sending the browser to the follow address: that address no longer
+            // follows when it is merely opened.
+            return app(\App\Http\Controllers\RoleController::class)->follow($request, $subdomain);
         }
 
         $user = $request->user();
@@ -1005,12 +1007,19 @@ class HomeController extends Controller
 
         $startOfMonth = Carbon::create($year, $month, 1, 0, 0, 0, $timezone)->startOfMonth();
 
-        $startOfMonthUtc = $startOfMonth->copy()->setTimezone('UTC');
+        // From the grid's first day, not the 1st: the month's first week shows the last days
+        // of the month before, and they were always empty here while a schedule's own month
+        // (RoleController::adminCalendarEvents()) showed the same events on them.
+        // A day of slack, as the end has: the bound is the VIEWER's midnight and an event is
+        // placed on its schedule's day, so a morning in Berlin fell before a midnight in Los
+        // Angeles and the grid's first cell was empty. Only grid days are placed (buildEventsMap()).
+        $startOfGridUtc = $startOfMonth->copy()->startOfWeek(0)->subDay()->setTimezone('UTC');
         $endOfGridUtc = $startOfMonth->copy()->endOfMonth()->endOfWeek(6)->addDays(2)->setTimezone('UTC');
 
         $roleIds = $user->editor()->pluck('roles.id');
 
-        $events = Event::with('roles', 'parts', 'tickets')
+        // creatorRole: every row is placed and timed on its own schedule's clock.
+        $events = Event::with('roles', 'parts', 'tickets', 'creatorRole')
             ->where(function ($query) use ($roleIds, $user) {
                 $query->where(function ($query) use ($roleIds) {
                     $query->whereIn('id', function ($query) use ($roleIds) {
@@ -1023,7 +1032,7 @@ class HomeController extends Controller
                     $query->where('user_id', $user->id);
                 });
             })
-            ->inMonth($startOfMonthUtc, $endOfGridUtc)
+            ->inMonth($startOfGridUtc, $endOfGridUtc)
             ->orderBy('starts_at')
             ->get();
 

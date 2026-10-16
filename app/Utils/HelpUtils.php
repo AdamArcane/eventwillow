@@ -17,6 +17,12 @@ class HelpUtils
         // Without this the template editor (newsletter-templates/{hash}/edit) fell through to
         // {subdomain}/edit below and Help opened the Creating Schedules guide.
         'newsletter-templates*' => '/docs/newsletters#saved-templates',
+        // A boost partner's pages, ahead of {subdomain}/requests and {subdomain}/edit below: on a
+        // flat route {subdomain} is *, which matched boost/requests and boost/{hash}/edit.
+        'boost/requests*' => '/docs/boost#partners-requests',
+        'boost/campaigns*' => '/docs/boost#partners-campaigns',
+        'boost/statements*' => '/docs/boost#partners-campaigns',
+        'boost/*/edit' => '/docs/boost#partners-requests',
 
         // Pages with section-level anchor mapping
         '{subdomain}/edit' => [
@@ -30,10 +36,13 @@ class HelpUtils
                 'section-merge' => '/docs/creating-schedules#merge',
                 'section-style' => '/docs/schedule-styling#overview',
                 'section-gallery' => '/docs/creating-schedules#gallery',
-                'style-tab-animation' => '/docs/schedule-styling#list-animation',
-                'style-tab-background' => '/docs/schedule-styling#backgrounds',
-                // The row is "Header and layout": it opens on the header style, with custom CSS last.
+                // The Style tab's four rows, in the order of the page, by the id of the row itself.
+                // Header opens on the header style; Events on the default layout, with the event
+                // animation under it.
                 'style-tab-advanced' => '/docs/schedule-styling#header-style',
+                'style-tab-background' => '/docs/schedule-styling#backgrounds',
+                'style-tab-animation' => '/docs/schedule-styling#event-layout',
+                'style-tab-css' => '/docs/schedule-styling#custom-css',
                 'section-subschedules' => '/docs/creating-schedules#customize',
                 'customize-tab-subschedules' => '/docs/creating-schedules#customize-subschedules',
                 'customize-tab-custom-fields' => '/docs/creating-schedules#customize-custom-fields',
@@ -57,11 +66,13 @@ class HelpUtils
                 'section-integrations' => '/docs/creating-schedules#integrations',
                 'integration-tab-email' => '/docs/creating-schedules#integrations-email',
                 'settings-tab-general' => '/docs/creating-schedules#settings-general',
+                'settings-tab-tickets' => '/docs/creating-schedules#ticket-presets',
                 'settings-tab-notifications' => '/docs/creating-schedules#settings-notifications',
                 'settings-tab-advanced' => '/docs/creating-schedules#settings-advanced',
                 'integration-tab-google' => '/docs/creating-schedules#integrations-google',
                 'integration-tab-microsoft' => '/docs/creating-schedules#integrations-microsoft',
                 'integration-tab-caldav' => '/docs/creating-schedules#integrations-caldav',
+                'integration-tab-feeds' => '/docs/creating-schedules#integrations-feeds',
                 'integration-tab-advanced' => '/docs/creating-schedules#integrations-advanced',
             ],
         ],
@@ -88,6 +99,8 @@ class HelpUtils
                 'ticket-tab-options' => '/docs/tickets#options',
                 'ticket-tab-promo_codes' => '/docs/tickets#promo-codes',
                 'ticket-tab-add_ons' => '/docs/tickets#add-ons',
+                // A preset chip or tile pressed (event/partials/ticket-presets-*).
+                'ticket-presets' => '/docs/tickets#ticket-presets',
                 'section-event-settings' => '/docs/creating-events#sponsors',
                 'settings-tab-sponsors' => '/docs/creating-events#sponsors',
                 'section-engagement' => '/docs/creating-events#engagement',
@@ -124,6 +137,8 @@ class HelpUtils
                 'ticket-tab-options' => '/docs/tickets#options',
                 'ticket-tab-promo_codes' => '/docs/tickets#promo-codes',
                 'ticket-tab-add_ons' => '/docs/tickets#add-ons',
+                // A preset chip or tile pressed (event/partials/ticket-presets-*).
+                'ticket-presets' => '/docs/tickets#ticket-presets',
                 'section-event-settings' => '/docs/creating-events#sponsors',
                 'settings-tab-sponsors' => '/docs/creating-events#sponsors',
                 'section-engagement' => '/docs/creating-events#engagement',
@@ -152,6 +167,7 @@ class HelpUtils
                 'payment-tab-payment-url' => '/docs/account-settings#payment-url',
                 'payment-tab-payfast' => '/docs/account-settings#payfast',
                 'payment-tab-paypal' => '/docs/account-settings#paypal',
+                'payment-tab-razorpay' => '/docs/account-settings#razorpay',
                 // A tab that holds several sections opens the guide at the first of them; pressing
                 // inside one of its sections moves Help to that section (layouts/navigation).
                 'section-security' => '/docs/account-settings#password',
@@ -163,6 +179,11 @@ class HelpUtils
                 'section-google-calendar' => '/docs/account-settings#google',
                 'section-microsoft-calendar' => '/docs/account-settings#microsoft',
                 'section-facebook' => '/docs/account-settings#facebook',
+                // A boost partner's tab and its two sections, on the page of a partner account
+                // only (BoostPartnerPagesTest).
+                'section-boost' => '/docs/account-settings#boosts',
+                'section-boost-account' => '/docs/account-settings#boosts-account',
+                'section-boost-card' => '/docs/account-settings#boosts-card',
                 'section-backup' => '/docs/account-settings#backup',
                 // Its two rows are the backup tool's own (a Vue app), reached by address.
                 'backup-tab-export' => '/docs/account-settings#backup-export',
@@ -192,6 +213,14 @@ class HelpUtils
         '{subdomain}/seating/*/design' => '/docs/allocated-seating#build',
         '{subdomain}/seating/box-office/*' => '/docs/allocated-seating#box-office',
         '{subdomain}/requests' => '/docs/managing-schedules#requests',
+        // The platform admin's list of every feed. Before the schedule's own feed pages: on a
+        // page with no schedule in its address `{subdomain}/feeds` reads as `*/feeds`, which
+        // is this page too, and the first match wins.
+        'admin/feeds*' => '/docs/selfhost/admin#manage-feeds',
+        '{subdomain}/feeds' => '/docs/managing-schedules#feeds',
+        '{subdomain}/feeds/add' => '/docs/managing-schedules#feeds-add',
+        '{subdomain}/feeds/*/edit' => '/docs/managing-schedules#feeds-settings',
+        '{subdomain}/feeds/*' => '/docs/managing-schedules#feeds-review',
         '{subdomain}/followers' => '/docs/managing-schedules#followers',
         '{subdomain}/team' => '/docs/managing-schedules#team',
         '{subdomain}/plan' => '/docs/managing-schedules#plan',
@@ -204,7 +233,19 @@ class HelpUtils
         '{subdomain}/import/ai' => '/docs/ai-import',
         '{subdomain}/import/eventbrite' => '/docs/ai-import#eventbrite-import',
         '{subdomain}/scan-agenda' => '/docs/scan-agenda',
-        '{subdomain}/events-graphic*' => '/docs/event-graphics',
+        // The page's five rows, by the pane each one opens (the row's aria-controls, which is what
+        // navigation.blade.php reads from a button[data-row-group] click). A flat mapping opened
+        // the top of the guide whichever setting was on screen.
+        '{subdomain}/events-graphic*' => [
+            'doc' => '/docs/event-graphics',
+            'anchors' => [
+                'graphic-pane-events' => '/docs/event-graphics#events',
+                'graphic-pane-flyers' => '/docs/event-graphics#dates-and-numbers',
+                'graphic-pane-header' => '/docs/event-graphics#header-footer-text',
+                'graphic-pane-caption' => '/docs/event-graphics#text-template',
+                'graphic-pane-email' => '/docs/event-graphics#email-scheduling',
+            ],
+        ],
         'events' => '/docs/getting-started',
         // Explicit rather than load-bearing: '{subdomain}/merge-venues*' above already matches
         // this page, because resolvePattern() substitutes '*' for {subdomain} when there is no
@@ -264,6 +305,7 @@ class HelpUtils
         // Not the organizer's Boost guide: 'boost*' above does not match this path.
         'admin/boost*' => '/docs/selfhost/admin#manage-boost',
         'admin/schedules*' => '/docs/selfhost/admin#manage-plans',
+        'admin/blocked*' => '/docs/selfhost/admin#manage-blocked',
         // Hosted only, and the operator's own walkthrough is on the SaaS side of the guide.
         'admin/domains*' => '/docs/saas/custom-domains#admin-management',
         'admin/referrals*' => '/docs/selfhost/admin#manage-referrals',
@@ -286,8 +328,27 @@ class HelpUtils
         'new/*' => '/docs/getting-started#create-schedule',
     ];
 
+    /**
+     * The Help page of a boost request to a boost partner: its form (/boost/create on an event a
+     * partner covers, which the address alone cannot tell from any other boost) and its own page.
+     */
+    public const BOOST_PARTNER_REQUESTS = '/docs/boost#partners-requests';
+
+    /**
+     * A page that knows better than its address which part of the guide it is: it names it here,
+     * while it renders, and the layout's Help link (drawn after the page's body) follows it.
+     */
+    public static function useDoc(string $docPath): void
+    {
+        request()->attributes->set('helpDocPath', $docPath);
+    }
+
     public static function getDocUrl(): string
     {
+        if ($chosen = request()->attributes->get('helpDocPath')) {
+            return marketing_url($chosen);
+        }
+
         foreach (self::$mappings as $pattern => $value) {
             $requestPattern = self::resolvePattern($pattern);
             if (request()->is($requestPattern)) {
@@ -302,6 +363,10 @@ class HelpUtils
 
     public static function getAnchorMap(): array
     {
+        if (request()->attributes->get('helpDocPath')) {
+            return [];
+        }
+
         foreach (self::$mappings as $pattern => $value) {
             $requestPattern = self::resolvePattern($pattern);
             if (request()->is($requestPattern)) {

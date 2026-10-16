@@ -30,7 +30,7 @@ class PersonalDataExportService
         'newsletter_clicks', 'newsletter_unsubscribes', 'event_comments', 'event_photos',
         'event_videos', 'event_poll_votes', 'carpool_offers', 'carpool_requests', 'carpool_reviews',
         'carpool_reports', 'support_conversations', 'referrals', 'boost_campaigns', 'webhooks',
-        'audit_logs', 'sessions', 'realtime_hits', 'user_active_days',
+        'audit_logs', 'sessions', 'realtime_hits', 'user_active_days', 'event_feeds', 'boost_partners',
     ];
 
     /**
@@ -38,7 +38,9 @@ class PersonalDataExportService
      * PersonalDataExportTest fails when a table appears that is in neither list.
      */
     public const NOT_EXPORTED = [
+        'account_blocks' => 'An operator\'s record of a blocked account. A blocked account cannot sign in to ask for this file, and the row is deleted when the block is lifted; the fact and its date are in account.blocked_at.',
         'backup_jobs' => 'Job bookkeeping; the archives are the user\'s own downloads.',
+        'spam_clearances' => 'An operator\'s decision that an account a watched word turned up for is not spam (SpamWatch). It is about the account, not something the person gave, and it is deleted with the account.',
         'calendar_syncs' => 'Which event maps to which calendar entry; covered by the calendar_connections summary.',
         'microsoft_calendar_syncs' => 'Same, for Outlook.',
         'dismissed_next_steps' => 'Interface state.',
@@ -116,7 +118,16 @@ class PersonalDataExportService
                 ['plan_type', 'status', 'subscribed_at', 'qualified_at', 'credited_at', 'created_at']),
             'boost_campaigns' => $this->rows('boost_campaigns', fn ($q) => $q->where('user_id', $user->id),
                 ['event_id', 'role_id', 'channel', 'name', 'status', 'currency_code', 'user_budget', 'total_charged', 'scheduled_start', 'scheduled_end', 'created_at']),
+            // An account that is a boost partner: its Page and ad account by name, how its
+            // Businesses pay it, and the card the fee is charged to by brand and last four. Never
+            // the Meta token or the Stripe ids.
+            'boost_partner' => $this->rows('boost_partners', fn ($q) => $q->where('user_id', $user->id),
+                ['connection_method', 'page_name', 'ad_account_name', 'ad_account_currency', 'payment_instructions', 'pm_brand', 'pm_last_four', 'enabled_at', 'confirmed_at', 'created_at']),
             'webhooks' => $this->rows('webhooks', fn ($q) => $q->where('user_id', $user->id), ['url', 'event_types', 'is_active', 'description', 'last_triggered_at', 'created_at']),
+            // The feeds this person added to a schedule. The security log is pruned after 90
+            // days, so this row is the lasting record of who did. Its name, the site it reads
+            // and when: not the address, which is a credential and is stored encrypted.
+            'feeds_added' => $this->rows('event_feeds', fn ($q) => $q->where('added_by', $user->id), ['role_id', 'name', 'host', 'kind', 'created_at']),
             'calendar_connections' => [
                 'google' => (bool) $user->google_token,
                 'microsoft' => (bool) $user->microsoft_token,
@@ -147,7 +158,7 @@ class PersonalDataExportService
             'profile_image_url', 'created_at', 'updated_at',
         ]);
 
-        foreach (['hero_variant', 'signup_intent', 'push_settings'] as $optional) {
+        foreach (['hero_variant', 'signup_intent', 'push_settings', 'signup_ip', 'blocked_at'] as $optional) {
             if (\Illuminate\Support\Facades\Schema::hasColumn('users', $optional)) {
                 $row[$optional] = DB::table('users')->where('id', $user->id)->value($optional);
             }

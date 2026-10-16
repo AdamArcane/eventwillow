@@ -70,6 +70,9 @@ return [
         // the model name would be sent to the API blank. Same reason as the plan prices below.
         'gemini_translation_model' => env('GEMINI_TRANSLATION_MODEL') ?: 'gemini-2.5-flash',
         'gemini_content_model' => env('GEMINI_CONTENT_MODEL') ?: 'gemini-2.5-flash',
+        // The blog's writer (App\Services\Blog\BlogWriter) alone: it follows a long brief, and a newer
+        // model kept every rule where the content model needed a second attempt. Empty: the content model.
+        'gemini_blog_model' => env('GEMINI_BLOG_MODEL') ?: null,
         'gemini_image_model' => env('GEMINI_IMAGE_MODEL') ?: 'imagen-4.0-ultra-generate-001',
         'client_id' => env('GOOGLE_CLIENT_ID'),
         'client_secret' => env('GOOGLE_CLIENT_SECRET'),
@@ -180,6 +183,13 @@ return [
         'webhook_verify_token' => env('META_WEBHOOK_VERIFY_TOKEN'),
         'max_concurrent_boosts' => env('META_MAX_CONCURRENT_BOOSTS', 3),
         'page_id' => env('META_PAGE_ID'),
+        // Boost partners. The platform's Meta Business (a partner shares its ad account and Page
+        // with it), the system user whose token is META_ACCESS_TOKEN, and the Facebook Login for
+        // Business configuration a partner can connect with instead (hidden until it is set).
+        'business_id' => env('META_BUSINESS_ID'),
+        'system_user_id' => env('META_SYSTEM_USER_ID'),
+        'login_config_id' => env('META_LOGIN_CONFIG_ID'),
+        'partners_enabled' => env('BOOST_PARTNERS_ENABLED', false),
     ],
 
 ];

@@ -60,17 +60,17 @@ class AppController extends Controller
             return response()->json(['success' => false, 'error' => 'Not available'], 403);
         }
 
-        // Require authentication unless this is the initial setup (no users exist yet)
-        if (! auth()->check()) {
-            try {
-                $hasUsers = \App\Models\User::exists();
-            } catch (\Exception $e) {
-                // Table may not exist yet during initial setup
-                $hasUsers = false;
-            }
-            if ($hasUsers) {
-                return response()->json(['success' => false, 'error' => 'Unauthorized'], 403);
-            }
+        // Only the setup wizard asks this, and only before the install has an account. Open to
+        // every signed-in person after that, it had the server open a connection to any host and
+        // port they named, on a route that is outside the CSRF check.
+        try {
+            $hasUsers = \App\Models\User::exists();
+        } catch (\Throwable $e) {
+            // Table may not exist yet during initial setup
+            $hasUsers = false;
+        }
+        if ($hasUsers) {
+            return response()->json(['success' => false, 'error' => 'Unauthorized'], 403);
         }
 
         $host = $request->input('host');
@@ -198,6 +198,18 @@ class AppController extends Controller
                 report($e);
             }
 
+            // Feeds: the addresses schedules keep reading for events. A feed is due about once
+            // an hour, so most calls are one query; a read stops starting new work after 20
+            // seconds. On this rail it runs inside this request's own lock, so a read can wait
+            // behind a slow tier above it. Keep in sync with routes/console.php; the lock the
+            // two rails share is inside the command.
+            try {
+                \Artisan::call('app:import-feeds');
+            } catch (\Throwable $e) {
+                \Log::error('Scheduled command app:import-feeds failed: '.$e->getMessage());
+                report($e);
+            }
+
             // === EVERY 5 MINUTES ===
             if (! Cache::has('td_5min')) {
                 Cache::put('td_5min', true, now()->addMinutes(5));
@@ -251,7 +263,7 @@ class AppController extends Controller
                     report($e);
                 }
 
-                if (\App\Services\MetaAdsService::isBoostConfigured()) {
+                if (\App\Services\MetaAdsService::shouldSync()) {
                     try {
                         \Artisan::call('boost:sync');
                     } catch (\Throwable $e) {
@@ -566,6 +578,15 @@ class AppController extends Controller
                 } catch (\Throwable $e) {
                     \Log::error('Scheduled command app:recheck-video-embeds failed: '.$e->getMessage());
                     report($e);
+                }
+                // The boost partners' monthly fee. Keep in sync with routes/console.php.
+                if (config('app.hosted')) {
+                    try {
+                        \Artisan::call('boost:charge-statements');
+                    } catch (\Throwable $e) {
+                        \Log::error('Scheduled command boost:charge-statements failed: '.$e->getMessage());
+                        report($e);
+                    }
                 }
 
                 // The blog is the marketing site's, so it is written on the nexus only: a
@@ -1017,46 +1038,117 @@ class AppController extends Controller
 
         // mqdefault (320x180) for cards; hqdefault (480x360) where it is shown large, as in emails.
         $quality = $request->query('q') === 'hq' ? 'hq' : 'mq';
+        // play=1 is the same thumbnail with a play mark drawn INTO it, for a newsletter: nothing
+        // layered over a picture survives Outlook, and a bare thumbnail reads as one more photo.
+        $play = $request->query('play') === '1';
         $cacheDir = storage_path('app/'.self::YOUTUBE_THUMB_CACHE_DIR);
         $cachePath = $cacheDir.'/'.$id.'_'.$quality.'.jpg';
+        $playPath = $cacheDir.'/'.$id.'_'.$quality.'_play.jpg';
         $headers = ['Content-Type' => 'image/jpeg', 'Cache-Control' => 'public, max-age=86400'];
+        $fresh = fn (string $path) => is_file($path) && time() - filemtime($path) < self::YOUTUBE_THUMB_TTL_DAYS * 24 * 60 * 60;
 
-        if (is_file($cachePath) && time() - filemtime($cachePath) < self::YOUTUBE_THUMB_TTL_DAYS * 24 * 60 * 60) {
-            return response()->file($cachePath, $headers);
+        if ($fresh($play ? $playPath : $cachePath)) {
+            return response()->file($play ? $playPath : $cachePath, $headers);
         }
 
-        $missingKey = 'yt-thumb-missing:'.$id.':'.$quality;
+        // The marked variant is drawn from the plain one, which may already be here.
+        $body = $fresh($cachePath) ? (string) file_get_contents($cachePath) : null;
 
-        if (Cache::has($missingKey) || (! auth()->check() && ! $this->youtubeIdIsReferenced($id))) {
-            abort(404);
+        if ($body === null) {
+            $missingKey = 'yt-thumb-missing:'.$id.':'.$quality;
+
+            if (Cache::has($missingKey) || (! auth()->check() && ! $this->youtubeIdIsReferenced($id))) {
+                abort(404);
+            }
+
+            try {
+                $response = Http::timeout(10)->get('https://i.ytimg.com/vi/'.$id.'/'.$quality.'default.jpg');
+            } catch (\Exception $e) {
+                report($e);
+                abort(404);
+            }
+
+            if (! $response->successful() || ! str_starts_with((string) $response->header('Content-Type'), 'image/')) {
+                // Only ids that passed the check above get here, so this key set is bounded by content.
+                Cache::put($missingKey, true, now()->addDay());
+                abort(404);
+            }
+
+            $body = $response->body();
+            $this->cacheYoutubeThumbnail($cacheDir, $cachePath, $body);
         }
 
-        try {
-            $response = Http::timeout(10)->get('https://i.ytimg.com/vi/'.$id.'/'.$quality.'default.jpg');
-        } catch (\Exception $e) {
-            report($e);
-            abort(404);
+        if (! $play) {
+            return response($body, 200, $headers);
         }
 
-        if (! $response->successful() || ! str_starts_with((string) $response->header('Content-Type'), 'image/')) {
-            // Only ids that passed the check above get here, so this key set is bounded by content.
-            Cache::put($missingKey, true, now()->addDay());
-            abort(404);
+        // A thumbnail that cannot be drawn on is still a thumbnail: the plain one is sent, and not
+        // cached under the marked name, so the next request tries again.
+        $marked = $this->youtubeThumbnailWithPlayMark($body);
+
+        if ($marked === null) {
+            return response($body, 200, $headers);
         }
 
+        $this->cacheYoutubeThumbnail($cacheDir, $playPath, $marked);
+
+        return response($marked, 200, $headers);
+    }
+
+    /**
+     * Written beside the target and renamed into place, so a concurrent request for the same
+     * video is served the old file or the new one, never half of one.
+     */
+    private function cacheYoutubeThumbnail(string $cacheDir, string $path, string $body): void
+    {
         if (! is_dir($cacheDir)) {
             @mkdir($cacheDir, 0755, true);
         }
 
-        // Written beside the target and renamed into place, so a concurrent request for the same
-        // video is served the old file or the new one, never half of one.
-        $tmpPath = $cachePath.'.'.Str::random(8).'.tmp';
+        $tmpPath = $path.'.'.Str::random(8).'.tmp';
 
-        if (@file_put_contents($tmpPath, $response->body()) !== false && ! @rename($tmpPath, $cachePath)) {
+        if (@file_put_contents($tmpPath, $body) !== false && ! @rename($tmpPath, $path)) {
             @unlink($tmpPath);
         }
+    }
 
-        return response($response->body(), 200, $headers);
+    /**
+     * $jpeg with a play mark in its centre: a dark disc, a white ring, a white triangle. Null when
+     * the picture cannot be read or GD is not there.
+     *
+     * The mark is drawn four times its size and resampled down, because GD's own ellipse has no
+     * anti-aliasing and a jagged disc is the first thing a reader would see.
+     */
+    private function youtubeThumbnailWithPlayMark(string $jpeg): ?string
+    {
+        if (! function_exists('imagecreatefromstring') || ! ($image = @imagecreatefromstring($jpeg))) {
+            return null;
+        }
+
+        $size = (int) round(min(imagesx($image), imagesy($image)) * 0.3);
+        $big = $size * 4;
+        $mark = imagecreatetruecolor($big, $big);
+        imagealphablending($mark, false);
+        imagesavealpha($mark, true);
+        imagefilledrectangle($mark, 0, 0, $big, $big, imagecolorallocatealpha($mark, 0, 0, 0, 127));
+        imagealphablending($mark, true);
+
+        $centre = intdiv($big, 2);
+        imagefilledellipse($mark, $centre, $centre, $big - 4, $big - 4, imagecolorallocatealpha($mark, 255, 255, 255, 8));
+        imagefilledellipse($mark, $centre, $centre, (int) round($big * 0.9), (int) round($big * 0.9), imagecolorallocatealpha($mark, 15, 23, 42, 30));
+        imagefilledpolygon($mark, [
+            (int) round($big * 0.41), (int) round($big * 0.30),
+            (int) round($big * 0.41), (int) round($big * 0.70),
+            (int) round($big * 0.72), $centre,
+        ], imagecolorallocate($mark, 255, 255, 255));
+
+        imagealphablending($image, true);
+        imagecopyresampled($image, $mark, intdiv(imagesx($image) - $size, 2), intdiv(imagesy($image) - $size, 2), 0, 0, $size, $size, $big, $big);
+
+        ob_start();
+        imagejpeg($image, null, 88);
+
+        return ob_get_clean() ?: null;
     }
 
     /**

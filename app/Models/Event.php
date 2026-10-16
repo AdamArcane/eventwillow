@@ -272,7 +272,10 @@ class Event extends Model
      *
      * import_source and import_batch are deliberately NOT fillable. EventRepo::saveEvent() fills
      * an Event from the whole request, so a fillable column would be writable from every event
-     * form; the code that creates the event stamps them instead.
+     * form; the code that creates the event stamps them instead. external_id (the id another
+     * system knows the event by) is kept out of $fillable for the same reason: the API controller
+     * writes it, after checking who is asking and that the owning schedule has no other event
+     * with it.
      */
     public const IMPORT_AI = 'ai';                 // text or a flyer read by the model
 
@@ -290,9 +293,12 @@ class Event extends Model
 
     public const IMPORT_CALDAV = 'caldav';
 
+    public const IMPORT_FEED = 'feed';             // an address the schedule keeps reading (EventFeed)
+
     public const IMPORT_SOURCES = [
         self::IMPORT_AI, self::IMPORT_ICS, self::IMPORT_PAGE, self::IMPORT_PAGE_AI,
         self::IMPORT_EVENTBRITE, self::IMPORT_GOOGLE, self::IMPORT_MICROSOFT, self::IMPORT_CALDAV,
+        self::IMPORT_FEED,
     ];
 
     /**
@@ -306,6 +312,37 @@ class Event extends Model
      * hour later, and a "no" kept for its lifetime left every event it synced unlabelled long
      * after the columns were there. Until the answer is yes it is one small query per ask.
      */
+    /**
+     * Whether a feed made this event and is still keeping it up to date. Such an event is
+     * written by its feed and by its owner, and by nothing else: an inbound calendar sync that
+     * rewrote it would look to the feed exactly like the owner editing every field.
+     *
+     * "Still": import_source says where an event came from and stays for good. Once its feed is
+     * removed, or the owner has dismissed it from the feed, it is an event like any other.
+     */
+    public function isFromFeed(): bool
+    {
+        return $this->import_source === self::IMPORT_FEED
+            && EventFeed::tablesReady()
+            && EventFeedItem::where('event_id', $this->id)
+                ->whereIn('state', [EventFeedItem::STATE_IMPORTED, EventFeedItem::STATE_DECIDE])
+                ->exists();
+    }
+
+    /** The feed that is keeping this event up to date, for a page that says so. Null for any other event. */
+    public function keptByFeed(): ?EventFeed
+    {
+        if (! $this->exists || $this->import_source !== self::IMPORT_FEED || ! EventFeed::tablesReady()) {
+            return null;
+        }
+
+        return EventFeedItem::where('event_id', $this->id)
+            ->whereIn('state', [EventFeedItem::STATE_IMPORTED, EventFeedItem::STATE_DECIDE])
+            ->with('feed')
+            ->first()
+            ?->feed;
+    }
+
     public static function importColumnsReady(): bool
     {
         return self::$importColumnsReady = self::$importColumnsReady
@@ -323,13 +360,15 @@ class Event extends Model
      * Each is the literal first segment of a route registered ahead of the event routes, whose
      * next segment takes an encoded event id, so /{slug}/{id} - or the dated, gallery or .ics URL
      * after it - reached that route instead: an event slugged "carpool" opened its carpool board,
-     * one slugged "curate-event" a GET that curates it, and a venue's event with an act called
-     * "book" (the other schedule's subdomain is the slug there) the booking form. guestUrlSlug()
+     * and a venue's event with an act called "book" (the other schedule's subdomain is the slug
+     * there) the booking form. Listing an event ("curate-event") and clearing its videos were
+     * GETs on this list until 2026-10; they are posted now, and a route that answers no GET
+     * shadows nothing. guestUrlSlug()
      * writes such a slug as "{slug}-event". With the id in the URL the slug is decoration - every
      * guest route resolves the event by its id - so existing events are fixed with no migration,
      * and their old URLs never reached them anyway.
      *
-     * book, carpool, curate-event and promo are guest routes on both kinds of install, map-image a
+     * book, carpool and promo are guest routes on both kinds of install, map-image a
      * hosted one. The rest are signed-in app routes, which selfhost registers under
      * /{subdomain}/... ahead of its guest routes. ShadowedEventSlugTest reads both route tables and
      * fails when this list and they drift apart.
@@ -337,11 +376,10 @@ class Event extends Model
     public const SHADOWED_SLUGS = [
         'book',
         'carpool',
-        'clear-videos',
         'clone-event',
-        'curate-event',
         'download-photos',
         'edit-event',
+        'feeds',
         'generate-flyer',
         'generate-style-image',
         'map-image',
@@ -661,6 +699,14 @@ class Event extends Model
                 ->get();
 
             foreach ($activeCampaigns as $campaign) {
+                // A partner boost is stopped, never deleted at Meta and never refunded: the platform
+                // holds none of its money, and its spend must stay readable for the statement.
+                if ($campaign->isPartner()) {
+                    \App\Services\BoostPartnerService::stopInCascade($campaign);
+
+                    continue;
+                }
+
                 try {
                     if ($campaign->meta_campaign_id && \App\Services\MetaAdsService::isBoostConfigured()) {
                         $metaService = app()->make(\App\Services\MetaAdsService::class);
@@ -794,9 +840,18 @@ class Event extends Model
         }
 
         // 'cancel', or a guarded 'delete': hide the event without pushing the change back out.
-        if (! $this->is_cancelled) {
-            $this->forceFill(['is_cancelled' => true, 'cancelled_at' => now()])->save();
-        }
+        // The flag and nothing else: no sequence bump, no webhook, no boost or installment
+        // unwinding, and the calendar services write the audit row once they have the outcome.
+        app(\App\Services\EventLifecycleService::class)->cancel(
+            $this,
+            cancelBoosts: false,
+            stopInstallments: false,
+            pushToCalendars: false,
+            webhook: false,
+            bumpSequence: false,
+            asBooking: false,
+            audit: false,
+        );
 
         return $action === 'delete' ? 'guarded_cancelled' : 'cancelled';
     }
@@ -1181,6 +1236,27 @@ class Event extends Model
     public function appointmentType()
     {
         return $this->belongsTo(AppointmentType::class);
+    }
+
+    /**
+     * The team member a booking was made with (events.appointment_host_user_id, stamped by
+     * AppointmentService::book() and kept when the type's host changes). Not fillable.
+     */
+    public function appointmentHost()
+    {
+        return $this->belongsTo(User::class, 'appointment_host_user_id');
+    }
+
+    /** The booking's host as a guest sees it ("with Sam"): the name only, never the address. */
+    public function appointmentHostName(): ?string
+    {
+        if (! $this->appointment_host_user_id) {
+            return null;
+        }
+
+        $name = trim((string) $this->appointmentHost?->name);
+
+        return $name !== '' ? $name : null;
     }
 
     /** Whether this event is a Calendly-style appointment booking (vs a regular event). */
@@ -3001,11 +3077,14 @@ class Event extends Model
      *
      *  - free: every such row costs nothing.
      *  - min / from: the lowest price, and whether there is a higher one.
+     *  - says: how the line is worded (priceWording()): 'free', 'from' or 'price'. A free
+     *          type beside paid ones is 'free' here while `free` stays false, because there
+     *          is still something to pay for.
      *  - low:  tickets can be bought and few are left: a tenth of the house or fewer, and never
      *          more than ten. Only where the house has a size (not unlimited, not a seat map).
      *          Never a number: the page says "Few left", not how many.
      *
-     * @return array{free: bool, min: float, from: bool, currency: ?string, low: bool}|null
+     * @return array{free: bool, min: float, from: bool, says: string, currency: ?string, low: bool}|null
      */
     public function ticketPriceSummary($date = null): ?array
     {
@@ -3038,11 +3117,27 @@ class Event extends Model
             'free' => $prices->max() <= 0,
             'min' => $prices->min(),
             'from' => $prices->min() < $prices->max(),
+            'says' => self::priceWording($prices->min(), $prices->max()),
             'currency' => $this->ticket_currency_code,
             // "Few left" is about what has gone: a room of two with nothing sold is not running out.
             'low' => $left !== null && $left > 0 && $left < $capacity && $this->ticketSaleState($date) === 'open'
                 && $left <= min(10, max(2, (int) floor($capacity * 0.1))),
         ];
+    }
+
+    /**
+     * How a set of ticket prices is worded in one line: 'free' where the cheapest way in costs
+     * nothing, 'from' where prices differ, 'price' where there is one.
+     *
+     * One rule for the three places that say it: a card or a row of the list and the month
+     * (cardTicketFields()), the event page's price line (event/show-guest) and a newsletter's
+     * event row (NewsletterService::eventRow()). Each used to read "the lowest price, and
+     * whether there is a higher one" for itself, and a free type beside paid ones (free entry,
+     * a paid table) came out as "From $0" in all three.
+     */
+    public static function priceWording(float $min, float $max): string
+    {
+        return $min <= 0 ? 'free' : ($min < $max ? 'from' : 'price');
     }
 
     /**
@@ -3439,9 +3534,15 @@ class Event extends Model
         }
 
         $prices = $priced->map(fn ($ticket) => (float) $ticket->price);
-        $free = $prices->max() <= 0;
+        // priceWording(): the event page's price line and a newsletter's row ask the same rule.
+        $says = self::priceWording($prices->min(), $prices->max());
+        $free = $says === 'free';
         $lowest = \App\Utils\MoneyUtils::format($prices->min(), $this->ticket_currency_code);
-        $from = $free ? null : ($prices->min() < $prices->max() ? __('messages.price_from', ['price' => $lowest]) : $lowest);
+        $from = match ($says) {
+            'free' => null,
+            'from' => __('messages.price_from', ['price' => $lowest]),
+            default => $lowest,
+        };
 
         $soldOut = [];
         $low = [];
@@ -4627,6 +4728,29 @@ class Event extends Model
         return $this->short_description_en ?: $this->short_description;
     }
 
+    /**
+     * When the event ends, in UTC and in the format of starts_at: the start plus its length, to
+     * the minute. Null when the event has no start or no length.
+     *
+     * To the minute because events.duration keeps hours to three decimals: 1h20 is stored as
+     * 1.333, and the plain sum reads 19:59:58 for an event that ends at 20:00. No event in this
+     * app is timed finer than a minute, and 0.001 hours is 3.6 seconds, so a minute-aligned end
+     * always comes back as the minute it was.
+     *
+     * Elapsed time, not wall-clock: an event that runs across a clock change is an hour shorter
+     * or longer in local terms, exactly as its end is displayed everywhere else.
+     */
+    public function endsAtUtc(): ?string
+    {
+        $minutes = (int) round(((float) $this->duration) * 60);
+
+        if (! $this->starts_at || $minutes < 1) {
+            return null;
+        }
+
+        return Carbon::parse($this->starts_at, 'UTC')->addMinutes($minutes)->format('Y-m-d H:i:s');
+    }
+
     public function toApiData()
     {
         $data = new \stdClass;
@@ -4642,12 +4766,20 @@ class Event extends Model
         $data->description = $this->description;
         $data->starts_at = $this->starts_at;
         $data->duration = $this->duration;
+        // Derived, never stored: the same fact as duration, for a client that thinks in end times.
+        $data->ends_at = $this->endsAtUtc();
         $data->category_id = $this->category_id;
         $data->category_name = $this->resolveCategoryName();
         $data->category_color = $this->resolveCategoryColor();
         $data->is_private = (bool) $this->is_private;
         $data->is_draft = (bool) $this->is_draft;
         $data->is_internal = (bool) $this->is_internal;
+        // Read-only here: an event is cancelled and restored through its own endpoints, which do
+        // more than flip the flag (connected calendars, boosts, the people registered).
+        $data->is_cancelled = (bool) $this->is_cancelled;
+        $data->cancelled_at = $this->cancelled_at?->toIso8601String();
+        // The id another system knows this event by (the API sets it; see ApiEventController).
+        $data->external_id = $this->external_id;
         $data->is_password_protected = $this->isPasswordProtected();
         $data->event_url = $this->event_url;
         $data->registration_url = $this->registration_url;
@@ -4676,6 +4808,8 @@ class Event extends Model
 
         // Tickets
         $data->tickets_enabled = (bool) $this->tickets_enabled;
+        // The schedule's ticket preset these tickets came from (Settings > Ticket presets), if any.
+        $data->ticket_preset_id = $this->ticket_preset_id ? UrlUtils::encodeId($this->ticket_preset_id) : null;
         // Encoded like every other user-visible id. Present but null on a general-admission event
         // so a subscriber can branch on it without special-casing a missing key.
         $data->seating_plan_id = $this->seating_plan_id ? UrlUtils::encodeId($this->seating_plan_id) : null;

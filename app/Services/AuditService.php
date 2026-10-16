@@ -54,6 +54,15 @@ class AuditService
 
     const SCHEDULE_MEMBER_REMOVE = 'schedule.member_remove';
 
+    // A feed is an address somebody chose for the schedule to keep reading. Who added, changed
+    // or removed one is recorded with the site and the kind, never the address: for a private
+    // calendar the address is the credential, and this log is read by the whole team.
+    const FEED_ADD = 'schedule.feed_add';
+
+    const FEED_UPDATE = 'schedule.feed_update';
+
+    const FEED_REMOVE = 'schedule.feed_remove';
+
     // Destructive, and often performed by someone outside the schedule it touches (a curator
     // clearing a broken video off an unclaimed act), so worth a trail.
     const SCHEDULE_VIDEO_REMOVE = 'schedule.video_remove';
@@ -213,6 +222,21 @@ class AuditService
 
     const ADMIN_SCHEDULE_UPDATE = 'admin.schedule_update';
 
+    // An operator shutting an account out, and letting it back in (AccountBlockService), and
+    // the list of what new accounts are refused for (Blocklist, /admin/blocked).
+    const ADMIN_ACCOUNT_BLOCK = 'admin.account_block';
+
+    const ADMIN_ACCOUNT_UNBLOCK = 'admin.account_unblock';
+
+    const ADMIN_BLOCKLIST_ADD = 'admin.blocklist_add';
+
+    const ADMIN_BLOCKLIST_REMOVE = 'admin.blocklist_remove';
+
+    // An account a watched word turned up for, marked not spam and flagged again (SpamWatch).
+    const ADMIN_SPAM_CLEAR = 'admin.spam_clear';
+
+    const ADMIN_SPAM_UNCLEAR = 'admin.spam_unclear';
+
     const ADMIN_GRANT = 'admin.grant';
 
     const ADMIN_REVOKE = 'admin.revoke';
@@ -240,6 +264,31 @@ class AuditService
     const BOOST_RESUME = 'boost.resume';
 
     const BOOST_CANCEL = 'boost.cancel';
+
+    // Boost partner actions (a partner's own Page and ad account; BoostPartnerService)
+    const BOOST_PARTNER_SUBMIT = 'boost.partner.submit';
+
+    const BOOST_PARTNER_EDIT = 'boost.partner.edit';
+
+    const BOOST_PARTNER_APPROVE = 'boost.partner.approve';
+
+    const BOOST_PARTNER_DECLINE = 'boost.partner.decline';
+
+    const BOOST_PARTNER_PAYMENT = 'boost.partner.payment';
+
+    const BOOST_PARTNER_PAYMENT_WITHDRAWN = 'boost.partner.payment_withdrawn';
+
+    const BOOST_PARTNER_STOP = 'boost.partner.stop';
+
+    const BOOST_PARTNER_LAUNCH = 'boost.partner.launch';
+
+    const BOOST_PARTNER_ENABLE = 'boost.partner.enable';
+
+    const BOOST_PARTNER_CONNECT = 'boost.partner.connect';
+
+    const BOOST_PARTNER_CONFIRM = 'boost.partner.confirm';
+
+    const BOOST_PARTNER_DISCONNECT = 'boost.partner.disconnect';
 
     // On-network promotion actions
     const PROMO_CREATE = 'promo.create';
@@ -298,6 +347,8 @@ class AuditService
         'payfast_passphrase',
         // The client id and the webhook id are identifiers, not secrets, so they stay readable.
         'paypal_client_secret',
+        'razorpay_key_secret',
+        'razorpay_webhook_secret',
         'two_factor_secret',
         'two_factor_recovery_codes',
     ];

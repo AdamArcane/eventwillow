@@ -14,13 +14,11 @@ use App\Http\Requests\EventPollStoreRequest;
 use App\Http\Requests\EventPollVoteRequest;
 use App\Http\Requests\EventUpdateRequest;
 use App\Http\Requests\EventVideoSubmitRequest;
-use App\Jobs\NotifyEventCancelled;
 use App\Jobs\SendQueuedEmail;
 use App\Mail\EventAccepted;
 use App\Mail\EventChanged;
 use App\Mail\EventDeclined;
 use App\Models\AnalyticsEventsDaily;
-use App\Models\BoostCampaign;
 use App\Models\DismissedVenueMergeSuggestion;
 use App\Models\Event;
 use App\Models\EventComment;
@@ -37,20 +35,20 @@ use App\Models\Sale;
 use App\Models\Ticket;
 use App\Models\User;
 use App\Notifications\DeletedEventNotification;
-use App\Notifications\NewRequestsNotification;
 use App\Repos\EventRepo;
 use App\Rules\NoFakeEmail;
+use App\Rules\NotBlocklisted;
 use App\Rules\ValidTurnstile;
 use App\Services\AuditService;
-use App\Services\BoostBillingService;
+use App\Services\Blocklist;
 use App\Services\DemoService;
 use App\Services\EventChangeNotifier;
+use App\Services\EventLifecycleService;
 use App\Services\LinkImportService;
-use App\Services\MetaAdsService;
-use App\Services\NotificationEmailService;
 use App\Services\OneSignalService;
+use App\Services\RequestNotifier;
+use App\Services\TicketPresets;
 use App\Services\UsageTrackingService;
-use App\Services\WebhookService;
 use App\Utils\AiImageIssuance;
 use App\Utils\ColorUtils;
 use App\Utils\GalleryUtils;
@@ -170,7 +168,7 @@ class EventController extends Controller
         // the booking instead - it frees the slot and (Phase 6) notifies the guest.
         if ($event->appointment_type_id) {
             AuditService::log(AuditService::EVENT_CANCEL, $user->id, 'Event', $event->id, null, null, $event->name);
-            $this->cancelAppointmentBooking($event);
+            app(EventLifecycleService::class)->cancelBooking($event);
 
             return redirect(route('role.view_admin', ['subdomain' => $subdomain, 'tab' => 'appointments']))
                 ->with('message', __('messages.appointments_cancelled_message'));
@@ -190,6 +188,8 @@ class EventController extends Controller
             return redirect()->back()->with('error', __('messages.cannot_delete_event_with_sales'));
         }
 
+        // Deleted on purpose: a feed that made it does not bring it back.
+        \App\Models\EventFeedItem::dismissFor($event);
         $this->deleteEventRecord($event, $user);
 
         /*
@@ -213,32 +213,19 @@ class EventController extends Controller
     }
 
     /**
-     * Delete an event nobody holds a ticket or booking for: the audit row, its boosts stopped, the
-     * webhook, then the row. The caller has already decided this event may go.
+     * Delete an event nobody holds a ticket or booking for (EventLifecycleService::delete(): the
+     * audit row, its boosts stopped, the webhook, then the row). The caller has already decided
+     * this event may go.
      */
     private function deleteEventRecord(Event $event, $user): void
     {
-        AuditService::log(AuditService::EVENT_DELETE, $user->id, 'Event', $event->id, null, null, $event->name);
-
-        // Cancel active boost campaigns before deletion (prevents orphaned Meta campaigns)
-        $this->cancelActiveBoosts($event);
-
-        // Capture webhook payload before deletion
-        if (! $event->is_draft) {
-            $webhookPayload = [
-                'event' => 'event.deleted',
-                'timestamp' => now()->toIso8601String(),
-                'data' => $event->toApiData(),
-            ];
-            WebhookService::dispatch('event.deleted', $event, $webhookPayload);
-        }
-
-        $event->delete();
+        app(EventLifecycleService::class)->delete($event, $user->id);
     }
 
     /**
      * Soft-cancel an event: retain the row (and its sales / refund trail), mark it cancelled, stop
      * advertising it, remove it from synced calendars, and optionally notify registered attendees.
+     * What that involves, and in which order, is EventLifecycleService::cancel().
      */
     public function cancel(Request $request, $subdomain, $hash)
     {
@@ -249,97 +236,16 @@ class EventController extends Controller
             return redirect()->back()->with('error', __('messages.not_authorized'));
         }
 
-        if ($event->is_cancelled) {
-            return redirect()->back()->with('message', __('messages.event_cancelled_flash'));
-        }
-
-        // Appointment bookings: cancel the sale too so the slot frees, analytics decrement, and
-        // (Phase 6) the guest is emailed. The Sale hook sets is_cancelled on the event.
-        if ($event->appointment_type_id) {
-            AuditService::log(AuditService::EVENT_CANCEL, $user->id, 'Event', $event->id, null, null, $event->name);
-            $this->cancelAppointmentBooking($event);
-
-            return redirect()->back()->with('message', __('messages.event_cancelled_flash'));
-        }
-
-        AuditService::log(AuditService::EVENT_CANCEL, $user->id, 'Event', $event->id, null, null, $event->name);
-
-        // Cancel active boost campaigns (don't keep advertising a cancelled event)
-        $this->cancelActiveBoosts($event);
-
-        // Stop charging installment plans. Cancelling an event deliberately leaves its sales
-        // `paid` (see the note in ticket/order.blade.php), so nothing here reaches
-        // Sale::booted()'s cancel branch - which means without this the buyer's card keeps being
-        // debited monthly for an event that is not happening. Same reasoning as the boost
-        // cancellation directly above: unwind the live money before flipping the flag.
-        $this->cancelActiveInstallmentPlans($event);
-
-        $event->forceFill([
-            'is_cancelled' => true,
-            'cancelled_at' => now(),
-            // Bump the iCal sequence so subscribed calendars pick up the cancellation (STATUS:CANCELLED).
-            'ical_sequence' => (int) $event->ical_sequence + 1,
-        ])->save();
-
-        // Remove the event from organizers' / members' synced calendars
-        $event->dispatchCalendarSync('delete');
-
-        if (! $event->is_draft) {
-            WebhookService::dispatch('event.cancelled', $event);
-        }
-
-        // Notify whoever there is to tell - buyers AND the interest list.
-        //
-        // No hasEmailSettings() here any more. notifyCancellation() already applies that gate to
-        // the SALES half internally, where it belongs: a buyer got their receipt from the
-        // schedule's own address and a platform-branded follow-up would be a surprise. Applying it
-        // at the dispatch site instead killed the interest half as well - and those people asked
-        // US, on this schedule's public page, and were told they would hear if anything changed.
-        // Most schedules have no SMTP of their own, so that promise was false for nearly all of
-        // them.
-        if ($request->boolean('notify_attendees')
-            && ! $event->is_draft
-            && EventChangeNotifier::hasAnyoneToTell($event)) {
-            $note = $request->input('notify_message');
-            NotifyEventCancelled::dispatch($event->id, $note ? Str::limit($note, 280, '') : null);
-            $event->forceFill(['attendees_notified_at' => now()])->saveQuietly();
-        }
+        // An appointment booking is cancelled through its sale, so the slot frees and the guest is
+        // emailed. An event that is already cancelled is left as it is. Both answer the same way.
+        app(EventLifecycleService::class)->cancel(
+            $event,
+            $user->id,
+            notifyAttendees: $request->boolean('notify_attendees'),
+            note: $request->input('notify_message'),
+        );
 
         return redirect()->back()->with('message', __('messages.event_cancelled_flash'));
-    }
-
-    /**
-     * Cancel an appointment booking from an owner action (event delete/cancel). Cancels the live
-     * sale - whose Sale::booted hook soft-cancels the event and frees the slot - and decrements
-     * analytics for a paid booking. Falls back to cancelling the event directly if no live sale.
-     */
-    protected function cancelAppointmentBooking(Event $event): void
-    {
-        $sale = Sale::where('event_id', $event->id)
-            ->whereNotIn('status', ['cancelled', 'refunded', 'expired'])
-            ->first();
-
-        if ($sale) {
-            $wasPaid = $sale->status === 'paid';
-            $wasPaidMoney = $wasPaid && (float) $sale->payment_amount > 0;
-            $sale->status = 'cancelled';
-            $sale->save();
-            if ($wasPaid) {
-                AnalyticsEventsDaily::decrementSale($event->id, (float) $sale->payment_amount, $sale->created_at->toDateString());
-            }
-            // Owner cancelled - email the guest, and remind the owner to refund a paid booking.
-            app(\App\Services\EmailService::class)->sendAppointmentGuestCancellation($sale);
-            if ($wasPaidMoney) {
-                app(\App\Services\EmailService::class)->sendAppointmentOwnerCancellation($sale, true);
-            }
-        } elseif (! $event->is_cancelled) {
-            $event->forceFill([
-                'is_cancelled' => true,
-                'cancelled_at' => now(),
-                'ical_sequence' => (int) $event->ical_sequence + 1,
-            ])->saveQuietly();
-            $event->dispatchCalendarSync('delete');
-        }
     }
 
     /**
@@ -356,116 +262,11 @@ class EventController extends Controller
             return redirect()->back()->with('error', __('messages.not_authorized'));
         }
 
-        if (! $event->is_cancelled) {
+        if (app(EventLifecycleService::class)->restore($event, $user->id) === EventLifecycleService::NOT_CANCELLED) {
             return redirect()->back();
         }
 
-        AuditService::log(AuditService::EVENT_RESTORE, $user->id, 'Event', $event->id, null, null, $event->name);
-
-        $event->forceFill([
-            'is_cancelled' => false,
-            'cancelled_at' => null,
-            // Bump the iCal sequence so subscribed calendars pick up the restored event.
-            'ical_sequence' => (int) $event->ical_sequence + 1,
-        ])->save();
-
-        if (! $event->is_draft) {
-            $event->dispatchCalendarSync('create');
-            WebhookService::dispatch('event.updated', $event);
-        }
-
         return redirect()->back()->with('message', __('messages.event_restored'));
-    }
-
-    /**
-     * Cancel and refund any active boost campaigns for an event. Shared by delete() and cancel() so a
-     * cancelled or deleted event never keeps running paid ads.
-     */
-    private function cancelActiveBoosts(Event $event): void
-    {
-        $activeCampaigns = BoostCampaign::where('event_id', $event->id)
-            ->unsettled()
-            ->get();
-
-        foreach ($activeCampaigns as $campaign) {
-            try {
-                $cancelled = \DB::transaction(function () use ($campaign) {
-                    $campaign = BoostCampaign::lockForUpdate()->find($campaign->id);
-                    if (! $campaign || ! $campaign->canBeCancelled()) {
-                        return false;
-                    }
-                    $campaign->update([
-                        'status' => 'cancelled',
-                        'meta_status' => $campaign->meta_campaign_id ? 'DELETED' : null,
-                    ]);
-
-                    return true;
-                });
-
-                if ($cancelled) {
-                    if ($campaign->meta_campaign_id) {
-                        (new MetaAdsService)->deleteCampaign($campaign);
-                    }
-
-                    // Gate the STRIPE call, not the refund. settlePayment()'s credit branch
-                    // debits boost_credit regardless of mode, so gating the whole block meant
-                    // deleting on selfhost destroyed the advertiser's wallet balance outright.
-                    // refundOnCancellation() reaches Stripe only when there is an intent, which
-                    // a selfhost campaign never has.
-                    $campaign->refresh();
-                    if (! in_array($campaign->billing_status, ['refunded', 'partially_refunded'])) {
-                        $billingService = new BoostBillingService;
-                        if ($campaign->billing_status === 'pending') {
-                            if (config('app.hosted') && ! config('app.is_testing') && $campaign->stripe_payment_intent_id) {
-                                $billingService->cancelPaymentIntent($campaign);
-                            }
-                        } else {
-                            $billingService->refundOnCancellation($campaign);
-                        }
-                    }
-                }
-            } catch (\Exception $e) {
-                \Log::warning('Failed to cancel boost campaign', [
-                    'campaign_id' => $campaign->id,
-                    'event_id' => $event->id,
-                    'error' => $e->getMessage(),
-                ]);
-            }
-        }
-    }
-
-    /**
-     * Stop the off-session charges for every installment plan on this event.
-     *
-     * A cancelled event keeps its sales `paid` by design, so none of them pass through
-     * Sale::booted()'s cancel branch. Without this the scheduled installments stay live and
-     * app:charge-installments goes on debiting real cards, month after month, for an event that
-     * has been called off. Failures are logged rather than thrown: the cancellation itself must
-     * still complete.
-     */
-    private function cancelActiveInstallmentPlans(Event $event): void
-    {
-        try {
-            $saleIds = Sale::where('event_id', $event->id)
-                ->where('is_deleted', false)
-                ->pluck('id');
-
-            $cancelled = app(\App\Services\InstallmentService::class)
-                ->cancelPlansForSales($saleIds, 'event_cancelled');
-
-            if ($cancelled) {
-                \Log::info('Cancelled installment plans for cancelled event', [
-                    'event_id' => $event->id,
-                    'plans' => $cancelled,
-                ]);
-            }
-        } catch (\Exception $e) {
-            report($e);
-            \Log::error('Failed to cancel installment plans for cancelled event', [
-                'event_id' => $event->id,
-                'error' => $e->getMessage(),
-            ]);
-        }
     }
 
     /**
@@ -674,7 +475,10 @@ class EventController extends Controller
         // the funnel's saved_event stage (GrowthExportService, createdEvents).
         $isFirstEventRun = ! session('pending_request')
             && ! is_demo_mode()
-            && $user->createdEvents()->doesntExist();
+            && $user->createdEvents()->doesntExist()
+            // A team member the owner's preset switch binds adds events on the owner's account
+            // (EventRepo::saveEvent()), so they would never stop counting as having made none.
+            && ! TicketPresets::lockedFor($user, $role);
 
         $event = new Event;
         $event->user_id = $user->id;
@@ -736,57 +540,42 @@ class EventController extends Controller
             $clonedFlyerImage = $clonedData['flyer_image_filename'] ?? null;
             $clonedFlyerImageUrl = $clonedFlyerImage ? $event->getFlyerImageUrlAttribute($clonedFlyerImage) : null;
 
+            // The source's preset, only if it is this schedule's own (a copy can be made through
+            // another schedule, and a template can outlive its preset). A team member the preset
+            // switch binds starts from that preset, or from the default with a word about why.
+            $clonedPreset = TicketPresets::find($role, $clonedData['event']['ticket_preset_id'] ?? null);
+            $event->ticket_preset_id = $clonedPreset?->id;
+            if (TicketPresets::lockedFor($user, $role)) {
+                if (! $clonedPreset) {
+                    $presetCopiedFrom = $clonedData['event']['name'] ?? null;
+                    $clonedPreset = TicketPresets::defaultFor($role);
+                }
+                if ($clonedPreset) {
+                    $defaultPromoCodes = TicketPresets::applyToModel($event, $clonedPreset);
+                }
+                // A preset's ticket types carry no seating bands.
+                $event->seating_plan_id = null;
+            } elseif ($clonedPreset && ! $clonedPreset->matches($event)) {
+                // The copy has the source's tickets, which are not the preset's any more (it changed
+                // since, or the source was edited by hand): its chip lit over them would name prices
+                // the copy does not have.
+                $event->ticket_preset_id = null;
+            }
+
             // Clear cloned data from session
             session()->forget('cloned_event');
         } else {
-            // Default behavior for new event
-            if ($role->default_tickets) {
-                $defaultTickets = json_decode($role->default_tickets, true);
-                $event->ticket_currency_code = $defaultTickets['currency_code'] ?? MoneyUtils::getCurrencyForCountry($role->country_code);
-                // The schedule's saved ticket defaults win: that is the owner's own explicit choice.
-                // DEFAULT_PAYMENT_METHOD only fills the gap where they have not made one.
-                $event->payment_method = $defaultTickets['payment_method']
-                    ?? payment_gateways()->defaultMethodFor($user, $event->ticket_currency_code);
-                $event->payment_instructions = $defaultTickets['payment_instructions'] ?? null;
-                $event->expire_unpaid_tickets = $defaultTickets['expire_unpaid_tickets'] ?? false;
-                $event->installments_enabled = $defaultTickets['installments_enabled'] ?? false;
-                $event->installment_count = $defaultTickets['installment_count'] ?? null;
-                $event->installment_final_days_before = $defaultTickets['installment_final_days_before'] ?? 14;
-                $event->installment_min_order_amount = $defaultTickets['installment_min_order_amount'] ?? null;
-                $event->ticket_notes = $defaultTickets['ticket_notes'] ?? null;
-                $event->terms_url = $defaultTickets['terms_url'] ?? null;
-                $event->total_tickets_mode = $defaultTickets['total_tickets_mode'] ?? 'individual';
-                $event->ask_phone = $defaultTickets['ask_phone'] ?? false;
-                $event->require_phone = $defaultTickets['require_phone'] ?? false;
-                $event->country_code_phone = $defaultTickets['country_code_phone'] ?? false;
-                $event->individual_tickets = $defaultTickets['individual_tickets'] ?? false;
-                $event->individual_ticket_fields = $defaultTickets['individual_ticket_fields'] ?? false;
-                $event->sell_after_start = $defaultTickets['sell_after_start'] ?? false;
-                $event->show_unavailable_tickets = $defaultTickets['show_unavailable_tickets'] ?? false;
-                $event->custom_fields = $defaultTickets['custom_fields'] ?? null;
-                $tickets = array_map(function ($ticketData) {
-                    $ticket = new Ticket;
-                    foreach ($ticketData as $key => $value) {
-                        $ticket->$key = $value;
-                    }
+            // Default behavior for new event: the schedule's default ticket preset, if it has one
+            // (Settings > Ticket presets, which took over from roles.default_tickets).
+            $event->ticket_currency_code = MoneyUtils::getCurrencyForCountry($role->country_code);
+            $event->payment_method = payment_gateways()->defaultMethodFor($user, $event->ticket_currency_code);
+            $event->tickets = collect([new Ticket]);
 
-                    return $ticket;
-                }, $defaultTickets['tickets'] ?? []);
-                $event->tickets = collect($tickets ?: [new Ticket]);
-                $event->addons = array_map(function ($addonData) {
-                    $addon = new Ticket;
-                    foreach ($addonData as $key => $value) {
-                        $addon->$key = $value;
-                    }
-                    $addon->is_addon = true;
-
-                    return $addon;
-                }, $defaultTickets['addons'] ?? []);
-                $defaultPromoCodes = $defaultTickets['promo_codes'] ?? [];
-            } else {
-                $event->ticket_currency_code = MoneyUtils::getCurrencyForCountry($role->country_code);
-                $event->payment_method = payment_gateways()->defaultMethodFor($user, $event->ticket_currency_code);
-                $event->tickets = collect([new Ticket]);
+            $defaultPreset = TicketPresets::defaultFor($role);
+            if ($defaultPreset) {
+                // The preset's own payment method wins: that is the owner's explicit choice.
+                // DEFAULT_PAYMENT_METHOD only fills the gap where it does not name one.
+                $defaultPromoCodes = TicketPresets::applyToModel($event, $defaultPreset);
             }
 
             // Set default category: prefer role's default (only if still enabled),
@@ -818,7 +607,9 @@ class EventController extends Controller
                 ->orderBy('id', 'desc')
                 ->first(['id', 'tickets_enabled', 'rsvp_enabled']);
 
-            if ($lastMode) {
+            // A default preset that says how people sign up decides it instead; the one copied
+            // from the old single default never said, and keeps this rule.
+            if ($lastMode && ! $defaultPreset?->kind) {
                 $event->tickets_enabled = (bool) $lastMode->tickets_enabled;
                 $event->rsvp_enabled = (bool) $lastMode->rsvp_enabled;
             }
@@ -863,13 +654,22 @@ class EventController extends Controller
         $currencies = json_decode($currencies);
 
         // Prepare curator data for cloned event
+        //
+        // Not the source's venue or its performers. The payload's "curators" is every schedule the
+        // source was on (Event::curators() has no type filter), and each one carried here is a
+        // ticked box under "Also list on". The venue reaches the copy through the venue field and
+        // the performers through the Participants tab, and those decide them: ticked here as
+        // well, a copy given another venue was saved at both, and showed whichever of the two the
+        // database returned first, and a performer removed from the copy stayed on it. Done here
+        // and not in EventRepo::buildClonePayload(), because a stored template holds the old
+        // payload and comes through this loop too.
         $clonedCurators = collect([]);
         $clonedCuratorGroups = [];
         if ($clonedData && isset($clonedData['curators'])) {
             foreach ($clonedData['curators'] as $curatorId) {
                 $curatorIdDecoded = UrlUtils::decodeId($curatorId);
                 $curator = Role::find($curatorIdDecoded);
-                if ($curator) {
+                if ($curator && ! $curator->isVenue() && ! $curator->isTalent()) {
                     $clonedCurators->push($curator);
                     if (isset($clonedData['curator_groups'][$curatorId])) {
                         $clonedCuratorGroups[$curatorId] = $clonedData['curator_groups'][$curatorId];
@@ -893,6 +693,7 @@ class EventController extends Controller
             'subdomain' => $subdomain,
             'title' => $isFirstEventRun ? __('messages.next_step_add_first_event') : __('messages.add_event'),
             'isFirstEventRun' => $isFirstEventRun,
+            'presetState' => TicketPresets::formState($role, $event, $user, $presetCopiedFrom ?? null),
             'selectedVenue' => $venue,
             'venues' => $venues,
             'recentVenueIds' => $this->recentVenueIds($role, $venues),
@@ -921,7 +722,38 @@ class EventController extends Controller
             abort(403);
         }
 
-        return redirect(route('event.edit', ['subdomain' => $subdomain, 'hash' => $hash]));
+        return redirect(route('event.edit', ['subdomain' => $subdomain, 'hash' => $hash] + $this->monthOnScreen($request)));
+    }
+
+    /**
+     * The calendar month an Edit link was pressed on, as the link carries it (the calendar's
+     * editUrl()), for passing on through a redirect. Empty for anything that is not a month.
+     */
+    private function monthOnScreen(Request $request): array
+    {
+        $year = filter_var($request->query('year'), FILTER_VALIDATE_INT, ['options' => ['min_range' => 1900, 'max_range' => 2199]]);
+        $month = filter_var($request->query('month'), FILTER_VALIDATE_INT, ['options' => ['min_range' => 1, 'max_range' => 12]]);
+
+        return $year !== false && $month !== false ? ['year' => $year, 'month' => $month] : [];
+    }
+
+    /**
+     * The month the calendar showed when Edit was pressed, while the event as saved still falls
+     * in it. A series is edited from whichever of its months the owner was looking at, and the
+     * save used to send them to the month it began in. An event moved out of that month is
+     * followed to its own, as before.
+     */
+    private function monthEditedFrom(Request $request, Event $event): ?Carbon
+    {
+        $value = $request->input('return_month');
+
+        if (! is_string($value) || ! preg_match('/^(19|2[01])\d{2}-(0[1-9]|1[0-2])$/', $value)) {
+            return null;
+        }
+
+        $first = Carbon::createFromFormat('Y-m-d', $value.'-01')->startOfDay();
+
+        return $event->nextOccurrenceFrom($first->format('Y-m-d'), $first->daysInMonth - 1) ? $first : null;
     }
 
     /**
@@ -979,7 +811,7 @@ class EventController extends Controller
             $event = Event::findOrFail(UrlUtils::decodeId($hash));
 
             if ($editableSubdomain = $this->resolveEditableSubdomain($user, $event)) {
-                return redirect(route('event.edit', ['subdomain' => $editableSubdomain, 'hash' => $hash]));
+                return redirect(route('event.edit', ['subdomain' => $editableSubdomain, 'hash' => $hash] + $this->monthOnScreen($request)));
             }
 
             return redirect()->back()->with('error', __('messages.not_authorized'));
@@ -1060,9 +892,14 @@ class EventController extends Controller
         // keeps the stored value.
         $currencyLocked = $event->exists && $event->hasSettledMoney();
 
+        $onScreen = $this->monthOnScreen($request);
+
         return view('event/edit', [
+            'presetState' => TicketPresets::formState($event->ticketingRole() ?? $role, $event, $user),
             'interestCount' => $interestCount,
             'currencyLocked' => $currencyLocked,
+            // Posted back as return_month, for update() to come back to (monthEditedFrom()).
+            'returnMonth' => $onScreen ? sprintf('%04d-%02d', $onScreen['year'], $onScreen['month']) : null,
             'role' => $role,
             'effectiveRole' => $effectiveRole,
             'user' => $user,
@@ -1155,6 +992,8 @@ class EventController extends Controller
             }
         }
 
+        $this->refuseUnsavablePreset($request, $event->ticketingRole() ?? $role);
+
         $this->eventRepo->saveEvent($role, $request, $event, true, $role->captureTimezone());
 
         $gallery = $this->syncGallery($request, $role, $event);
@@ -1202,51 +1041,19 @@ class EventController extends Controller
             }
         }
 
-        if ($request->has('save_default_tickets')) {
-            $role = Role::subdomain($subdomain)->firstOrFail();
-            $event->load(['promoCodes', 'addons']);
-            $defaultTickets = [
-                'currency_code' => $event->ticket_currency_code,
-                'payment_method' => $event->payment_method,
-                'payment_instructions' => $event->payment_instructions,
-                'expire_unpaid_tickets' => $event->expire_unpaid_tickets,
-                'installments_enabled' => $event->installments_enabled,
-                'installment_count' => $event->installment_count,
-                'installment_final_days_before' => $event->installment_final_days_before,
-                'installment_min_order_amount' => $event->installment_min_order_amount,
-                'ticket_notes' => $event->ticket_notes,
-                'terms_url' => $event->terms_url,
-                'total_tickets_mode' => $event->total_tickets_mode,
-                'ask_phone' => $event->ask_phone,
-                'require_phone' => $event->require_phone,
-                'country_code_phone' => $event->country_code_phone,
-                'individual_tickets' => $event->individual_tickets,
-                'individual_ticket_fields' => $event->individual_ticket_fields,
-                'sell_after_start' => $event->sell_after_start,
-                'show_unavailable_tickets' => $event->show_unavailable_tickets,
-                'custom_fields' => $event->custom_fields,
-                'tickets' => $event->tickets->map(fn ($ticket) => $ticket->toClonePayload())->toArray(),
-                'addons' => $event->addons->map(function ($addon) {
-                    return [
-                        'type' => $addon->type,
-                        'quantity' => $addon->quantity,
-                        'price' => $addon->price,
-                        'description' => $addon->description,
-                    ];
-                })->toArray(),
-                'promo_codes' => $event->promoCodes->map(function ($pc) {
-                    return [
-                        'code' => $pc->code,
-                        'type' => $pc->type,
-                        'value' => $pc->value,
-                        'max_uses' => $pc->max_uses,
-                        'is_active' => $pc->is_active,
-                        'ticket_ids' => $pc->ticket_ids,
-                    ];
-                })->toArray(),
-            ];
-            $role->default_tickets = json_encode($defaultTickets);
-            $role->save();
+        // "Save these tickets as a preset" (Tickets tab, bottom). Written to the event's OWN schedule,
+        // not the one in the address, and only by whoever may change that schedule's presets: its
+        // owner, or an editor while the team does not pick from presets (TicketPresets::mayEdit()).
+        if ($request->boolean('save_ticket_preset')) {
+            $presetSchedule = $event->ticketingRole() ?? Role::subdomain($subdomain)->first();
+            if ($presetSchedule && TicketPresets::mayEdit($request->user(), $presetSchedule)) {
+                TicketPresets::saveFromEvent(
+                    $presetSchedule,
+                    $event->fresh(['tickets', 'addons', 'promoCodes']),
+                    (string) $request->input('ticket_preset_name', ''),
+                    $request->boolean('ticket_preset_default'),
+                );
+            }
         }
 
         if ($request->has('agenda_ai_prompt')) {
@@ -1260,7 +1067,9 @@ class EventController extends Controller
             $role->save();
         }
 
-        if ($event->starts_at) {
+        if ($from = $this->monthEditedFrom($request, $event)) {
+            $date = $from;
+        } elseif ($event->starts_at) {
             // Schedule-local date so the redirect opens the calendar month the event appears in.
             $date = Carbon::parse($event->saleEventDateFromStartsAt());
         } else {
@@ -1393,13 +1202,13 @@ class EventController extends Controller
         }
 
         // Appointment bookings confirm on acceptance: calendar sync + guest AppointmentConfirmed.
-        // Unpaid online payments (stripe/payment_url) defer confirmation to the payment webhook so
+        // Unpaid online payments (AppointmentType::paysOnline()) defer confirmation to the payment so
         // the guest never gets "Confirmed" for a booking that can still expire unpaid.
         if ($event->appointment_type_id) {
             $sale = Sale::where('event_id', $event->id)
                 ->whereNotIn('status', ['cancelled', 'refunded', 'expired'])
                 ->first();
-            if ($sale && ($sale->status === 'paid' || ! in_array($sale->payment_method, ['stripe', 'payment_url'], true))) {
+            if ($sale && ($sale->status === 'paid' || ! \App\Models\AppointmentType::paysOnline($sale->payment_method))) {
                 app(\App\Services\AppointmentService::class)->confirm($sale);
             }
         }
@@ -1612,31 +1421,15 @@ class EventController extends Controller
         }
 
         // Internal events are intentionally never public, so the quick-publish route must not flip one
-        // (the UI never offers Publish for them; this also blocks crafted requests). Publishing means
-        // "make fully public", so normalize the whole visibility state via the shared helper.
-        if (! $event->is_draft || $event->is_internal) {
+        // (the UI never offers Publish for them; this also blocks crafted requests), and a cancelled
+        // event is not put back on calendars by being published. Publishing means "make fully
+        // public": EventLifecycleService::publish() normalizes the whole visibility state, pushes
+        // to the calendars this schedule is connected to, and sends the webhook.
+        $role = Role::subdomain($subdomain)->firstOrFail();
+
+        if (app(EventLifecycleService::class)->publish($event, $user->id, $role) === EventLifecycleService::NOT_PUBLISHABLE) {
             return redirect()->back();
         }
-
-        $event->setVisibilityState('public');
-        $event->save();
-
-        // Trigger calendar sync now that the event is published
-        $role = Role::subdomain($subdomain)->firstOrFail();
-        if ($role->syncsToGoogle()) {
-            $event->syncToGoogleCalendar('create');
-        }
-        if ($role->syncsToMicrosoft()) {
-            $event->syncToMicrosoftCalendar('create');
-        }
-        if ($role->syncsToCalDAV()) {
-            $event->syncToCalDAV('create');
-        }
-
-        // Dispatch webhook
-        WebhookService::dispatch('event.created', $event);
-
-        AuditService::log(AuditService::EVENT_PUBLISH, $user->id, 'Event', $event->id, null, null, $event->name);
 
         // The publish that takes a setup guide's schedule live lands on its Schedule tab, in the
         // event's month, where the "Your page" panel answers it. This action is reached from the
@@ -1714,7 +1507,7 @@ class EventController extends Controller
                         ->where('is_deleted', false)
                         ->whereNotIn('status', ['cancelled', 'refunded', 'expired'])
                         ->first();
-                    if ($sale && ($sale->status === 'paid' || ! in_array($sale->payment_method, ['stripe', 'payment_url'], true))) {
+                    if ($sale && ($sale->status === 'paid' || ! \App\Models\AppointmentType::paysOnline($sale->payment_method))) {
                         app(\App\Services\AppointmentService::class)->confirm($sale);
                     }
 
@@ -1775,6 +1568,17 @@ class EventController extends Controller
         return redirect()->route('home')->with('error', __('messages.set_default_schedule'));
     }
 
+    /**
+     * "Save these tickets as a preset" that Settings > Ticket presets could not hold is refused
+     * before the event is saved, so nothing is half done (TicketPresets::assertSavable()).
+     */
+    private function refuseUnsavablePreset(Request $request, Role $presetSchedule): void
+    {
+        if ($request->boolean('save_ticket_preset') && TicketPresets::mayEdit($request->user(), $presetSchedule)) {
+            TicketPresets::assertSavable($presetSchedule, $request);
+        }
+    }
+
     public function store(EventCreateRequest $request, $subdomain)
     {
         if (! auth()->user()->isEditor($subdomain)) {
@@ -1785,7 +1589,12 @@ class EventController extends Controller
 
         // Asked before the save, which is what makes it "first". Not the owner count: saveEvent()
         // can attach a new venue to this user as its owner.
-        $isFirstEvent = $request->user()->createdEvents()->doesntExist();
+        // A member the ticket preset switch binds adds events on the owner's account, so they never
+        // stop counting as having made none (create() leaves them out of the first-event form too).
+        $isFirstEvent = $request->user()->createdEvents()->doesntExist()
+            && ! TicketPresets::lockedFor($request->user(), $role);
+
+        $this->refuseUnsavablePreset($request, $role);
 
         $event = $this->eventRepo->saveEvent($role, $request, null, true, $role->captureTimezone());
 
@@ -1811,51 +1620,19 @@ class EventController extends Controller
             }
         }
 
-        if ($request->has('save_default_tickets')) {
-            $role = Role::subdomain($subdomain)->firstOrFail();
-            $event->load(['promoCodes', 'addons']);
-            $defaultTickets = [
-                'currency_code' => $event->ticket_currency_code,
-                'payment_method' => $event->payment_method,
-                'payment_instructions' => $event->payment_instructions,
-                'expire_unpaid_tickets' => $event->expire_unpaid_tickets,
-                'installments_enabled' => $event->installments_enabled,
-                'installment_count' => $event->installment_count,
-                'installment_final_days_before' => $event->installment_final_days_before,
-                'installment_min_order_amount' => $event->installment_min_order_amount,
-                'ticket_notes' => $event->ticket_notes,
-                'terms_url' => $event->terms_url,
-                'total_tickets_mode' => $event->total_tickets_mode,
-                'ask_phone' => $event->ask_phone,
-                'require_phone' => $event->require_phone,
-                'country_code_phone' => $event->country_code_phone,
-                'individual_tickets' => $event->individual_tickets,
-                'individual_ticket_fields' => $event->individual_ticket_fields,
-                'sell_after_start' => $event->sell_after_start,
-                'show_unavailable_tickets' => $event->show_unavailable_tickets,
-                'custom_fields' => $event->custom_fields,
-                'tickets' => $event->tickets->map(fn ($ticket) => $ticket->toClonePayload())->toArray(),
-                'addons' => $event->addons->map(function ($addon) {
-                    return [
-                        'type' => $addon->type,
-                        'quantity' => $addon->quantity,
-                        'price' => $addon->price,
-                        'description' => $addon->description,
-                    ];
-                })->toArray(),
-                'promo_codes' => $event->promoCodes->map(function ($pc) {
-                    return [
-                        'code' => $pc->code,
-                        'type' => $pc->type,
-                        'value' => $pc->value,
-                        'max_uses' => $pc->max_uses,
-                        'is_active' => $pc->is_active,
-                        'ticket_ids' => $pc->ticket_ids,
-                    ];
-                })->toArray(),
-            ];
-            $role->default_tickets = json_encode($defaultTickets);
-            $role->save();
+        // "Save these tickets as a preset" (Tickets tab, bottom). Written to the event's OWN schedule,
+        // not the one in the address, and only by whoever may change that schedule's presets: its
+        // owner, or an editor while the team does not pick from presets (TicketPresets::mayEdit()).
+        if ($request->boolean('save_ticket_preset')) {
+            $presetSchedule = $event->ticketingRole() ?? Role::subdomain($subdomain)->first();
+            if ($presetSchedule && TicketPresets::mayEdit($request->user(), $presetSchedule)) {
+                TicketPresets::saveFromEvent(
+                    $presetSchedule,
+                    $event->fresh(['tickets', 'addons', 'promoCodes']),
+                    (string) $request->input('ticket_preset_name', ''),
+                    $request->boolean('ticket_preset_default'),
+                );
+            }
         }
 
         if ($request->input('agenda_ai_prompt')) {
@@ -2004,6 +1781,17 @@ class EventController extends Controller
             if ($event->is_private && (! $isEventMemberOrAdmin || ! $event->roles->contains('id', $role->id))) {
                 abort(404);
             }
+        }
+
+        // Only a curator lists somebody else's event. A venue and a performer are put on an event
+        // by the event's own people, in its form: attached here, any schedule could name itself
+        // the venue or a performer of a stranger's event, and be treated as one from then on.
+        if (! $role->isCurator()) {
+            if ($request->ajax()) {
+                return response()->json(['success' => false, 'message' => __('messages.not_authorized')], 403);
+            }
+
+            return redirect()->back()->with('error', __('messages.not_authorized'));
         }
 
         // Check if the user is authorized to curate events for this role
@@ -3357,6 +3145,24 @@ class EventController extends Controller
                     ]);
                 }
 
+                // An account an operator has shut out submits nothing: said here, before the
+                // event is made. EnsureAccountNotBlocked would only sign it out afterwards.
+                if (auth()->user()->isBlocked()) {
+                    Auth::guard('web')->logout();
+                    throw ValidationException::withMessages([
+                        'account_password' => [__('messages.account_blocked')],
+                    ]);
+                }
+
+                // An account with two-factor signs in on the sign-in page, which asks for its code.
+                // Signed in here, the password alone was enough for a full session.
+                if (auth()->user()->hasTwoFactorEnabled()) {
+                    Auth::guard('web')->logout();
+                    throw ValidationException::withMessages([
+                        'account_password' => [__('messages.two_factor_sign_in_first')],
+                    ]);
+                }
+
                 RateLimiter::clear($throttleKey);
 
                 $user = auth()->user();
@@ -3524,7 +3330,7 @@ class EventController extends Controller
         $request->validate([
             'account_name' => ['required', 'string', 'max:255'],
             'account_email' => array_merge(
-                ['required', 'string', 'email', 'max:255'],
+                ['required', 'string', 'email', 'max:255', new NotBlocklisted],
                 $isStub ? [] : ['unique:users,email'],
                 config('app.hosted') ? [new NoFakeEmail] : []
             ),
@@ -3594,6 +3400,7 @@ class EventController extends Controller
         session()->forget(['utm_params', 'utm_referrer_url', 'utm_landing_page', 'guest_language']);
 
         $user->email_verified_at = now();
+        $user->signup_ip = Blocklist::address($request);
         // The form's terms checkbox, recorded as RegisteredUserController does (hosted only, where
         // the box is shown with the privacy policy).
         if (config('app.hosted') && $request->boolean('terms')) {
@@ -3695,17 +3502,17 @@ class EventController extends Controller
      * been told their event would be reviewed.
      *
      * The same condition as that digest (accepting requests, approval required), the same email
-     * and the same push, and it leaves last_notified_request_count at the count it announced, so
-     * the digest does not announce the same request again. Stored with writeOperationalColumns(),
-     * never save(): a save runs the schedule's whole saving hook and moves updated_at, which the
-     * sitemap publishes.
+     * and the same push, through the same sender: RequestNotifier, which spells each request out
+     * in one mail and marks it as told on its own row (event_role.request_notified_at), so the
+     * digest does not announce the same request again.
      *
      * Three things about when and how:
      *  - After the response. The mail is one round trip to the mail server per recipient, and the
      *    visitor's Submit must not wait on it: a slow server held the button, they pressed again,
      *    and the event was saved twice.
      *  - At most once per REQUEST_NOTICE_MINUTES per schedule. A request inside that window sends
-     *    nothing and leaves the count alone, which is what lets the digest announce it at noon.
+     *    nothing and is left unmarked, which is what lets the next mail (the next request after
+     *    the window, or the digest at noon) spell it out.
      *  - In each person's own language, not the submitter's: this runs inside a guest's request,
      *    whose locale is the guest's.
      *
@@ -3724,37 +3531,9 @@ class EventController extends Controller
                     return;
                 }
 
-                $pendingCount = Event::whereHas('roles', function ($query) use ($role) {
-                    $query->where('event_role.role_id', $role->id)
-                        ->whereNull('event_role.is_accepted');
-                })->count();
-
-                $editors = $role->getEditorsWantingNotification('new_request');
-                $pushUrl = app_url(route('role.view_admin', ['subdomain' => $role->subdomain, 'tab' => 'requests'], false));
-
-                foreach ($editors as $editor) {
-                    $locale = is_valid_language_code($editor->language_code)
-                        ? $editor->language_code
-                        : NotificationEmailService::locale($role);
-
-                    $editor->notify((new NewRequestsNotification($role, $pendingCount))->locale($locale));
-
-                    OneSignalService::pushToUser($editor, [
-                        'title_key' => 'messages.push_new_request_title',
-                        'body_key' => 'messages.push_new_request_body',
-                        'url' => $pushUrl,
-                        'options' => ['icon' => $role->profile_image_url],
-                    ], $role);
-                }
-
-                $sharedSent = app(NotificationEmailService::class)
-                    ->sendNotification($role, 'new_request', new NewRequestsNotification($role, $pendingCount), $editors);
-
-                // Either counts: the daily digest compares against this, so a shared-address-only
-                // schedule would otherwise be told about the same request again at noon.
-                if ($editors->isNotEmpty() || $sharedSent) {
-                    $role->writeOperationalColumns(['last_notified_request_count' => $pendingCount]);
-                }
+                // Who is told, in which language, what the mail spells out and what it leaves
+                // for the noon summary is the notifier's, which that summary sends through too.
+                app(RequestNotifier::class)->announce($role);
             } catch (\Throwable $e) {
                 report($e);
             }
@@ -3822,7 +3601,7 @@ class EventController extends Controller
         $request->validate([
             'account_name' => ['required', 'string', 'max:255'],
             'account_email' => array_merge(
-                ['required', 'string', 'email', 'max:255', 'unique:users,email'],
+                ['required', 'string', 'email', 'max:255', 'unique:users,email', new NotBlocklisted],
                 config('app.hosted') ? [new NoFakeEmail] : []
             ),
             'account_password' => ['required', 'string', 'min:8'],
@@ -3860,6 +3639,8 @@ class EventController extends Controller
         ]);
 
         session()->forget(['utm_params', 'utm_referrer_url', 'utm_landing_page', 'guest_language']);
+
+        $user->forceFill(['signup_ip' => Blocklist::address($request)])->save();
 
         // The form's terms checkbox, recorded as RegisteredUserController does (hosted only, where
         // the box is shown with the privacy policy).
@@ -4306,6 +4087,12 @@ class EventController extends Controller
     {
         if (is_demo_mode()) {
             return response()->json(['error' => __('messages.demo_mode_restriction')], 403);
+        }
+
+        // The schedule's own editors. Any signed-in account could post here, to any schedule's
+        // address, and the file is kept on the server.
+        if (! $request->user()->isEditor($subdomain)) {
+            return response()->json(['error' => __('messages.not_authorized')], 403);
         }
 
         $file = $request->file('image');
@@ -5343,6 +5130,32 @@ class EventController extends Controller
             || ($event->isMembersOnly() && ! $isMemberOrAdmin)
             || ($event->isPasswordProtected() && ! $isMemberOrAdmin && ! session()->has('event_password_'.$event->id))) {
             abort(404);
+        }
+
+        // ?to=google and ?to=outlook: that calendar's own "new entry" address, for the month's
+        // preview card, which holds what an entry needs only here, on the server. Behind the
+        // gate above, so the link answers exactly where this event's .ics does. The address is
+        // built here and nothing in it comes from the request but which of the two is wanted.
+        // Its notes are the event's page, as in the mails: the description has no length cap
+        // and would otherwise ride in the Location header.
+        // The date in the address is used only where it is one of this event's own nights (a
+        // one-off event has none, a series only the days it is on), the page it names is the
+        // schedule's own domain where it has one, as in the mails, and a cancelled event is
+        // left to the file, which says STATUS:CANCELLED: an entry made here could not.
+        $to = request()->query('to');
+        if (in_array($to, ['google', 'outlook'], true) && ! $event->is_cancelled) {
+            // isOccurrenceDate() first: the route lets any eight digits through, and
+            // matchesDate() parses what it is handed (2026-13-45 was a 500 here, where the
+            // file itself ignores such a date).
+            $night = ($date && $event->days_of_week && Event::isOccurrenceDate($date) && $event->matchesDate($date, $event->scheduleTimezone())) ? $date : null;
+            // No night, no dated page: handed null, getGuestUrl() names the series' first date.
+            $page = $event->getGuestUrl($role->subdomain, $night ?: false, true) ?: '';
+            $entry = $to === 'google' ? $event->getGoogleCalendarUrl($night, $page) : $event->getMicrosoftCalendarUrl($night, $page);
+
+            return redirect()->away($entry)->withHeaders([
+                'Cache-Control' => 'no-store, private',
+                'X-Robots-Tag' => 'noindex, nofollow',
+            ]);
         }
 
         $title = $event->getTitle();

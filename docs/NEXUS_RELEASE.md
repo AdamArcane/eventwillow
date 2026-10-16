@@ -23,6 +23,7 @@ pre-flight, P9 to P11 are v1.0.132's, and steps 1 to 9 are v1.0.130's runbook.
 
 | Version | Tagged | What it needs from you |
 |---|---|---|
+| [Unreleased](#unreleased-boost-partners-appointment-hosts-and-the-appointment-api-2026-10-15) | not yet | Confirm the Meta token is a system user's, add `META_BUSINESS_ID` and `META_SYSTEM_USER_ID`, check the Stripe platform webhook; after: the scheduler entry, then the pilot partner's setup |
 | [v1.0.134](#v10134) | not yet (partly live since 2026-09-30) | A last `/admin/growth` download, a Stripe portal setting, an `audit_logs` size check, a `cache` table purge, a privacy-notice decision, then `GROWTH_DATA_TOKEN`; [GDPR](#gdpr-2026-10-04): 2FA on every admin first, then the policy-change notice |
 | [v1.0.133](#v10133) | 2026-09-25 | Four read-only queries, the image backfill, a sitemap cache key, a Cloudflare purge |
 | [v1.0.132](#v10132) | 2026-09-23 | The ticket amnesty migration by hand, a `SESSION_LIFETIME` decision, a MySQL check, the federation welcome order |
@@ -94,6 +95,137 @@ included.
 A new secret goes in the console as an **encrypted, app-level** variable, never in a stored spec
 file.
 
+## Unreleased: boost partners, appointment hosts and the appointment API (2026-10-15)
+
+Everything on `main` from 2026-10-15 for one partner network (its name stays out of this repo),
+built as one piece of work. Nothing changes for any existing account until a platform admin
+enables a boost partner, or an owner gives an appointment type a host.
+
+**What ships:**
+- **Boost partners.**
+  - An account that owns many schedules runs every boost on them under ITS OWN Facebook Page and
+    Meta ad account.
+  - A boost is a request. It launches when the partner has approved its current version AND
+    recorded payment for its current budget.
+  - Meta bills the partner's ad account. We charge the partner 20% of actual monthly spend, by
+    card, with an emailed statement.
+  - The partner works from three pages (`/boost/requests`, `/boost/campaigns`,
+    `/boost/statements`), a Boosts tab in Settings, and nine `/api/boosts` endpoints usable with
+    the partner account's own key.
+  - Enabled per account at `/admin/boost` (the Boost partners card), and only while
+    `BOOST_PARTNERS_ENABLED` is set.
+  - `docs/FEATURES.md` ("Boost partners") has the rules.
+- **Appointment hosts.** An appointment type can be hosted by an owner or admin of its schedule.
+  Conflicts are then checked per host, across every schedule they host on.
+- **Appointment API.** `GET /api/schedules/{subdomain}/appointment-types`,
+  `GET /api/appointment-types/{id}/slots` and `POST /api/appointment-types/{id}/bookings`, for a
+  voice agent booking on a guest's behalf. Pro, like the rest of the API.
+- **API rate limits.** These now count per account for a key that works, and per visitor address
+  (`Blocklist::address()`, not the proxy's) for a missing or wrong key. Every client gets the same
+  or more room; nothing is tighter for anyone.
+- **Growth data.** The payload is now `schema_version` 20: `boost.partner_fees` is new. Nothing
+  else changed shape.
+
+### Before the deploy
+
+1. The [every-deploy](#every-deploy) checks.
+2. **Confirm `META_ACCESS_TOKEN` is a system user's token, not a person's.** A partner who shares
+   its ad account and Page with our Meta Business (the pilot's method) is run with this token, so
+   a personal token stops working the day its person leaves or logs out.
+   - Check it in Meta Business Settings > Users > System users; the token belongs to one of them.
+   - **And that the token was generated with `business_management`**, not only
+     `ads_management`. The partner-share check reads what partners shared with our Business
+     (`client_ad_accounts`, `client_pages`) and assigns it to the system user, which needs that
+     permission: without it every partner's Save and check fails and Confirm is refused.
+     Regenerate the token with both if in doubt.
+   - If it is not a system user's, create an Admin system user there with `ads_management` and
+     `business_management`, generate a token that never expires, and replace `META_ACCESS_TOKEN`
+     with it (encrypted, app-level). Test the platform's own Boost once after.
+3. **Add, as app-level variables** (absent, never blank, until you have the values):
+   - `META_BUSINESS_ID`: our Meta Business ID, the number in Business Settings > Business info.
+     The Boosts tab shows it to the partner, who adds it as a partner on their ad account and
+     Page.
+   - `META_SYSTEM_USER_ID`: that system user's ID. The app gives it the tasks it needs on what a
+     partner shared.
+   - `BOOST_PARTNERS_ENABLED=true`, when you are ready for the pilot. Until it is set, the Enable
+     form on `/admin/boost` is hidden.
+   - **Not yet: `META_LOGIN_CONFIG_ID`.** Facebook Login for Business needs Meta App Review
+     (Advanced Access for `ads_management`, `pages_show_list`, `pages_read_engagement`,
+     `pages_manage_ads`, `business_management`). Unset, the login option is hidden and partners
+     use the share. When it is set later, the Meta app also needs, in its Facebook Login for
+     Business settings: the redirect URI `https://eventschedule.com/settings/boost-partner/callback`,
+     the deauthorize callback `https://eventschedule.com/webhooks/meta/deauthorize`, and the data
+     deletion request URL `https://eventschedule.com/webhooks/meta/data-deletion`. Choose a
+     configuration whose token type is a system-user token, which does not expire.
+4. **Stripe: check that the PLATFORM account sends `payment_intent.succeeded` to
+   `https://eventschedule.com/stripe/webhook`**, signed with `STRIPE_PLATFORM_WEBHOOK_SECRET`.
+   - The monthly fee is charged on the platform account. That event is how a charge that went
+     through while our call timed out is recorded, rather than charged again the next day.
+   - If the platform account has no endpoint for that address, add one with that event, and put
+     its signing secret in `STRIPE_PLATFORM_WEBHOOK_SECRET`.
+5. **Production's `META_API_VERSION`.** The default is `v21.0`. Meta retires a version about two
+   years after release, and a newer one wants `is_adset_budget_sharing_enabled` and
+   `targeting_automation.advantage_audience` on an ad set.
+   - Before the pilot's first real boost, launch one test boost through a test ad account shared
+     the same way. Its ad set must be created without an error.
+
+### Migrations
+
+Five. None irreversible; all are new tables or nullable columns.
+
+| Migration | What it does |
+|---|---|
+| `2026_10_15_100000_create_boost_partners_table` | New table: one row per partner account (the Meta connection, the fee card's Stripe ids, the carry) |
+| `2026_10_15_100001_add_partner_columns_to_boost_campaigns_table` | About thirty nullable columns and one index on `boost_campaigns`, a small table. Every add is guarded |
+| `2026_10_15_100002_create_boost_partner_ledger_tables` | New tables: `boost_ad_versions`, `boost_spend_days`, `boost_statements` (one per partner, month and currency), `boost_statement_lines` |
+| `2026_10_15_200000_add_host_to_appointment_types_table` | Two nullable columns on `appointment_types` |
+| `2026_10_15_200001_add_appointment_host_user_id_to_events_table` | One nullable column and an index on `events (appointment_host_user_id, starts_at)`. The index build reads all of `events` once. It waits at most 10 seconds for its lock; if the deploy fails there, re-run `php artisan migrate --force` from the console. Guarded, so a second run adds only what is missing |
+
+### Scheduled entries
+
+- **New: `boost-charge-statements`, daily, both rails, hosted only.** It bills last month once
+  that month has closed in the partner's ad account's timezone (from the 3rd), and retries a
+  declined card for a week. It does nothing until a partner has spend, so the first real charge
+  is on 2026-11-03 at the earliest.
+- **Changed: `boost-sync`.** It now also runs when a partner exists and the platform has no Meta
+  token of its own, and it follows partner boosts (review, running, spend per day, completion).
+
+### After the deploy
+
+1. **Check the platform pages:**
+   - `/admin/queue`: the Scheduler card lists `boost-charge-statements`.
+   - `/admin/boost`: the Boost partners card shows. With the variable set, it has the Enable
+     form.
+2. **Set up the pilot partner,** in this order:
+   1. On `/admin/boost`, enable the partner's account by its email address.
+   2. The partner opens Settings > Boosts, follows the steps to share its ad account and Page
+      with our Business, enters the two IDs, and presses Save and check. Every check should pass.
+   3. Back on `/admin/boost`, check that the owning Business named beside the account is the
+      partner's own, then press Confirm. The partner is emailed. Confirm is refused while a check
+      fails: a partner could otherwise enter another client's IDs, which our token can reach.
+   4. The partner adds the fee card in the same tab, and writes how its businesses pay it.
+   5. A Business on one of the partner's schedules opens an event and presses Boost. The
+      partner's Requests page gets the request and the partner gets a mail.
+3. **Appointment mail on hosted needs the schedule's own email settings.** Check each pilot
+   Business's schedule. Without them, the API leaves out the types with a price or an approval
+   step, because the guest could never hear back.
+4. **Tell support:**
+   - A partner's ads run in its own ad account. Removing our access there does NOT stop an ad
+     that is already running: the partner pauses it in Ads Manager too.
+   - A Business can no longer start an on-site promotion for an event a partner covers.
+
+**Watch for** three new rows on `/admin`:
+- `boost_partners_waiting`: a partner share that needs your Confirm.
+- `boost_partner_launches_stuck`: approved and paid for 30 minutes, with nothing at Meta.
+- `boost_statements_failed`: a fee that was declined, needs the partner to confirm with the bank,
+  or has no card.
+
+**Undo:** a console rollback restores the code; the migrations are additive and can stay.
+- While a partner boost is running, stop it first (its page, or `/boost/campaigns`). The old code
+  does not follow partner boosts, so one left running keeps spending in the partner's ad account
+  unwatched.
+- A statement made before the rollback is not charged until the code is back.
+
 ## v1.0.134
 
 **Partly deployed.** Everything on `main` after v1.0.133. The version was bumped on 2026-09-28;
@@ -106,8 +238,10 @@ steps below are now overdue rather than ahead.
 
 Still to ship: realtime, the growth data pull, the get-started and email-design rework of
 2026-10-02, the cache pruning of 2026-10-03, and round three of the homepage headline test of
-2026-10-04 with the Reset stats button it needs and the homepage search title and description
-that now read from it. Four parts need steps of their own, below the
+2026-10-04 with the Reset stats button it needs, the homepage's search title and description
+going back to their own strings on 2026-10-08 (they read from the headline test from 2026-10-04,
+and search clicks fell; step 10), and the homepage redesign of 2026-10-08 (step 10 has what to do
+after it is live). Four parts need steps of their own, below the
 checklist:
 - [Conversion, churn and owner emails](#conversion-churn-and-owner-emails) (live; the Stripe
   setting in step 3 is the one step left)
@@ -116,6 +250,8 @@ checklist:
 - [Cache pruning](#cache-pruning-appprune-cache)
 - [Event import](#event-import-2026-10-05) (a link, a list to choose from, Undo, and Google
   Calendar as a read-only source; nothing to do before the deploy, three checks after)
+- [The examples page](#the-examples-page-2026-10-09) (nothing before the deploy; a look and a
+  re-scrape after, and a command to run whenever the guest page's look changes)
 
 ### Checklist
 
@@ -159,12 +295,24 @@ checklist:
     against round three, and not resetting starts `plan_sell` on its round-two counts while the
     two new arms start from nothing.
 
-    The same view-source should open on
-    `<title>Plan, promote, and sell from your event calendar | Event Schedule</title>`, with the
-    subtitle as the meta description: the homepage's search title and description are now built
-    from the headline the server renders (`HeroExperiment::meta()`), so they follow the default
-    and then the winner. Nothing to run. Google picks it up on its next crawl of `/`; "Request
-    indexing" for the homepage in Search Console shortens the wait and is optional.
+    **The search result no longer follows the headline (2026-10-08).** For four days the
+    homepage's `<title>` was the headline with the brand after it ("Plan, promote, and sell from
+    your event calendar | Event Schedule") and its meta description was the subtitle; search
+    clicks fell, so both are strings of their own again (`home_title` and `home_description` in
+    `lang/*/marketing.php`). The title is word for word what was live before 2026-10-04. The
+    description opens as it did and has a new ending: it names bookings, says tickets are sold on
+    Pro inside the sentence, and closes on "Free to start." where it used to close on "Paid
+    ticketing is on the Pro plan." After the deploy that carries this, and once the cache for `/`
+    has turned over, view-source on the signed-out homepage should open on
+    `<title>Event Schedule - Free Event Calendar, Ticketing &amp; Booking</title>`, with
+    "Publish your events on one calendar page, take bookings and unlimited free registrations,
+    and sell tickets on Pro with zero platform fees. Free to start." as the description,
+    whichever headline the test is showing. Nothing to run. Then press "Request indexing" for `https://eventschedule.com/`
+    in Search Console: Google only shows the old title again after it has crawled the page, and
+    this is the one page where waiting for that costs clicks. Compare the homepage's clicks and
+    click-through rate in Search Console for the week after with the weeks before 2026-10-04,
+    per query, since a brand search and a search for "event calendar" may have moved differently.
+    Leave both strings alone for a few weeks after that, so the numbers say something.
 
     **Reset once more after the release that puts the variant on the sign-up link.** Between
     the consent release and that one, only visitors who allowed marketing cookies could be
@@ -173,14 +321,23 @@ checklist:
     sign-ups are counted on the same basis. Then check it: in a private window, leave the cookie
     banner unanswered, click a sign-up button on the homepage (the address bar shows
     `/sign_up?hero=...`) and create an account. The card's sign-up count rises within 10 minutes.
+
+    **And once more after the homepage redesign of 2026-10-08.** The three headlines are the same,
+    but everything around them changed (the name box and its button are beside the headline now),
+    so counts from before and after are not one experiment. When view-source on the signed-out
+    homepage shows `<div id="hp">`, press **Reset stats**. The same release re-cut the homepage's
+    link preview (`public/images/social/home.jpg`), and the image address carries no version, so
+    re-scrape `https://eventschedule.com/` in the Facebook Sharing Debugger and the LinkedIn Post
+    Inspector. Then run PageSpeed on `/`: if the largest paint in a tall window turns out to be
+    the showreel's poster and it is slow, give the two posters `fetchpriority="high"`.
 11. **The next day:** check that the `cache` table stopped growing (see
     [Cache pruning](#cache-pruning-appprune-cache)).
 
 ### Migrations
 
-Thirty-two, none irreversible. Fourteen already ran with the 2026-09-27 to 2026-09-30 deploys;
-eighteen are left: the eleven below, three under GDPR and two under Event import (each in its own
-section), and the two `2026_10_05_*`, which add one guarded nullable column each to `users`
+Thirty-five, none irreversible. Fourteen already ran with the 2026-09-27 to 2026-09-30 deploys;
+twenty-one are left: the eleven below, three under GDPR, two under Event import and three under
+Feeds (each in its own section), and the two `2026_10_05_*`, which add one guarded nullable column each to `users`
 (`setup_guide`, `suggestions_off_at`). Five of the eleven below read a large table: the two listed
 first, the `user_active_days` one, which reads 90 days of `audit_logs`, and the two index builds
 on `role_user` and `sales`:
@@ -221,7 +378,9 @@ All run on both rails:
 - `realtime-prune`, every five minutes;
 - `app-prune-cache`, hourly;
 - `app-place-venues`, every minute (four address lookups a run at most; does nothing while
-  `MAP_GEOCODER_URL` is unset).
+  `MAP_GEOCODER_URL` is unset);
+- `app-import-feeds`, every minute, last in the list (about 20 seconds of reading a run at most;
+  does nothing while no schedule has a feed that is due). See "Feeds" below.
 
 ### GDPR (2026-10-04)
 
@@ -563,6 +722,132 @@ Leave them unset and nothing about this ships to anyone: the feature stays dark.
   the provider table, the tile service in the clause on what marketing consent loads, and the
   hidden-map preference in the list of what the browser keeps. Nothing to edit. Open the page
   and read the three places once after the deploy.
+
+### Feeds, and the API additions (2026-10-08)
+
+**What ships:**
+- **Feeds** (Enterprise on eventschedule.com; every selfhost install has them): an address a
+  schedule keeps reading about once an hour, a calendar, an RSS/Atom/JSON feed or a page with event
+  data. Nothing changes for anyone until an owner adds one, from Edit schedule, Integrations,
+  "Feeds from other sites", or from "Keep this link in sync" on the import page. A schedule shows
+  its Feeds tab once it has a feed. `/admin/feeds` lists every feed on the install.
+- **Five additions to the events API** (Pro, with the rest of the API): `external_id` with
+  lookup and upsert, `ends_at`, `flyer_image_url`, and `POST /api/events/{id}/cancel` and
+  `/restore`. All additive: a client that sends none of them sees the two new fields in the event
+  object and nothing else. Cancel and restore are for the event's own people (its creator, or an
+  owner or admin of the schedule that owns it), not for a schedule that only lists it.
+- A notification preference, **Feeds**, on by default for owners, admins and the shared address:
+  drafts waiting, a decision needed, a feed that stopped being read. At most one of each a day per
+  schedule. They are sent after a run has let go of its lock, and one that could not be sent is
+  tried again at the feed's next read.
+
+**Three migrations:**
+
+| Migration | What it does |
+|---|---|
+| `2026_10_08_000000_add_external_id_to_events_table` | One nullable `varchar(255)` column (`utf8mb4_bin`, so `A1` and `a1` are two ids) and a unique index on `(creator_role_id, external_id)`. The index build reads all of `events` once. Guarded, with a short lock wait, like `2026_10_04_000003` |
+| `2026_10_08_000001_create_event_feeds_table` | New table |
+| `2026_10_08_000002_create_event_feed_items_table` | New table: one row per entry a feed has seen, which is also the work queue |
+
+**The scheduled entry.** `app-import-feeds` runs every minute on both rails and takes the feeds
+that are due, oldest first, until about 20 seconds have passed. One cache lock (`feeds.import`)
+covers both rails, so the two cannot read the same feed at once. On the HTTP rail a read can wait
+behind that rail's own 15-minute lock. A feed's address is stored encrypted (`APP_KEY`), is never
+written to a log or an audit row, and its path is dropped from Sentry breadcrumbs and traced
+spans for a host that is not ours. A feed is claimed for ten minutes before it is read, so a
+read that kills the process is not first in line on every run after it.
+
+**What it fetches.** Every read goes through `UrlUtils::safeHttpGetWithUrl()`: public addresses
+only, every redirect checked again. Feeds add outbound requests the app did not make before, at
+most one list an hour per feed plus, for a feed of posts, each new post's own page, plus each
+event's picture once. What does not answer is given up on: a post's page after five tries an
+hour apart, a picture after three. A read that left work unfinished comes back within the minute
+only after a run that got somewhere, and at most 30 times running, so a source cannot be asked
+for its whole list every minute for ever. No AI call is made for a feed, on any plan.
+
+**After deploying, check:**
+- `/admin/queue`: the Scheduler card lists `app-import-feeds` and it is not overdue.
+- `/admin/feeds` opens (it redirects to the dashboard with a notice if the migrations did not run).
+- Add a feed to a test schedule from a public .ics address: the check shows its events, the feed
+  reads within a minute, and a second read an hour later changes nothing.
+
+**Watch for:** the `feeds_failing` row on `/admin`. It shows only when at least five of the sites
+feeds read, and half of all the sites being read, are failing at once (counted by site: six
+feeds on one site that is down are one source's trouble), which points at this server (the
+network, or an address of ours that a host blocks) rather than at each source. While it shows,
+no owner is mailed and no feed is paused.
+
+**Not in this release:** a reader for one provider's own feed format is in the code and is named
+neither in the guide nor on the Add page. It was written from the provider's documentation, whose
+one example is a news post, so the format and zone of an event's start are a guess until it has
+read a real feed.
+
+### Newsletter emails (2026-10-08)
+
+No migration, no env var, no scheduled entry.
+
+**What ships:**
+- **The five newsletter designs, redrawn**, a preview text field, and a Desktop / Mobile switch on
+  the builder's preview. The designs keep their names and what is stored for them.
+- **What an Events block lists**: only events the schedule accepted, a recurring event under its
+  next date that has not begun, nothing that has ended, and no price on an event people sign up
+  for or whose tickets can no longer be bought.
+
+**Mail already waiting when this deploys goes out in the new design.** Nothing of the old markup
+is stored: a newsletter that is scheduled, and the remainder of an A/B test still waiting for its
+winner, are rendered when they are sent. Their blocks, settings and recipients are unchanged, but
+a hand-picked Events block can go out with fewer rows than its author last saw in the preview
+(an event that was not accepted, or has ended since).
+
+**After deploying:** send a test from the builder to a Gmail and to an Outlook inbox. Outlook for
+Windows was hardened by the same techniques as the transactional mail and has not been looked at
+in the app itself.
+
+### The examples page (2026-10-09)
+
+No migration, no env var, no scheduled entry.
+
+**What ships:** `/examples` rebuilt as two walls of the demo schedules' own pictures (the twelve
+hand-made examples, then the Springfield town on a wall of its own). A name typed on the page is
+set over every picture, and a picture that is pressed brings forward a photograph of that
+schedule's page as a phone shows it.
+
+**The photographs are files in the repository**, taken from the live demos by
+`php artisan app:generate-example-shots` and recorded in `config/example_shots.php` with the date
+they were taken, which the page prints. They show the guest page as it was that day. So:
+
+- **After a deploy that changes how a schedule's guest page looks**, run
+  `php artisan app:generate-example-shots --pages` on a dev machine. It needs Dusk's ChromeDriver
+  (`php artisan dusk:chrome-driver`) and loads the 18 public demo pages and three of Moe's
+  Tavern's, read-only. Read the table it prints (a name that changed since the last run is
+  marked) and the diff of `config/example_shots.php`, look at `/examples` locally, and commit the
+  pictures and the file together: `ExamplesPageTest` fails if the file names a picture that is not
+  there. Six of the demos can be edited by anybody, and the name on each photographed page is what
+  the page prints under its picture: a name that is not the demo's own means someone has been in,
+  and the hourly demo reset will put it back before a second run. If a page cannot be read, or
+  Moe's page lists no event, the command stops and writes nothing.
+- **What the command finds by its words on the guest page.** A change to any of these wants the
+  command changed in the same commit:
+  - the cookie banner, hidden before each photograph by the words "Allow all". If that button is
+    renamed the banner is in all 21 pictures, with no warning;
+  - the numbered parts of "Look closer" on Moe's page: Follow, Show All, Free entry, Add Photo,
+    Weekly, Buy Tickets or Get Tickets, Add to Calendar; the list and month switch by `list`,
+    `calendar` or `grid` in a button's label, title or id; and the line-up by the eight performer
+    names in `GenerateExampleShots::ACTS`, which are `DemoService`'s own.
+
+  A part that is not found has no number on the pictures, and its row says "Not in these
+  pictures". That is a designed state, not a fault ("Free entry" comes and goes with the day's
+  events), but it is also what a renamed button looks like.
+- `--art` alone re-makes the wall's pictures from the header and logo files in
+  `public/images/examples/` and `public/images/demo/`, with no browser. It is only needed when one
+  of those files changes or a schedule is added to `App\Utils\ExampleSchedules`.
+- The photographs keep their file names when they are taken again, so the page puts the day they
+  were taken on their addresses (`?v=2026-10-09`): a browser that kept an old picture would
+  otherwise show it under the new measurements.
+
+**After deploying:** open `https://eventschedule.com/examples`, type a name, press a picture. Then
+re-scrape the page in the Facebook Sharing Debugger and the LinkedIn Post Inspector: its link
+preview (`public/images/social/examples.jpg`) was re-cut and the image address carries no version.
 
 ### Guest page counts (2026-10-07)
 
@@ -1047,6 +1332,7 @@ Console, then Deploy, as in [Every deploy](#every-deploy).
 - The new pages answer 200:
   - `/ticket-fee-calculator`
   - `/features/booking-requests`
+  - `/features/lineup`
   - `/event-landing-page`
   - `/ticketleap-alternative`
   - `/songkick-alternative`
@@ -1202,6 +1488,7 @@ unset** on the nexus. Each has a working default:
 | `EVENT_INTEREST_RECIPIENT_BATCH` | `2000`, the cap that bounds outbound interest mail |
 | `EVENT_INTEREST_TICKETS_MAX_AGE_DAYS` | `180` |
 | `PAYPAL_CLIENT_ID` / `PAYPAL_CLIENT_SECRET` / `PAYPAL_SANDBOX` / `PAYPAL_WEBHOOK_ID` | unset. `PayPalGateway::platformCredentials()` returns `[]` when hosted, so these are selfhost-only by construction - each owner connects their own account |
+| `RAZORPAY_KEY_ID` / `RAZORPAY_KEY_SECRET` / `RAZORPAY_WEBHOOK_SECRET` | unset. `RazorpayGateway::platformCredentials()` returns `[]` when hosted, so these are selfhost-only by construction - each owner connects their own keys |
 | `GOOGLE_WALLET_ISSUER_ID` / `GOOGLE_WALLET_SERVICE_ACCOUNT` | unset. Wallet passes are opt-in **per install**, and `GoogleWalletService::isConfigured()` gates everything about them: every button, the route handler, the confirmation email, the privacy page's processor row and every marketing claim about the button. Unset, eventschedule.com neither offers passes nor says it does; `GoogleWalletMarketingClaimTest` pins the claims |
 | `GOOGLE_WALLET_ID_PREFIX` | `es`. Irrelevant until the two above are set |
 

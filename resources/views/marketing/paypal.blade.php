@@ -1,4 +1,4 @@
-<x-marketing-layout>
+<x-marketing-layout :hp="true">
     <x-slot name="title">Sell Event Tickets with PayPal | Zero Platform Fees</x-slot>
     <x-slot name="description">Take ticket money into your own PayPal account, with no platform fee on any plan. Every payment is read back from PayPal, and refunds can be full or partial.</x-slot>
     <x-slot name="breadcrumbTitle">PayPal</x-slot>
@@ -291,7 +291,7 @@
                         ['Included, not an add-on', 'PayPal comes with paid ticketing on Pro, at no extra cost, and the same on Enterprise or a selfhosted install. What you pay for is the plan that lets a ticket carry a price; Event Schedule still adds no fee of its own on top of what you charge.'],
                         ['Refunds move real money', 'From the Sales page, a full or partial refund is issued against the capture PayPal actually took, and the sale only changes once the money has gone back. A partial refund leaves the sale paid and its tickets valid.'],
                         ['One order, one capture', 'A multi-event cart pays as a single amount, so a buyer taking tickets for three of your nights approves once and is charged once.'],
-                        ['What it does not do', 'Installment plans are Stripe-only, and gift cards and appointment bookings cannot be paid through PayPal either. HUF, JPY and TWD are excluded deliberately, because PayPal rejects a decimal amount in all three and our pricing path can produce one.'],
+                        ['What it does not do', 'Installment plans are Stripe-only, and gift cards cannot be paid through PayPal either. HUF, JPY and TWD are excluded deliberately, because PayPal rejects a decimal amount in all three and our pricing path can produce one.'],
                     ];
                 @endphp
                 <div class="grid gap-4 sm:grid-cols-2" data-reveal-group="80">
@@ -326,7 +326,7 @@
                 ['q' => 'What if a buyer approves the payment and then disappears?', 'a' => 'Nothing is captured. The sale is re-checked when they come back, and if it has expired or been released in the meantime, the payment is not taken. This matters more on PayPal than on other gateways, because the capture is the moment the money moves rather than something that already happened.'],
                 ['q' => 'What if PayPal holds a payment for review?', 'a' => 'The sale waits instead of expiring. PayPal sometimes reviews a payment before completing it, which is routine on a new merchant account, and by then the money has left the buyer, so their seats stay held rather than going back on sale. The buyer is told the payment is under review, and their ticket page stops offering to take it again. When PayPal completes it, the sale settles and the ticket is emailed, which is the one step that arrives by webhook.'],
                 ['q' => 'Do I have to set up webhooks?', 'a' => 'No. A listener is registered for you where it can be, but the ordinary return path settles the sale on its own by reading the capture back from PayPal. The webhook only earns its keep in the late cases - a capture that completes later, or one whose response was lost.'],
-                ['q' => 'Which currencies work?', 'a' => 'PayPal\'s own list, minus HUF, JPY and TWD. Those three are excluded on purpose: PayPal rejects a decimal amount in all of them, and a discounted ticket can produce one, which would leave money captured and a ticket withheld. PayPal does not settle South African rand at all, so an event priced in rand can use Payfast instead.'],
+                ['q' => 'Which currencies work?', 'a' => 'PayPal\'s own list, minus HUF, JPY and TWD. Those three are excluded on purpose: PayPal rejects a decimal amount in all of them, and a discounted ticket can produce one, which would leave money captured and a ticket withheld. This app does not offer PayPal for South African rand or Indian rupees, so an event priced in rand can use Payfast instead, and one priced in Indian rupees can use Razorpay.'],
                 ['q' => 'Can I refund through it?', 'a' => 'Yes, in full or in part, from the Sales page. The refund is issued against the capture PayPal took and the sale changes only once the money has actually gone back. A partial refund leaves the sale paid with its tickets valid, and the Sales page shows how much has been returned so far. A PayPal sale that was marked paid by hand has no capture to refund against, so it offers Mark as Refunded instead, which records the refund without moving money. Refund here rather than in PayPal: a refund raised in PayPal\'s own dashboard is not reported back.'],
             ];
         @endphp

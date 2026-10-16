@@ -33,7 +33,7 @@ class GrowthExportService
      * pulls knows whether they compare. Every bump is described in docs/GROWTH_DATA.md's changelog,
      * which GrowthDataDictionaryTest holds to this number.
      */
-    public const SCHEMA_VERSION = 16;
+    public const SCHEMA_VERSION = 20;
 
     /** The month the schedule.claim audit action shipped; nothing before it can be counted. */
     private const CLAIMS_TRACKED_FROM = '2026-09';
@@ -680,6 +680,11 @@ class GrowthExportService
                 .'frozen in every earlier pull: do not compare them across this version. A calendar pull '
                 .'creates a venue schedule per location, owned by the same account, so count OWNERS '
                 .'(uid), not schedules, when asking how many organizers have a full calendar.',
+            'Since schema_version 17: events_by_source also carries imported_feed, events made by a '
+                .'feed (an address the schedule keeps reading about once an hour), and imported includes '
+                .'them. Unlike every other source they arrive with nobody at the keyboard: a schedule '
+                .'with a feed can gain a hundred events in one read. Do not read imported_feed, or '
+                .'daily.events_imported from this version on, as a count of things an organizer did.',
         ];
         // Every derived section is computed from the row tables, so if those were capped
         // the sections describe the most recent N rows and not the whole population.
@@ -747,6 +752,7 @@ class GrowthExportService
                 'buyers' => $this->buyers(),
                 'reach' => $this->reach(),
                 'usage' => $this->usage($months),
+                'blog' => $this->blog(),
                 'geography' => $this->geographyFrom($schedules),
                 'boost' => $this->boost(),
                 'referrals' => $this->referrals(),
@@ -1529,10 +1535,10 @@ class GrowthExportService
         // columns (gateways are per account); only Stripe Connect records when it completed.
         $owners = DB::table('users')
             ->where(fn ($q) => $q->whereNotNull('stripe_completed_at')->orWhereNotNull('paypal_client_id')
-                ->orWhereNotNull('payfast_merchant_id')->orWhereNotNull('invoiceninja_api_key')
+                ->orWhereNotNull('payfast_merchant_id')->orWhereNotNull('razorpay_key_id')->orWhereNotNull('invoiceninja_api_key')
                 ->orWhereNotNull('api_key_hash'))
             ->get(['id', 'stripe_account_id', 'stripe_completed_at', 'paypal_client_id',
-                'payfast_merchant_id', 'invoiceninja_api_key', 'api_key_hash'])
+                'payfast_merchant_id', 'razorpay_key_id', 'invoiceninja_api_key', 'api_key_hash'])
             ->keyBy('id');
         $webhookOwners = DB::table('webhooks')->where('is_active', true)->distinct()->pluck('user_id')->flip();
 
@@ -1932,6 +1938,7 @@ class GrowthExportService
             'stripe' => $owner->stripe_account_id && $owner->stripe_completed_at,
             'paypal' => (bool) $owner->paypal_client_id,
             'payfast' => (bool) $owner->payfast_merchant_id,
+            'razorpay' => (bool) $owner->razorpay_key_id,
             'invoiceninja' => (bool) $owner->invoiceninja_api_key,
         ]));
     }
@@ -3198,6 +3205,40 @@ class GrowthExportService
         return $out;
     }
 
+    /**
+     * The blog, a post a row: the address `acquisition.by_landing_path` knows it by, its section,
+     * what wrote it, the month it went out, its length and its views. No visitor is in here: a
+     * post is ours, and its views are a count.
+     *
+     * Views are counted on the request, and since schema 18 only for a request that passes the
+     * marketing pages' own filters (PageView::isBot / isSuspiciousRequest). Before that every
+     * crawler's fetch counted, so a post's total is mostly crawls up to that date.
+     */
+    private function blog(): array
+    {
+        $columns = ['path', 'section', 'source', 'published', 'words', 'views', 'noindex'];
+
+        if (! config('app.is_nexus') || ! \Illuminate\Support\Facades\Schema::hasColumn('blog_posts', 'category')) {
+            return ['columns' => $columns, 'rows' => []];
+        }
+
+        $rows = \App\Models\BlogPost::published()
+            ->orderByDesc('published_at')
+            ->get(['slug', 'category', 'source', 'published_at', 'content', 'view_count', 'noindex'])
+            ->map(fn ($post) => [
+                '/blog/'.$post->slug,
+                $post->category,
+                $post->source ?: 'before',
+                $post->published_at?->format('Y-m'),
+                $post->wordCount(),
+                (int) $post->view_count,
+                (bool) $post->noindex,
+            ])
+            ->all();
+
+        return ['columns' => $columns, 'rows' => $rows];
+    }
+
     /** Activation and selling by country, from the (k-anonymised) schedule rows. */
     private function geographyFrom(array $schedules): array
     {
@@ -3246,7 +3287,15 @@ class GrowthExportService
             ->map(fn ($r) => ['month' => $r->ym, 'campaigns' => (int) $r->campaigns, 'schedules' => (int) $r->schedules])
             ->all();
 
-        return ['net_markup' => $markup, 'campaigns' => $campaigns];
+        // The fee boost partners pay on their own ad accounts' actual spend, by the month it is
+        // FOR (a statement's period), counted once paid.
+        $partnerFees = DB::table('boost_statements')->where('status', 'paid')->where('period', '>=', $from->format('Y-m'))
+            ->selectRaw('period as ym, currency, SUM(charged_amount) as fee')
+            ->groupBy('period', 'currency')->orderBy('period')->get()
+            ->map(fn ($r) => ['month' => $r->ym, 'currency' => $r->currency, 'fee' => round((float) $r->fee, 2)])
+            ->all();
+
+        return ['net_markup' => $markup, 'campaigns' => $campaigns, 'partner_fees' => $partnerFees];
     }
 
     /** The referral programme: where referrals stand, and how many start each month. */

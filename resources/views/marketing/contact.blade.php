@@ -1,4 +1,4 @@
-<x-marketing-layout>
+<x-marketing-layout :hp="true">
     <x-slot name="title">Contact Event Schedule | Support Email and Bug Reports</x-slot>
     <x-slot name="description">One support address, no portal to log into. Where to send a bug, a security report or an idea, and who to ask about a refund for a ticket you bought.</x-slot>
     <x-slot name="breadcrumbTitle">Contact</x-slot>
@@ -9,7 +9,7 @@
         "@context": "https://schema.org",
         "@type": "ContactPage",
         "name": "Contact Event Schedule",
-        "description": "One support address for Event Schedule, GitHub Issues for bugs and Discussions for ideas. Refunds and questions about an event go to the organizer who sold the ticket.",
+        "description": "One support address for Event Schedule, and GitHub Issues for bugs and ideas. Refunds and questions about an event go to the organizer who sold the ticket.",
         "url": "{{ url()->current() }}",
         "mainEntity": {
             "@type": "Organization",
@@ -35,9 +35,11 @@
            ceremonious way to reach somebody: one side to write on, one
            address, no envelope and no front desk. That is exactly the
            shape of support here, so the page IS a postcard - a divided
-           back in the hero, a second card for what to write, a sheet of
-           stamps for the social links, and a night-mail band for the
-           part that happens in public on GitHub.
+           back in the hero and a second card for what to write. (The
+           sheet of stamps for the social links and the night-mail band
+           for GitHub went in 2026-10: the routing table already sends
+           each kind of message to its address, and the footer carries
+           the six social links.)
 
            MATERIAL, NOT HUE, is the differentiator. The accent hue stays
            the page's existing brand blue (#1d4ed8 / #1e40af on light and
@@ -77,11 +79,6 @@
            no build may be run here. */
         .es-post-hr { border-color: rgba(21, 26, 33, 0.1); }
         .dark .es-post-hr { border-color: rgba(231, 235, 242, 0.1); }
-
-        /* Same reason: 2xl:mx-auto / 2xl:max-w-[100rem] are not in the bundle. */
-        @media (min-width: 1536px) {
-            .es-post-wide { margin-inline: auto; max-width: 100rem; }
-        }
 
         .es-post-ink { color: #151a21; }
         .dark .es-post-ink { color: #e7ebf2; }
@@ -139,14 +136,6 @@
             border-color: rgba(122, 176, 255, 0.75);
             box-shadow: 0 0 0 4px rgba(122, 176, 255, 0.24);
         }
-        /* The shared GitHub star badge (marketing/partials/github-star-badge)
-           carries bg-gray-800/dark:bg-gray-700 on its two halves, so it changes
-           shade with the colour mode. Inside a band that is dark in BOTH modes
-           that reads as the object changing, so pin both halves structurally.
-           Targeting the elements rather than the utility class names keeps this
-           page from asserting anything about a file it does not own. */
-        .es-post-star a > span:first-child { background-color: #252526; }
-        .es-post-star a > span:last-child { background-color: #2d2d30; }
 
         /* --- Card stock: the same paper in both colour modes --- */
         .es-post-stock {
@@ -240,27 +229,6 @@
             font-weight: 800;
             letter-spacing: 0.16em;
             color: #1e40af;
-        }
-        .es-post-stamp-name {
-            font-size: 0.68rem;
-            font-weight: 600;
-            line-height: 1.15;
-        }
-        /* The sheet. Six stamps, so the block is complete at every breakpoint:
-           6/2, 6/3 and 6/6 all divide, which a sheet of five never did (a
-           two-column sheet of five leaves the bottom-right corner torn off).
-           Page-local because md:grid-cols-6 is not in the built marketing CSS
-           and no build may be run here. */
-        .es-post-sheet {
-            display: grid;
-            gap: 0.75rem;
-            grid-template-columns: repeat(2, minmax(0, 1fr));
-        }
-        @media (min-width: 640px) {
-            .es-post-sheet { grid-template-columns: repeat(3, minmax(0, 1fr)); }
-        }
-        @media (min-width: 768px) {
-            .es-post-sheet { grid-template-columns: repeat(6, minmax(0, 1fr)); }
         }
 
         /* Franking bars: abstract strokes across the stamp, marching slowly. */
@@ -429,10 +397,8 @@
 
         .es-post-hover:hover { border-color: rgba(30, 64, 175, 0.45); }
         .dark .es-post-hover:hover { border-color: rgba(122, 176, 255, 0.45); }
-        .es-post-hover:hover .es-post-hover-title,
-        .es-post-hover:hover .es-post-hover-arrow { color: #1e40af; }
-        .dark .es-post-hover:hover .es-post-hover-title,
-        .dark .es-post-hover:hover .es-post-hover-arrow { color: #7ab0ff; }
+        .es-post-hover:hover .es-post-hover-title{ color: #1e40af; }
+        .dark .es-post-hover:hover .es-post-hover-title{ color: #7ab0ff; }
 
         /* --- Focus rings. No border-radius: an outline already follows the
                element's own shape, and setting one changes it on focus. --- */
@@ -464,7 +430,7 @@
 
         // Where a message should go, and why there. Every destination is a
         // surface that already exists: the user guide, the FAQ page, the
-        // public repo's Issues and Discussions tabs, and the support address.
+        // public repo's Issues tab, and the support address.
         $routes = [
             [
                 'what' => 'A how-to question',
@@ -488,7 +454,7 @@
                 'label' => 'The organizer',
                 'href' => null,
                 'external' => false,
-                'why' => 'Ticket money goes straight to the organizer\'s own account, not through us, so the refund has to come from them: they can send a Stripe or PayPal sale back in full or in part from their Sales page. They are also the ones who can answer for the event itself.',
+                'why' => 'Ticket money goes straight to the organizer\'s own account, not through us, so the refund has to come from them: they can send a Stripe, PayPal or Razorpay sale back in full or in part from their Sales page. They are also the ones who can answer for the event itself.',
             ],
             [
                 'what' => 'Something is broken',
@@ -547,7 +513,7 @@
         $faqs = [
             [
                 'q' => 'How do I contact Event Schedule?',
-                'a' => 'Email '.$supportEmail.'. For anything technical you can also open an issue or start a discussion on GitHub, both of which are public. There is no support portal to log into and no ticket number to quote.',
+                'a' => 'Email '.$supportEmail.'. For anything technical you can also open an issue on GitHub, which is public. There is no support portal to log into and no ticket number to quote.',
             ],
             [
                 'q' => 'Where do I report a bug?',
@@ -555,7 +521,7 @@
             ],
             [
                 'q' => 'How do I request a feature?',
-                'a' => 'Start a GitHub Discussion. Feature requests are worth putting in the open, because somebody else usually wants a version of the same thing. Email works too if you would rather not post publicly.',
+                'a' => 'Open a GitHub issue. Feature requests are worth putting in the open, because somebody else usually wants a version of the same thing. Email works too if you would rather not post publicly.',
             ],
             [
                 'q' => 'Is there a phone number?',
@@ -567,7 +533,7 @@
             ],
             [
                 'q' => 'Can Event Schedule refund my ticket?',
-                'a' => 'No, because the money never passed through us. Ticket sales settle into the organizer\'s own Stripe or PayPal account, so ask the schedule you bought from: they can refund a Stripe or PayPal sale in full or in part from their Sales page, and it goes back through the same provider. A ticket paid any other way, in cash or through a payment link for example, is settled between you and them. Event Schedule does not email you when a refund goes through, so their reply is your confirmation.',
+                'a' => 'No, because the money never passed through us. Ticket sales settle into the organizer\'s own Stripe or PayPal account, so ask the schedule you bought from: they can refund a Stripe, PayPal or Razorpay sale in full or in part from their Sales page, and it goes back through the same provider. A ticket paid any other way, in cash or through a payment link for example, is settled between you and them. Event Schedule does not email you when a refund goes through, so their reply is your confirmation.',
             ],
             [
                 'q' => 'Someone made a page with my name on it. Who do I tell?',
@@ -590,9 +556,6 @@
             ['top', 'The card'],
             ['where', 'Where to post it'],
             ['card', 'What to write'],
-            ['open', 'Open source'],
-            ['answers', 'Answers'],
-            ['follow', 'Follow us'],
             ['faq', 'Questions'],
             ['claim', 'Just start'],
         ];
@@ -626,19 +589,19 @@
                     </h1>
 
                     <p class="es-fade-up es-d-2 es-post-muted mb-9 max-w-xl text-lg sm:text-xl">
-                        Short, direct, one address. Email us, start a discussion, or file an issue. Event Schedule is open source, so everything except the email happens in public.
+                        Short, direct, one address. Email us or file an issue. Event Schedule is open source, so everything except the email happens in public.
                     </p>
 
-                    <div class="es-fade-up es-d-3 flex flex-col items-start gap-4 sm:flex-row">
+                    <div class="es-fade-up es-d-3 flex flex-col items-start gap-4 sm:flex-row sm:flex-wrap">
+                        <a href="#where" class="glass group inline-flex items-center justify-center gap-2 whitespace-nowrap rounded-2xl px-7 py-4 text-base font-semibold transition-all duration-200 hover:-translate-y-0.5 hover:shadow-lg sm:text-lg">
+                            Where should it go?
+                            <svg aria-hidden="true" class="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 14l-7 7m0 0l-7-7m7 7V3" /></svg>
+                        </a>
                         <a href="mailto:{{ $supportEmail }}" class="es-post-btn group inline-flex items-center justify-center gap-2 whitespace-nowrap rounded-2xl px-7 py-4 text-base font-semibold transition-all duration-200 hover:-translate-y-0.5 sm:text-lg">
                             <svg aria-hidden="true" class="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke-width="1.9" stroke="currentColor">
                                 <path stroke-linecap="round" stroke-linejoin="round" d="M3 8l7.89 5.26a2 2 0 002.22 0L21 8M5 19h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z" />
                             </svg>
                             {{ $supportEmail }}
-                        </a>
-                        <a href="#where" class="glass group inline-flex items-center justify-center gap-2 whitespace-nowrap rounded-2xl px-7 py-4 text-base font-semibold transition-all duration-200 hover:-translate-y-0.5 hover:shadow-lg sm:text-lg">
-                            Where should it go?
-                            <svg aria-hidden="true" class="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 14l-7 7m0 0l-7-7m7 7V3" /></svg>
                         </a>
                     </div>
                 </div>
@@ -811,7 +774,7 @@
                         </li>
                         <li class="flex gap-3" data-reveal>
                             <svg aria-hidden="true" class="es-post-accent mt-0.5 h-5 w-5 flex-none" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M5 13l4 4L19 7" /></svg>
-                            <span>You do not need an account to write to us, or to read every issue and discussion in the repo.</span>
+                            <span>You do not need an account to write to us, or to read every issue in the repo.</span>
                         </li>
                     </ul>
                     <div class="mt-auto pt-6">
@@ -826,186 +789,14 @@
     </section>
 
     <!-- ============================================================ -->
-    <!-- 4. Open source: the night mail (fixed-dark band)             -->
-    <!-- ============================================================ -->
-    <section id="open" class="relative scroll-mt-24 px-2 py-14 sm:px-4 lg:py-20">
-        <div class="es-post-band noise relative overflow-hidden es-post-wide rounded-[2.5rem] border border-white/[0.06] px-4 py-16 sm:px-6 lg:px-8 lg:py-20">
-            <div class="pointer-events-none absolute inset-0" aria-hidden="true">
-                <div class="grid-overlay absolute inset-0 opacity-20"></div>
-            </div>
-
-            <div class="relative z-10 mx-auto max-w-5xl">
-                <div class="mx-auto mb-12 max-w-3xl text-center">
-                    <div class="es-post-num mb-6" data-reveal aria-hidden="true"><span>04</span></div>
-                    <p class="es-post-tag mb-4" data-reveal style="--reveal-delay: 0.05s;">Open source</p>
-                    <h2 class="es-balance es-post-ink text-3xl font-black tracking-tight md:text-5xl" data-reveal style="--reveal-delay: 0.1s;">
-                        The code is <span class="es-post-lit">already public.</span>
-                    </h2>
-                    <p class="es-post-muted mt-5 text-lg" data-reveal style="--reveal-delay: 0.15s;">
-                        Which means so is the mail about it. Every issue, every discussion, every commit that closes one.
-                    </p>
-
-                    <div class="mt-8 flex flex-col items-center gap-6" data-reveal>
-                        <div class="es-post-mark flex flex-col items-center justify-center gap-1 text-center" aria-hidden="true">
-                            <span>GITHUB</span>
-                            <span class="es-post-mark-rule"></span>
-                            <span>RECEIVED</span>
-                            <span class="es-post-mark-rule"></span>
-                            <span>IN&nbsp;PUBLIC</span>
-                        </div>
-
-                        <div class="es-post-star">
-                            @include('marketing.partials.github-star-badge')
-                        </div>
-                    </div>
-                </div>
-
-                <div class="grid gap-6 md:grid-cols-3" data-reveal-group="100">
-                    <div class="es-post-card flex h-full flex-col p-6" data-reveal="panel">
-                        <p class="es-post-tag mb-3">Discussions</p>
-                        <h3 class="es-post-ink mb-2 text-lg font-bold">Ask, or propose</h3>
-                        <p class="es-post-muted text-sm">Have a question or an idea? Start a conversation. It is the easiest way to reach both us and the people already using the thing you are asking about.</p>
-                        <a href="https://github.com/eventschedule/eventschedule/discussions" target="_blank" rel="noopener noreferrer" class="es-post-lit mt-auto inline-flex items-center gap-1.5 pt-5 text-sm font-semibold hover:underline">
-                            GitHub Discussions
-                            <svg aria-hidden="true" class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14" /></svg>
-                        </a>
-                    </div>
-                    <div class="es-post-card flex h-full flex-col p-6" data-reveal="panel">
-                        <p class="es-post-tag mb-3">Issues</p>
-                        <h3 class="es-post-ink mb-2 text-lg font-bold">Report a bug</h3>
-                        <p class="es-post-muted text-sm">Found something broken? Open an issue and we will look into it. Because the tracker is public, you can watch the fix land instead of wondering.</p>
-                        <a href="https://github.com/eventschedule/eventschedule/issues" target="_blank" rel="noopener noreferrer" class="es-post-lit mt-auto inline-flex items-center gap-1.5 pt-5 text-sm font-semibold hover:underline">
-                            GitHub Issues
-                            <svg aria-hidden="true" class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14" /></svg>
-                        </a>
-                    </div>
-                    <div class="es-post-card flex h-full flex-col p-6" data-reveal="panel">
-                        <p class="es-post-tag mb-3">Selfhost</p>
-                        <h3 class="es-post-ink mb-2 text-lg font-bold">Run it yourself</h3>
-                        <p class="es-post-muted text-sm">Prefer it on your own server? The installation guide walks through it, and selfhost questions are welcome on GitHub alongside everything else.</p>
-                        <a href="{{ marketing_url('/docs/selfhost/installation') }}" class="es-post-lit mt-auto inline-flex items-center gap-1.5 pt-5 text-sm font-semibold hover:underline">
-                            Installation guide
-                            <svg aria-hidden="true" class="h-4 w-4 rtl:rotate-180" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M13 7l5 5m0 0l-5 5m5-5H6" /></svg>
-                        </a>
-                    </div>
-                </div>
-
-                <p class="es-post-muted mt-10 text-center" data-reveal>
-                    Reading the source is a legitimate way to get an answer.
-                    <a href="{{ $repoUrl }}" target="_blank" rel="noopener noreferrer" class="es-post-lit inline-flex items-center gap-1 font-semibold transition-all hover:gap-2">
-                        Open the repository
-                        <svg aria-hidden="true" class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14" /></svg>
-                    </a>
-                </p>
-            </div>
-        </div>
-    </section>
-
-    <!-- ============================================================ -->
-    <!-- 5. You can also find answers here                            -->
-    <!-- ============================================================ -->
-    <section id="answers" class="scroll-mt-24 py-20 lg:py-28">
-        <div class="mx-auto max-w-5xl px-4 sm:px-6 lg:px-8">
-            <div class="mx-auto mb-12 max-w-3xl text-center">
-                <div class="es-post-num mb-6" data-reveal aria-hidden="true"><span>05</span></div>
-                <p class="es-post-tag mb-4" data-reveal style="--reveal-delay: 0.05s;">Helpful resources</p>
-                <h2 class="es-balance es-post-ink text-3xl font-black tracking-tight md:text-4xl" data-reveal style="--reveal-delay: 0.1s;">
-                    You can also find answers here
-                </h2>
-                <p class="es-post-muted mt-5 text-lg" data-reveal style="--reveal-delay: 0.15s;">
-                    The documentation and the FAQ already answer many common questions, and neither of them has to wait for us to read anything.
-                </p>
-            </div>
-
-            <div class="grid gap-4 md:grid-cols-2" data-reveal-group="90">
-                <div class="es-bento group relative" data-tilt="4" data-reveal="panel">
-                    <div class="es-tilt-inner es-post-card relative flex h-full flex-col overflow-hidden p-7">
-                        <div class="relative z-10 flex h-full flex-col">
-                            <svg aria-hidden="true" class="es-post-accent mb-4 h-7 w-7" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="1.8">
-                                <path stroke-linecap="round" stroke-linejoin="round" d="M12 6.253v13m0-13C10.832 5.477 9.246 5 7.5 5S4.168 5.477 3 6.253v13C4.168 18.477 5.754 18 7.5 18s3.332.477 4.5 1.253m0-13C13.168 5.477 14.754 5 16.5 5c1.747 0 3.332.477 4.5 1.253v13C19.832 18.477 18.247 18 16.5 18c-1.746 0-3.332.477-4.5 1.253" />
-                            </svg>
-                            <h3 class="es-post-ink mb-2 text-xl font-bold">Documentation</h3>
-                            <p class="es-post-muted mb-5">The user guide, with a search box. Getting started, creating schedules and events, tickets, newsletters, analytics, the API, and a whole selfhost section.</p>
-                            <a href="{{ marketing_url('/docs') }}" class="es-post-link mt-auto inline-flex items-center gap-1.5 font-semibold hover:underline">
-                                Read the guide
-                                <svg aria-hidden="true" class="h-4 w-4 rtl:rotate-180" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M13 7l5 5m0 0l-5 5m5-5H6" /></svg>
-                            </a>
-                        </div>
-                        <div class="es-glare" aria-hidden="true"></div>
-                        <div class="es-ring-glow" aria-hidden="true"></div>
-                    </div>
-                </div>
-
-                <div class="es-bento group relative" data-tilt="4" data-reveal="panel">
-                    <div class="es-tilt-inner es-post-card relative flex h-full flex-col overflow-hidden p-7">
-                        <div class="relative z-10 flex h-full flex-col">
-                            <svg aria-hidden="true" class="es-post-accent mb-4 h-7 w-7" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="1.8">
-                                <path stroke-linecap="round" stroke-linejoin="round" d="M8.228 9c.549-1.165 2.03-2 3.772-2 2.21 0 4 1.343 4 3 0 1.4-1.278 2.575-3.006 2.907-.542.104-.994.54-.994 1.093m0 3h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
-                            </svg>
-                            <h3 class="es-post-ink mb-2 text-xl font-bold">FAQ</h3>
-                            <p class="es-post-muted mb-5">The short answers, in one page: what the free plan includes, what Pro adds, why there are zero platform fees on ticket sales, and how selfhosting differs.</p>
-                            <a href="{{ marketing_url('/faq') }}" class="es-post-link mt-auto inline-flex items-center gap-1.5 font-semibold hover:underline">
-                                Read the FAQ
-                                <svg aria-hidden="true" class="h-4 w-4 rtl:rotate-180" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M13 7l5 5m0 0l-5 5m5-5H6" /></svg>
-                            </a>
-                        </div>
-                        <div class="es-glare" aria-hidden="true"></div>
-                        <div class="es-ring-glow" aria-hidden="true"></div>
-                    </div>
-                </div>
-            </div>
-        </div>
-    </section>
-
-    <!-- ============================================================ -->
-    <!-- 6. Follow us: a sheet of stamps                              -->
-    <!-- ============================================================ -->
-    <section id="follow" class="scroll-mt-24 es-post-hr border-t py-20 lg:py-28">
-        <div class="mx-auto max-w-4xl px-4 sm:px-6 lg:px-8">
-            <div class="mx-auto mb-10 max-w-2xl text-center">
-                <div class="es-post-num mb-6" data-reveal aria-hidden="true"><span>06</span></div>
-                <h2 class="es-balance es-post-ink mb-4 text-3xl font-black tracking-tight md:text-4xl" data-reveal style="--reveal-delay: 0.05s;">
-                    Follow us
-                </h2>
-                <p class="es-post-muted text-lg" data-reveal style="--reveal-delay: 0.1s;">
-                    Stay up to date with the latest news, features, and updates.
-                </p>
-            </div>
-
-            <div data-reveal="panel">
-                <div class="es-post-stock noise relative overflow-hidden p-5 sm:p-7">
-                    <div class="es-post-head relative z-10 mb-6 flex items-baseline justify-between gap-3 pb-2">
-                        <span>Sheet of six</span>
-                        <span>Perforated</span>
-                    </div>
-                    <div class="es-post-sheet relative z-10">
-                        @foreach ($socials as $social)
-                            <a href="{{ $social['href'] }}" target="_blank" rel="noopener noreferrer"
-                                class="es-post-stamp flex flex-col items-center justify-between gap-2 text-center">
-                                <span class="es-post-stamp-value">FOLLOW</span>
-                                <svg aria-hidden="true" class="es-post-ink h-7 w-7" fill="currentColor" viewBox="0 0 24 24">{!! $social['path'] !!}</svg>
-                                <span class="es-post-stamp-name es-post-ink">{{ $social['name'] }}</span>
-                                <span class="es-post-frank"></span>
-                            </a>
-                        @endforeach
-                    </div>
-                    <p class="es-post-muted relative z-10 mt-6 es-post-hr border-t pt-4 text-xs">
-                        Six places to follow along, and not one of them is a support queue. For anything that needs an answer, the addresses above are better than a reply in a feed.
-                    </p>
-                </div>
-            </div>
-        </div>
-    </section>
-
-    <!-- ============================================================ -->
-    <!-- 7. FAQ                                                       -->
+    <!-- 4. FAQ                                                       -->
     <!-- ============================================================ -->
     <x-seo.faq-schema :items="$faqs" />
 
     <section id="faq" class="scroll-mt-24 es-post-hr border-t py-20 lg:py-28">
         <div class="mx-auto max-w-3xl px-4 sm:px-6 lg:px-8">
             <div class="mb-12 text-center">
-                <div class="es-post-num mb-6" data-reveal aria-hidden="true"><span>07</span></div>
+                <div class="es-post-num mb-6" data-reveal aria-hidden="true"><span>04</span></div>
                 <h2 class="es-balance es-post-ink mb-4 text-3xl font-black tracking-tight md:text-4xl" data-reveal style="--reveal-delay: 0.05s;">
                     Frequently asked questions
                 </h2>
@@ -1029,37 +820,10 @@
         </div>
     </section>
 
-    <!-- ============================================================ -->
-    <!-- 8. Related pages                                             -->
-    <!-- ============================================================ -->
-    <section class="es-post-hr border-t py-16">
-        <div class="mx-auto max-w-5xl px-4 sm:px-6 lg:px-8">
-            <h2 class="es-post-ink mb-8 text-center text-2xl font-black tracking-tight md:text-3xl" data-reveal>Related pages</h2>
-            <div class="grid grid-cols-2 gap-4 md:grid-cols-4" data-reveal-group="70">
-                @foreach ($relatedPages as [$relHref, $relName, $relBlurb])
-                    <a href="{{ marketing_url($relHref) }}" class="es-post-hover es-post-card group flex flex-col p-5 transition-all duration-200 hover:shadow-md" data-reveal>
-                        <span class="es-post-hover-title es-post-ink mb-2 text-sm font-semibold transition-colors">{{ $relName }}</span>
-                        <span class="es-post-muted mb-4 text-xs leading-relaxed">{{ $relBlurb }}</span>
-                        <span class="es-post-hover-arrow es-post-muted mt-auto inline-flex items-center gap-1 text-xs font-medium transition-colors">
-                            Read more
-                            <svg aria-hidden="true" class="h-3.5 w-3.5 transition-transform group-hover:translate-x-0.5 rtl:rotate-180" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M9 5l7 7-7 7" /></svg>
-                        </span>
-                    </a>
-                @endforeach
-            </div>
-            <div class="mt-8 text-center">
-                <a href="{{ marketing_url('/features') }}" class="es-post-link inline-flex items-center font-medium hover:underline">
-                    See all features
-                    <svg aria-hidden="true" class="ml-1 h-4 w-4 rtl:ml-0 rtl:mr-1 rtl:rotate-180" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 7l5 5m0 0l-5 5m5-5H6" />
-                    </svg>
-                </a>
-            </div>
-        </div>
-    </section>
+    <x-marketing.related-pages />
 
     <!-- ============================================================ -->
-    <!-- 9. Finale                                                    -->
+    <!-- 5. Finale                                                    -->
     <!-- ============================================================ -->
     <section id="claim" class="relative scroll-mt-24 px-2 py-16 sm:px-4 lg:py-24">
         <div class="mx-auto max-w-6xl">
@@ -1089,14 +853,14 @@
                     <p class="es-post-tag mb-3">Addressed to you</p>
                     <div class="mx-auto flex max-w-2xl flex-col items-stretch justify-center gap-3 sm:flex-row">
                         <label for="es-claim-input" class="sr-only">Your schedule name</label>
-                        <div dir="ltr" class="es-claim flex min-w-0 flex-1 items-center rounded-2xl border border-white/15 bg-white/[0.07] px-5 py-4 backdrop-blur-md transition-all">
+                        <div dir="ltr" class="es-claim flex min-w-0 flex-1 items-center rounded-2xl border border-white/15 bg-white/[0.07] px-4 sm:px-5 py-4 backdrop-blur-md transition-all">
                             <input id="es-claim-input" type="text" placeholder="your-schedule" autocomplete="off" spellcheck="false" maxlength="30"
-                                class="min-w-0 flex-1 border-0 bg-transparent p-0 text-right font-mono text-sm font-semibold text-white placeholder-gray-400 focus:outline-none focus:ring-0 sm:text-base">
+                                class="min-w-0 flex-1 border-0 bg-transparent p-0 text-right font-mono text-base font-semibold text-white placeholder-gray-400 focus:outline-none focus:ring-0">
                             <span class="shrink-0 select-none font-mono text-sm text-gray-400 sm:text-base">.eventschedule.com</span>
                         </div>
                         <a href="{{ app_url('/sign_up') }}" class="es-post-btn group relative inline-flex shrink-0 items-center justify-center gap-2 overflow-hidden rounded-2xl px-8 py-4 text-lg font-semibold transition-all duration-200 hover:-translate-y-0.5 hover:scale-[1.02]">
                             <span class="relative z-10 flex items-center gap-2">
-                                Get Started Free
+                                Start for free
                                 <svg aria-hidden="true" class="h-5 w-5 transition-transform group-hover:translate-x-1 rtl:rotate-180" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                                     <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 7l5 5m0 0l-5 5m5-5H6" />
                                 </svg>
@@ -1129,8 +893,6 @@
     </nav>
 
     </div>
-
-    <x-marketing.related-pages />
 
     <!-- Local confetti (no CDN) + motion engines -->
     <script {!! nonce_attr() !!} src="{{ asset('vendor/canvas-confetti/confetti.browser.min.js') }}" defer></script>

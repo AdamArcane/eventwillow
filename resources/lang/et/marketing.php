@@ -2,6 +2,8 @@
 
 return [
     'pricing_title' => 'Event Schedule\'i hinnad: tasuta plaan, ilma platvormitasudeta',
+    'home_title' => 'EventWillow - tasuta sündmuste kalender, piletimüük ja broneeringud',
+    'home_description' => 'Avalda sündmused ühel kalendrilehel, võta vastu broneeringuid ja piiramatult tasuta registreerumisi ning müü Pro-paketis pileteid platvormitasudeta. Alusta tasuta.',
     'pricing_description' => 'Alusta tasuta: piiramatud sündmused ja tasuta registreerumine. Pro lisab tasuliste piletite müügi, Enterprise nummerdatud kohad. Platvormitasu pole üheski plaanis.',
 
     'features_title' => 'Sündmuste haldamise tarkvara: kõik funktsioonid, ilma platvormitasudeta',

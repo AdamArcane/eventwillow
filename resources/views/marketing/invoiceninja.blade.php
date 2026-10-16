@@ -1,4 +1,4 @@
-<x-marketing-layout>
+<x-marketing-layout :hp="true">
     <x-slot name="title">Invoice Ninja Ticketing | Post Every Sale to Your Books</x-slot>
     <x-slot name="description">Sell tickets in Event Schedule and the entry lands in Invoice Ninja: a client, a line item per ticket type, and the QR code printed on the invoice.</x-slot>
     <x-slot name="breadcrumbTitle">Invoice Ninja</x-slot>
@@ -603,11 +603,11 @@
             ],
             [
                 'q' => 'Can I use Stripe and Invoice Ninja at the same time?',
-                'a' => 'Yes. Each connects once under Settings, Payment Methods, and then each event chooses how it takes money: Stripe, PayPal, Payfast for events priced in rand, Invoice Ninja, a plain payment URL or cash. A corporate booking that needs an invoice and a public show that wants a card payment can run side by side.',
+                'a' => 'Yes. Each connects once under Settings, Payment Methods, and then each event chooses how it takes money: Stripe, PayPal, Payfast for events priced in rand, Razorpay for events priced in Indian rupees, Invoice Ninja, a plain payment URL or cash. A corporate booking that needs an invoice and a public show that wants a card payment can run side by side.',
             ],
             [
                 'q' => 'Can I refund an Invoice Ninja sale from Event Schedule?',
-                'a' => 'You can record the refund, not send it. An Invoice Ninja sale shows Mark as Refunded on the Sales page, which marks the sale refunded here and puts its seats back on sale, but moves no money and changes nothing in Invoice Ninja, so return the payment there yourself. Stripe and PayPal are the only methods where a refund from the Sales page sends the money back for you.',
+                'a' => 'You can record the refund, not send it. An Invoice Ninja sale shows Mark as Refunded on the Sales page, which marks the sale refunded here and puts its seats back on sale, but moves no money and changes nothing in Invoice Ninja, so return the payment there yourself. Stripe, PayPal and Razorpay are the only methods where a refund from the Sales page sends the money back for you.',
             ],
             [
                 'q' => 'Can one invoice cover tickets to several events?',

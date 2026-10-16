@@ -1,7 +1,9 @@
 <?php
 
+use App\Http\Controllers\AdminBlockController;
 use App\Http\Controllers\AdminController;
 use App\Http\Controllers\AdminFederationController;
+use App\Http\Controllers\AdminFeedController;
 use App\Http\Controllers\AdminLegalController;
 use App\Http\Controllers\AdminNewsletterController;
 use App\Http\Controllers\AdminRealtimeController;
@@ -15,12 +17,16 @@ use App\Http\Controllers\Auth\RegisteredUserController;
 use App\Http\Controllers\BackupController;
 use App\Http\Controllers\BlogController;
 use App\Http\Controllers\BoostController;
+use App\Http\Controllers\BoostPartnerAdminController;
+use App\Http\Controllers\BoostPartnerController;
+use App\Http\Controllers\BoostPartnerSettingsController;
 use App\Http\Controllers\BoxOfficeController;
 use App\Http\Controllers\CalDAVController;
 use App\Http\Controllers\CarpoolController;
 use App\Http\Controllers\CheckInController;
 use App\Http\Controllers\EventbriteController;
 use App\Http\Controllers\EventController;
+use App\Http\Controllers\EventFeedController;
 use App\Http\Controllers\EventInterestController;
 use App\Http\Controllers\EventTemplateController;
 use App\Http\Controllers\FeedbackController;
@@ -79,6 +85,7 @@ if (config('app.hosted') && ! config('app.is_testing')) {
         Route::domain('blog.'._base_domain())->group(function () {
             Route::get('/', [BlogController::class, 'index'])->name('blog.index');
             Route::get('/feed', [BlogController::class, 'feed'])->name('blog.feed');
+            Route::get('/topics/{category}', [BlogController::class, 'index'])->name('blog.category');
             Route::get('/{slug}', [BlogController::class, 'show'])->name('blog.show');
         });
     }
@@ -111,7 +118,8 @@ if (config('app.hosted') && ! config('app.is_testing')) {
         // shares one with every other throttled route on the host.
         Route::get('/api/venue-map', [\App\Http\Controllers\VenueMapController::class, 'show'])->name('role.venue_map')->middleware('throttle:60,1,venue_map');
         Route::get('/request', [RoleController::class, 'request'])->name('role.request');
-        Route::get('/follow', [RoleController::class, 'follow'])->name('role.follow');
+        Route::post('/follow', [RoleController::class, 'follow'])->name('role.follow');
+        Route::get('/follow', [RoleController::class, 'followLanding']);
         // Claiming a schedule the app created while somebody entered an event, and the other
         // answer to the same page: this is not me. Registered ahead of the /{slug} catch-alls, and
         // throttled because both send a signed-out visitor into sign-up. The limiters are NAMED for
@@ -181,7 +189,7 @@ if (config('app.hosted') && ! config('app.is_testing')) {
         Route::post('/guest-parse', [EventController::class, 'guestParse'])->name('event.guest_parse')->middleware('throttle:10,1');
         Route::post('/guest-upload-image', [EventController::class, 'guestUploadImage'])->name('event.guest_upload_image')->middleware('throttle:20,1');
         Route::get('/guest-search-youtube', [RoleController::class, 'guestSearchYouTube'])->name('role.guest_search_youtube');
-        Route::get('/curate-event/{hash}', [EventController::class, 'curate'])->name('event.curate');
+        Route::post('/curate-event/{hash}', [EventController::class, 'curate'])->name('event.curate');
         Route::post('/submit-video/{event_hash}', [EventController::class, 'submitVideo'])->name('event.submit_video')->middleware('throttle:10,60');
         Route::post('/submit-comment/{event_hash}', [EventController::class, 'submitComment'])->name('event.submit_comment')->middleware('throttle:20,60,submit_comment');
         Route::post('/submit-photo/{event_hash}', [EventController::class, 'submitPhoto'])->name('event.submit_photo')->middleware('throttle:10,60,submit_photo');
@@ -375,6 +383,9 @@ Route::post('/clear-pending-request', [EventController::class, 'clearPendingRequ
 
 // Newsletter tracking routes (public, no auth)
 Route::get('/nl/o/{token}', [NewsletterTrackingController::class, 'trackOpen'])->name('newsletter.track_open')->middleware('throttle:60,1');
+// The link a newsletter carries is signed for its own address. Ahead of the older form below,
+// whose encodedUrl takes anything.
+Route::get('/nl/c/{token}/{signature}/{encodedUrl}', [NewsletterTrackingController::class, 'trackSignedClick'])->name('newsletter.track_signed_click')->where(['signature' => '[0-9a-f]{32}', 'encodedUrl' => '[A-Za-z0-9_-]+'])->middleware('throttle:60,1');
 Route::get('/nl/c/{token}/{encodedUrl}', [NewsletterTrackingController::class, 'trackClick'])->name('newsletter.track_click')->where('encodedUrl', '.*')->middleware('throttle:60,1');
 Route::get('/nl/u/{token}', [NewsletterTrackingController::class, 'showUnsubscribe'])->name('newsletter.show_unsubscribe');
 Route::post('/nl/u/{token}', [NewsletterTrackingController::class, 'unsubscribe'])->name('newsletter.unsubscribe')->middleware('throttle:newsletter_unsubscribe');
@@ -489,6 +500,10 @@ Route::post('/microsoft-calendar/webhook', [MicrosoftCalendarWebhookController::
 // Meta Ads webhook routes (no auth required)
 Route::get('/webhooks/meta', [MetaAdsWebhookController::class, 'verify'])->name('meta.webhook.verify')->middleware('throttle:10,1');
 Route::post('/webhooks/meta', [MetaAdsWebhookController::class, 'handle'])->name('meta.webhook.handle')->middleware('throttle:60,1');
+// Facebook Login for Business (boost partners): Meta calls these when a person removes the app or
+// asks for their data to be deleted. Both clear that person's stored token.
+Route::post('/webhooks/meta/deauthorize', [BoostPartnerSettingsController::class, 'deauthorize'])->name('meta.webhook.deauthorize')->middleware('throttle:60,1');
+Route::post('/webhooks/meta/data-deletion', [BoostPartnerSettingsController::class, 'dataDeletion'])->name('meta.webhook.data_deletion')->middleware('throttle:60,1');
 
 // WhatsApp webhook route (no auth required)
 Route::post('/api/whatsapp/webhook', [WhatsAppWebhookController::class, 'handle'])->name('whatsapp.webhook')->middleware('throttle:60,1');
@@ -689,6 +704,33 @@ Route::middleware(['auth', 'verified', 'app_subdomain', 'active_day'])->group(fu
     Route::get('/promotions/create', [PromotionController::class, 'create'])->name('promotions.create');
     Route::post('/promotions/payment-intent', [PromotionController::class, 'createPaymentIntent'])->name('promotions.payment_intent');
     Route::post('/promotions', [PromotionController::class, 'store'])->name('promotions.store');
+    // Boost partners: an account whose schedules boost under its own Page and ad account, with
+    // every boost approved and marked paid by it first. Static paths come before /boost/{hash}.
+    Route::get('/boost/requests', [BoostPartnerController::class, 'requests'])->name('boost.partner.requests');
+    Route::get('/boost/campaigns', [BoostPartnerController::class, 'campaigns'])->name('boost.partner.campaigns');
+    Route::get('/boost/campaigns/export', [BoostPartnerController::class, 'export'])->name('boost.partner.export');
+    Route::get('/boost/statements', [BoostPartnerController::class, 'statements'])->name('boost.partner.statements');
+    Route::get('/boost/statements/{period}', [BoostPartnerController::class, 'statement'])->name('boost.partner.statement')->where('period', '\d{4}-\d{2}');
+    Route::post('/boost/statements/{period}/pay', [BoostPartnerController::class, 'payStatement'])->name('boost.partner.statement_pay')->where('period', '\d{4}-\d{2}');
+    // Stripe sends the partner back here from its bank's confirmation page; it reads Stripe's answer
+    // and records it, so repeating it changes nothing.
+    Route::get('/boost/statements/{period}/return', [BoostPartnerController::class, 'statementReturn'])->name('boost.partner.statement_return')->where('period', '\d{4}-\d{2}');
+    Route::post('/boost/{hash}/approve', [BoostPartnerController::class, 'approve'])->name('boost.partner.approve');
+    Route::post('/boost/{hash}/decline', [BoostPartnerController::class, 'decline'])->name('boost.partner.decline');
+    Route::post('/boost/{hash}/payment', [BoostPartnerController::class, 'confirmPayment'])->name('boost.partner.payment');
+    Route::post('/boost/{hash}/payment/withdraw', [BoostPartnerController::class, 'withdrawPayment'])->name('boost.partner.payment_withdraw');
+    Route::post('/boost/{hash}/stop', [BoostPartnerController::class, 'stop'])->name('boost.partner.stop');
+    Route::get('/boost/{hash}/edit', [BoostPartnerController::class, 'edit'])->name('boost.edit');
+    Route::post('/boost/{hash}/edit', [BoostPartnerController::class, 'update'])->name('boost.update');
+    Route::post('/settings/boost-partner/share', [BoostPartnerSettingsController::class, 'saveShare'])->name('boost.partner.settings.share');
+    Route::post('/settings/boost-partner/check', [BoostPartnerSettingsController::class, 'check'])->name('boost.partner.settings.check');
+    Route::post('/settings/boost-partner/disconnect', [BoostPartnerSettingsController::class, 'disconnect'])->name('boost.partner.settings.disconnect');
+    Route::get('/settings/boost-partner/login', [BoostPartnerSettingsController::class, 'login'])->name('boost.partner.settings.login');
+    Route::get('/settings/boost-partner/callback', [BoostPartnerSettingsController::class, 'callback'])->name('boost.partner.settings.callback');
+    Route::post('/settings/boost-partner/select', [BoostPartnerSettingsController::class, 'selectAssets'])->name('boost.partner.settings.select');
+    Route::post('/settings/boost-partner/instructions', [BoostPartnerSettingsController::class, 'saveInstructions'])->name('boost.partner.settings.instructions');
+    Route::post('/settings/boost-partner/card/intent', [BoostPartnerSettingsController::class, 'cardIntent'])->name('boost.partner.settings.card_intent');
+    Route::post('/settings/boost-partner/card', [BoostPartnerSettingsController::class, 'saveCard'])->name('boost.partner.settings.card');
     Route::get('/boost/{hash}', [BoostController::class, 'show'])->name('boost.show');
     Route::post('/boost/{hash}/toggle-pause', [BoostController::class, 'togglePause'])->name('boost.toggle_pause');
     Route::post('/boost/{hash}/cancel', [BoostController::class, 'cancel'])->name('boost.cancel');
@@ -740,7 +782,7 @@ Route::middleware(['auth', 'verified', 'app_subdomain', 'active_day'])->group(fu
     Route::get('/google-calendar/redirect', [GoogleCalendarController::class, 'redirect'])->name('google.calendar.redirect');
     Route::get('/google-calendar/callback', [GoogleCalendarController::class, 'callback'])->name('google.calendar.callback');
     Route::get('/google-calendar/reauthorize', [GoogleCalendarController::class, 'reauthorize'])->name('google.calendar.reauthorize');
-    Route::get('/google-calendar/disconnect', [GoogleCalendarController::class, 'disconnect'])->name('google.calendar.disconnect');
+    Route::post('/google-calendar/disconnect', [GoogleCalendarController::class, 'disconnect'])->name('google.calendar.disconnect');
     Route::get('/google-calendar/calendars', [GoogleCalendarController::class, 'getCalendars'])->name('google.calendar.calendars');
     Route::get('/google-calendar/import/{subdomain}/calendars', [GoogleCalendarController::class, 'importCalendars'])->name('google.calendar.import_calendars')->middleware('throttle:30,1');
     Route::post('/google-calendar/import/{subdomain}/events', [GoogleCalendarController::class, 'importEvents'])->name('google.calendar.import_events')->middleware('throttle:30,1');
@@ -754,7 +796,7 @@ Route::middleware(['auth', 'verified', 'app_subdomain', 'active_day'])->group(fu
     Route::get('/microsoft-calendar/redirect', [MicrosoftCalendarController::class, 'redirect'])->name('microsoft.calendar.redirect');
     Route::get('/microsoft-calendar/callback', [MicrosoftCalendarController::class, 'callback'])->name('microsoft.calendar.callback');
     Route::get('/microsoft-calendar/reauthorize', [MicrosoftCalendarController::class, 'reauthorize'])->name('microsoft.calendar.reauthorize');
-    Route::get('/microsoft-calendar/disconnect', [MicrosoftCalendarController::class, 'disconnect'])->name('microsoft.calendar.disconnect');
+    Route::post('/microsoft-calendar/disconnect', [MicrosoftCalendarController::class, 'disconnect'])->name('microsoft.calendar.disconnect');
     Route::get('/microsoft-calendar/calendars', [MicrosoftCalendarController::class, 'getCalendars'])->name('microsoft.calendar.calendars');
     Route::post('/microsoft-calendar/sync/{subdomain}', [MicrosoftCalendarController::class, 'sync'])->name('microsoft.calendar.sync');
     Route::post('/microsoft-calendar/sync-event/{subdomain}/{eventId}', [MicrosoftCalendarController::class, 'syncEvent'])->name('microsoft.calendar.sync_event');
@@ -789,13 +831,13 @@ Route::middleware(['auth', 'verified', 'app_subdomain', 'active_day'])->group(fu
     Route::post('/{subdomain}/subscription/cancel', [SubscriptionController::class, 'cancel'])->name('subscription.cancel');
     Route::post('/{subdomain}/subscription/resume', [SubscriptionController::class, 'resume'])->name('subscription.resume');
     Route::post('/{subdomain}/subscription/swap', [SubscriptionController::class, 'swap'])->name('subscription.swap');
-    Route::get('/{subdomain}/unfollow', [RoleController::class, 'unfollow'])->name('role.unfollow');
+    Route::post('/{subdomain}/unfollow', [RoleController::class, 'unfollow'])->name('role.unfollow');
     Route::put('/{subdomain}/update', [RoleController::class, 'update'])->name('role.update');
     // How a schedule's venues are placed on its venue map, for its editors.
     Route::get('/{subdomain}/venue-map/status', [\App\Http\Controllers\VenueMapController::class, 'status'])->name('role.venue_map.status');
     Route::put('/{subdomain}/venue-map/marks/{venue}', [\App\Http\Controllers\VenueMapController::class, 'mark'])->name('role.venue_map.mark');
     Route::delete('/{subdomain}/venue-map/marks/{venue}', [\App\Http\Controllers\VenueMapController::class, 'unmark'])->name('role.venue_map.unmark');
-    Route::post('/{subdomain}/test-email', [RoleController::class, 'testEmail'])->name('role.test_email');
+    Route::post('/{subdomain}/test-email', [RoleController::class, 'testEmail'])->name('role.test_email')->middleware('throttle:10,1');
     Route::post('/{subdomain}/notification-email/resend', [NotificationEmailController::class, 'resend'])->name('role.notification_email.resend')->middleware('throttle:5,1');
     Route::post('/{subdomain}/test-feedback-email', [RoleController::class, 'testFeedbackEmail'])->name('role.test_feedback_email');
     Route::delete('/{subdomain}/delete', [RoleController::class, 'delete'])->name('role.delete');
@@ -829,6 +871,7 @@ Route::middleware(['auth', 'verified', 'app_subdomain', 'active_day'])->group(fu
     Route::delete('/{subdomain}/delete-event-image', [EventController::class, 'deleteImage'])->name('event.delete_image');
     Route::get('/{subdomain}/events-graphic', [GraphicController::class, 'generateGraphic'])->name('event.generate_graphic');
     Route::get('/{subdomain}/events-graphic/data', [GraphicController::class, 'generateGraphicData'])->name('event.generate_graphic_data');
+    Route::get('/{subdomain}/events-graphic/list-preview', [GraphicController::class, 'listWordingPreview'])->name('event.graphic_list_preview');
     Route::get('/{subdomain}/events-graphic/download', [GraphicController::class, 'downloadGraphic'])->name('event.download_graphic');
     Route::get('/{subdomain}/events-graphic/settings', [GraphicController::class, 'getSettings'])->name('event.graphic_settings');
     Route::post('/{subdomain}/events-graphic/settings', [GraphicController::class, 'saveSettings'])->name('event.save_graphic_settings');
@@ -837,7 +880,7 @@ Route::middleware(['auth', 'verified', 'app_subdomain', 'active_day'])->group(fu
     Route::post('/{subdomain}/events-graphic/test-email', [GraphicController::class, 'sendTestEmail'])->name('event.graphic_test_email');
     Route::post('/{subdomain}/events-graphic/header-image', [GraphicController::class, 'uploadHeaderImage'])->name('event.graphic_upload_header_image');
     Route::delete('/{subdomain}/events-graphic/header-image', [GraphicController::class, 'deleteHeaderImage'])->name('event.graphic_delete_header_image');
-    Route::get('/{subdomain}/clear-videos/{event_hash}/{role_hash}', [EventController::class, 'clearVideos'])->name('event.clear_videos');
+    Route::post('/{subdomain}/clear-videos/{event_hash}/{role_hash}', [EventController::class, 'clearVideos'])->name('event.clear_videos');
     Route::post('/{subdomain}/requests/accept-event/{hash}', [EventController::class, 'accept'])->name('event.accept');
     Route::post('/{subdomain}/requests/decline-event/{hash}', [EventController::class, 'decline'])->name('event.decline');
     Route::post('/{subdomain}/requests/accept-all', [EventController::class, 'acceptAll'])->name('event.accept_all');
@@ -901,6 +944,27 @@ Route::middleware(['auth', 'verified', 'app_subdomain', 'active_day'])->group(fu
     Route::post('/{subdomain}/team/transfer', [RoleController::class, 'storeTransfer'])->name('role.transfer.store')->middleware('throttle:5,1');
     Route::post('/{subdomain}/team/transfer/cancel', [RoleController::class, 'cancelTransfer'])->name('role.transfer.cancel');
     Route::post('/{subdomain}/team/transfer/resend', [RoleController::class, 'resendTransfer'])->name('role.transfer.resend')->middleware('throttle:5,1');
+    // Feeds: the addresses a schedule keeps reading for events. Their list is a tab of the
+    // schedule (role.view_admin, tab "feeds"); these are what changes one. For the owner and the
+    // admins, checked in the controller. The check is throttled: it fetches somebody else's server.
+    // A schedule's feeds. Never a schedule called admin (no schedule can be): /admin/feeds and
+    // what hangs off it are the platform's own pages, registered further down.
+    Route::where(['subdomain' => '(?!admin(?=/|$))[^/]+'])->group(function () {
+        Route::get('/{subdomain}/feeds/add', [EventFeedController::class, 'create'])->name('role.feeds.create');
+        Route::post('/{subdomain}/feeds/check', [EventFeedController::class, 'check'])->name('role.feeds.check')->middleware('throttle:10,1');
+        Route::post('/{subdomain}/feeds', [EventFeedController::class, 'store'])->name('role.feeds.store');
+        Route::get('/{subdomain}/feeds/{hash}', [EventFeedController::class, 'show'])->name('role.feeds.show');
+        Route::get('/{subdomain}/feeds/{hash}/edit', [EventFeedController::class, 'edit'])->name('role.feeds.edit');
+        Route::put('/{subdomain}/feeds/{hash}', [EventFeedController::class, 'update'])->name('role.feeds.update');
+        Route::delete('/{subdomain}/feeds/{hash}', [EventFeedController::class, 'destroy'])->name('role.feeds.destroy');
+        Route::post('/{subdomain}/feeds/{hash}/read', [EventFeedController::class, 'read'])->name('role.feeds.read')->middleware('throttle:10,1');
+        Route::post('/{subdomain}/feeds/{hash}/pause', [EventFeedController::class, 'pause'])->name('role.feeds.pause');
+        Route::post('/{subdomain}/feeds/{hash}/resume', [EventFeedController::class, 'resume'])->name('role.feeds.resume');
+        Route::post('/{subdomain}/feeds/{hash}/review', [EventFeedController::class, 'review'])->name('role.feeds.review');
+        Route::post('/{subdomain}/feeds/{hash}/publish-all', [EventFeedController::class, 'publishAll'])->name('role.feeds.publish_all');
+        Route::post('/{subdomain}/feeds/{hash}/decide/{item}', [EventFeedController::class, 'decide'])->name('role.feeds.decide');
+        Route::post('/{subdomain}/feeds/{hash}/undo', [EventFeedController::class, 'undo'])->name('role.feeds.undo');
+    });
     Route::delete('/{subdomain}/uncurate-event/{hash}', [EventController::class, 'uncurate'])->name('event.uncurate');
     Route::get('/{subdomain}/import', [EventController::class, 'showImportHub'])->name('event.show_import');
     Route::get('/{subdomain}/import/ai', [EventController::class, 'showImport'])->name('event.show_import_ai');
@@ -969,12 +1033,14 @@ Route::middleware(['auth', 'verified', 'app_subdomain', 'active_day'])->group(fu
     // install a schedule legitimately living at /features - the reserved-subdomain list in Role.php
     // is gated on config('app.hosted') and is not consulted by the rename path at all, so a
     // schedule really can hold that subdomain.
+    // "admin" as well: /admin/feeds is the platform's own page, and without this it is the Feeds
+    // tab of a schedule called admin, which no schedule can be (Role::RESERVED_SUBDOMAINS).
     $adminTabSubdomain = config('app.is_nexus')
-        ? '(?!docs(?=/|$)|features(?=/|$))[^/]+'
-        : '(?!docs(?=/|$))[^/]+';
-    Route::get('/{subdomain}/{tab}', [RoleController::class, 'viewAdmin'])->name('role.view_admin')->where('tab', 'schedule|templates|availability|appointments|seating|requests|followers|team|plan|videos')->where('subdomain', $adminTabSubdomain);
+        ? '(?!docs(?=/|$)|features(?=/|$)|admin(?=/|$))[^/]+'
+        : '(?!docs(?=/|$)|admin(?=/|$))[^/]+';
+    Route::get('/{subdomain}/{tab}', [RoleController::class, 'viewAdmin'])->name('role.view_admin')->where('tab', 'schedule|templates|availability|appointments|seating|requests|feeds|followers|team|plan|videos')->where('subdomain', $adminTabSubdomain);
 
-    Route::post('/{subdomain}/upload-image', [EventController::class, 'uploadImage'])->name('event.upload_image');
+    Route::post('/{subdomain}/upload-image', [EventController::class, 'uploadImage'])->name('event.upload_image')->middleware('throttle:60,1');
 
     // The organizer gallery editor uploads each photo the moment it is added, as a draft that
     // the edit form's Save commits (GalleryUtils::sync()). A 50-photo drop is 50 requests, hence
@@ -1029,6 +1095,7 @@ Route::middleware(['auth', 'verified', 'app_subdomain', 'active_day'])->group(fu
         // explains how to turn it on rather than disappearing.
         Route::get('/admin/realtime', [AdminRealtimeController::class, 'index'])->name('admin.realtime');
         Route::get('/admin/realtime/data', [AdminRealtimeController::class, 'data'])->name('admin.realtime.data');
+        Route::get('/admin/realtime/trends', [AdminRealtimeController::class, 'trends'])->name('admin.realtime.trends');
         Route::post('/admin/settings/realtime', [AdminRealtimeController::class, 'updateSettings'])->name('admin.settings.update_realtime');
         Route::get('/admin/users', [AdminController::class, 'users'])->name('admin.users');
         Route::get('/admin/revenue', [AdminController::class, 'revenue'])->name('admin.revenue');
@@ -1046,6 +1113,9 @@ Route::middleware(['auth', 'verified', 'app_subdomain', 'active_day'])->group(fu
         Route::get('/admin/boost', [AdminController::class, 'boost'])->name('admin.boost');
         Route::post('/admin/boost/grant-credit', [AdminController::class, 'boostGrantCredit'])->name('admin.boost.grant_credit');
         Route::post('/admin/boost/set-limit', [AdminController::class, 'boostSetLimit'])->name('admin.boost.set_limit');
+        Route::post('/admin/boost/partners', [BoostPartnerAdminController::class, 'enable'])->name('admin.boost.partners.enable');
+        Route::post('/admin/boost/partners/{partner}/confirm', [BoostPartnerAdminController::class, 'confirm'])->name('admin.boost.partners.confirm');
+        Route::post('/admin/boost/partners/{partner}/disable', [BoostPartnerAdminController::class, 'disable'])->name('admin.boost.partners.disable');
         Route::post('/admin/translation/retry', [AdminController::class, 'retryTranslation'])->name('admin.translation.retry');
         // App Update (selfhost). Registered on every install and 404'd at runtime inside the
         // controller, matching the federation and growth routes above: phpunit pins
@@ -1106,6 +1176,20 @@ Route::middleware(['auth', 'verified', 'app_subdomain', 'active_day'])->group(fu
         // Same shape as admin.app_update and admin.federation above: registered everywhere, with
         // the controller owning the authorization. AdminController::schedules() counts Stripe
         // subscriptions and granted plans, which simply read zero off-platform.
+        Route::get('/admin/feeds', [AdminFeedController::class, 'index'])->name('admin.feeds');
+        Route::post('/admin/feeds/{hash}/read', [AdminFeedController::class, 'read'])->name('admin.feeds.read');
+        Route::post('/admin/feeds/{hash}/resume', [AdminFeedController::class, 'resume'])->name('admin.feeds.resume');
+        // Shutting an account out, and the list of what new accounts are refused for. On every
+        // install: a selfhost that opens registration has the same spam.
+        Route::get('/admin/blocked', [AdminBlockController::class, 'index'])->name('admin.blocked');
+        Route::post('/admin/blocked/list', [AdminBlockController::class, 'storeEntry'])->name('admin.blocked.entry.store');
+        Route::post('/admin/blocked/list/{hash}/remove', [AdminBlockController::class, 'removeEntry'])->name('admin.blocked.entry.remove');
+        Route::get('/admin/blocked/account/{hash}', [AdminBlockController::class, 'account'])->name('admin.blocked.account');
+        Route::post('/admin/blocked/account/{hash}/block', [AdminBlockController::class, 'block'])->name('admin.blocked.block');
+        Route::post('/admin/blocked/account/{hash}/unblock', [AdminBlockController::class, 'unblock'])->name('admin.blocked.unblock');
+        Route::post('/admin/blocked/account/{hash}/not-spam', [AdminBlockController::class, 'notSpam'])->name('admin.blocked.not_spam');
+        Route::post('/admin/blocked/account/{hash}/flag-again', [AdminBlockController::class, 'flagAgain'])->name('admin.blocked.flag_again');
+        Route::post('/admin/blocked/words', [AdminBlockController::class, 'saveWords'])->name('admin.blocked.words');
         Route::get('/admin/schedules', [AdminController::class, 'schedules'])->name('admin.schedules');
         Route::get('/admin/schedules/{role}/edit', [AdminController::class, 'editSchedule'])->name('admin.schedules.edit');
         Route::put('/admin/schedules/{role}', [AdminController::class, 'updateSchedule'])->name('admin.schedules.update');
@@ -1219,6 +1303,12 @@ Route::middleware(['auth', 'verified', 'app_subdomain', 'active_day'])->group(fu
             Route::delete('/admin/blog/{blog_post}', [BlogController::class, 'destroy'])->name('blog.destroy');
             Route::post('/admin/blog/{blog_post}/noindex', [BlogController::class, 'toggleNoindex'])->name('blog.noindex');
             Route::post('/admin/blog/generate-content', [BlogController::class, 'generateContent'])->name('blog.generate-content');
+            // The review of the posts already published. Its routes come before the ones that
+            // take a post's id, so "review" is never read as one.
+            Route::get('/admin/blog-review', [BlogController::class, 'review'])->name('blog.review');
+            Route::post('/admin/blog-review', [BlogController::class, 'runReview'])->name('blog.review.run');
+            Route::post('/admin/blog-review/claims', [BlogController::class, 'checkClaims'])->name('blog.review.claims');
+            Route::post('/admin/blog/{blog_post}/merge', [BlogController::class, 'merge'])->name('blog.merge');
         }
     });
 });
@@ -1278,6 +1368,7 @@ if (config('app.is_nexus')) {
         Route::get('/features/waitlist', [MarketingController::class, 'waitlist'])->name('marketing.waitlist');
         Route::get('/features/registration', [MarketingController::class, 'registration'])->name('marketing.registration');
         Route::get('/features/booking-requests', [MarketingController::class, 'bookingRequests'])->name('marketing.booking_requests');
+        Route::get('/features/lineup', [MarketingController::class, 'lineup'])->name('marketing.lineup');
         Route::get('/features/installments', [MarketingController::class, 'installments'])->name('marketing.installments');
         Route::get('/features/ai', [MarketingController::class, 'ai'])->name('marketing.ai');
         Route::get('/features/calendar-sync', [MarketingController::class, 'calendarSync'])->name('marketing.calendar_sync');
@@ -1558,6 +1649,7 @@ if (config('app.is_nexus')) {
             Route::get('/features/waitlist', [MarketingController::class, 'waitlist'])->name('marketing.waitlist');
             Route::get('/features/registration', [MarketingController::class, 'registration'])->name('marketing.registration');
             Route::get('/features/booking-requests', [MarketingController::class, 'bookingRequests'])->name('marketing.booking_requests');
+            Route::get('/features/lineup', [MarketingController::class, 'lineup'])->name('marketing.lineup');
             Route::get('/features/installments', [MarketingController::class, 'installments'])->name('marketing.installments');
             Route::get('/features/ai', [MarketingController::class, 'ai'])->name('marketing.ai');
             Route::get('/features/calendar-sync', [MarketingController::class, 'calendarSync'])->name('marketing.calendar_sync');
@@ -1877,6 +1969,7 @@ if (config('app.is_nexus')) {
             Route::get('/for-meetup-groups', fn () => redirect('https://'._base_domain().'/for-meetup-groups', 301));
             Route::get('/features/registration', fn () => redirect('https://'._base_domain().'/features/registration', 301));
             Route::get('/features/booking-requests', fn () => redirect('https://'._base_domain().'/features/booking-requests', 301));
+            Route::get('/features/lineup', fn () => redirect('https://'._base_domain().'/features/lineup', 301));
             Route::get('/community-event-calendar', fn () => redirect('https://'._base_domain().'/community-event-calendar', 301));
             Route::get('/wordpress-event-calendar', fn () => redirect('https://'._base_domain().'/wordpress-event-calendar', 301));
             Route::get('/event-landing-page', fn () => redirect('https://'._base_domain().'/event-landing-page', 301));
@@ -2085,6 +2178,7 @@ if (config('app.is_nexus')) {
     Route::get('/for-meetup-groups', fn () => redirect()->route('home'));
     Route::get('/features/registration', fn () => redirect()->route('home'));
     Route::get('/features/booking-requests', fn () => redirect()->route('home'));
+    Route::get('/features/lineup', fn () => redirect()->route('home'));
     Route::get('/community-event-calendar', fn () => redirect()->route('home'));
     Route::get('/wordpress-event-calendar', fn () => redirect()->route('home'));
     Route::get('/event-landing-page', fn () => redirect()->route('home'));
@@ -2216,6 +2310,7 @@ if (config('app.hosted') && config('app.is_nexus')) {
 if (config('app.is_nexus') && (config('app.is_testing') || config('app.env') == 'local')) {
     Route::get('/blog', [BlogController::class, 'index'])->name('blog.index');
     Route::get('/blog/feed', [BlogController::class, 'feed'])->name('blog.feed');
+    Route::get('/blog/topics/{category}', [BlogController::class, 'index'])->name('blog.category');
     Route::get('/blog/{slug}', [BlogController::class, 'show'])->name('blog.show');
 }
 
@@ -2235,7 +2330,8 @@ if (! config('app.hosted') || config('app.is_testing')) {
     Route::get('/{subdomain}/api/calendar-events', [RoleController::class, 'calendarEvents'])->name('role.calendar_events');
     Route::get('/{subdomain}/api/venue-map', [\App\Http\Controllers\VenueMapController::class, 'show'])->name('role.venue_map')->middleware('throttle:60,1,venue_map');
     Route::get('/{subdomain}/request', [RoleController::class, 'request'])->name('role.request');
-    Route::get('/{subdomain}/follow', [RoleController::class, 'follow'])->name('role.follow');
+    Route::post('/{subdomain}/follow', [RoleController::class, 'follow'])->name('role.follow');
+    Route::get('/{subdomain}/follow', [RoleController::class, 'followLanding']);
     Route::get('/{subdomain}/claim', [RoleController::class, 'claimStart'])->name('role.claim.start')->middleware('throttle:20,1,schedule_claim');
     Route::post('/{subdomain}/claim', [RoleController::class, 'claimConfirm'])->name('role.claim.confirm')->middleware('throttle:5,1,schedule_claim');
     Route::get('/{subdomain}/not-me', [RoleController::class, 'claimNotMe'])->name('role.claim.not_me')->middleware('throttle:20,1,schedule_claim');
@@ -2273,7 +2369,7 @@ if (! config('app.hosted') || config('app.is_testing')) {
     Route::post('/{subdomain}/guest-parse', [EventController::class, 'guestParse'])->name('event.guest_parse')->middleware('throttle:10,1');
     Route::post('/{subdomain}/guest-upload-image', [EventController::class, 'guestUploadImage'])->name('event.guest_upload_image')->middleware('throttle:20,1');
     Route::get('/{subdomain}/guest-search-youtube', [RoleController::class, 'guestSearchYouTube'])->name('role.guest_search_youtube');
-    Route::get('/{subdomain}/curate-event/{hash}', [EventController::class, 'curate'])->name('event.curate');
+    Route::post('/{subdomain}/curate-event/{hash}', [EventController::class, 'curate'])->name('event.curate');
     Route::post('/{subdomain}/submit-video/{event_hash}', [EventController::class, 'submitVideo'])->name('event.submit_video')->middleware('throttle:10,60');
     Route::post('/{subdomain}/submit-comment/{event_hash}', [EventController::class, 'submitComment'])->name('event.submit_comment')->middleware('throttle:20,60,submit_comment');
     Route::post('/{subdomain}/submit-photo/{event_hash}', [EventController::class, 'submitPhoto'])->name('event.submit_photo')->middleware('throttle:10,60,submit_photo');

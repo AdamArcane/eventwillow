@@ -56,8 +56,13 @@ class SentryScrubber
      * i.e. still ship the credential.
      *
      * Matches the value up to the next separator so a following parameter stays readable.
+     *
+     * The OAuth names too (client_secret, access_token, refresh_token, code): an HTTP client's
+     * transfer error ends with the address it asked, and a token exchange carries the app secret
+     * and the user's code or token in that address (BoostPartnerSettingsController::callback()).
+     * Named one by one, so a parameter that merely ends in "secret" stays readable.
      */
-    private const SECRET_QUERY = '#((?:^|[?&])(?:secret|token|api_key|email|sig)=)[^&\s"\']+#i';
+    private const SECRET_QUERY = '#((?:^|[?&])(?:secret|token|api_key|email|sig|client_secret|access_token|refresh_token|code)=)[^&\s"\']+#i';
 
     /**
      * Request headers that carry the visitor's real IP address. Sentry's own sanitiser drops
@@ -154,6 +159,8 @@ class SentryScrubber
                 $crumb = $crumb->withMessage(self::scrub($message));
             }
 
+            $crumb = self::withoutForeignPath($crumb);
+
             // Metadata, not just the message: an http_client_requests breadcrumb carries the URL
             // there, which is where an appointment secret actually travels.
             foreach ($crumb->getMetadata() as $key => $value) {
@@ -167,11 +174,109 @@ class SentryScrubber
             return $crumb;
         }, $event->getBreadcrumbs()));
 
+        // Spans, on a traced request. An outbound request is a span as well as a breadcrumb: the
+        // address is in its description ("GET https://host/path") and again in its data. With
+        // tracing switched on, that is where an address a schedule's owner gave us would leave.
+        foreach ($event->getSpans() as $span) {
+            if ($span->getOp() !== 'http.client') {
+                continue;
+            }
+
+            $description = (string) $span->getDescription();
+            if (preg_match('~^(\S+\s+)?(https?://\S+)$~i', $description, $found)) {
+                $span->setDescription($found[1].self::hostOnly($found[2]));
+            }
+
+            $data = (array) $span->getData();
+            $changed = [];
+            foreach (['url', 'http.url'] as $key) {
+                if (is_string($data[$key] ?? null) && self::hostOnly($data[$key]) !== $data[$key]) {
+                    $changed[$key] = self::hostOnly($data[$key]);
+                }
+            }
+            if ($changed) {
+                foreach (['http.query' => '[query]', 'http.fragment' => '[fragment]'] as $key => $placeholder) {
+                    if (is_string($data[$key] ?? null) && $data[$key] !== '') {
+                        $changed[$key] = $placeholder;
+                    }
+                }
+                $span->setData($changed);
+            }
+        }
+
         // extra and tags are free text the app sets itself, and cost nothing to walk.
         $event->setExtra(self::scrubDeep($event->getExtra()));
         $event->setTags(self::scrubDeep($event->getTags()));
 
         return $event;
+    }
+
+    /**
+     * An outbound request to somebody else's server keeps its host and loses the rest.
+     *
+     * Every request the app makes is a breadcrumb (`http_client_requests`), and an address a
+     * schedule's owner gave us to read is a credential in the PATH, where no pattern can know it:
+     * a calendar's private link (`/calendar/ical/<address>/private-<token>/basic.ics`), a
+     * provider's feed (`/rss/<token>`), and whatever it redirects to. Any error in the same
+     * process would ship them. The host says which service was asked, which is what a report
+     * needs; the stack trace says which call.
+     *
+     * Our own host and its subdomains are left to the patterns above: our route paths are what
+     * make a report readable, and the secrets in them are ones this class knows the shape of.
+     */
+    private static function withoutForeignPath(Breadcrumb $crumb): Breadcrumb
+    {
+        $metadata = $crumb->getMetadata();
+        $url = $metadata['url'] ?? null;
+
+        if ($crumb->getType() !== Breadcrumb::TYPE_HTTP || ! is_string($url)) {
+            return $crumb;
+        }
+
+        $host = parse_url($url, PHP_URL_HOST);
+
+        if (! is_string($host) || $host === '' || self::isOurHost($host)) {
+            return $crumb;
+        }
+
+        $crumb = $crumb->withMetadata('url', self::hostOnly($url));
+
+        foreach (['http.query' => '[query]', 'http.fragment' => '[fragment]'] as $key => $placeholder) {
+            if (is_string($metadata[$key] ?? null) && $metadata[$key] !== '') {
+                $crumb = $crumb->withMetadata($key, $placeholder);
+            }
+        }
+
+        return $crumb;
+    }
+
+    /** A foreign address as its host alone. Our own, and anything that is not an address, as it is. */
+    private static function hostOnly(string $url): string
+    {
+        $host = parse_url($url, PHP_URL_HOST);
+
+        if (! is_string($host) || $host === '' || self::isOurHost($host)) {
+            return $url;
+        }
+
+        $path = (string) parse_url($url, PHP_URL_PATH);
+        $port = parse_url($url, PHP_URL_PORT);
+
+        return (parse_url($url, PHP_URL_SCHEME) ?: 'https').'://'.$host.($port ? ':'.$port : '').($path !== '' && $path !== '/' ? '/[path]' : $path);
+    }
+
+    private static function isOurHost(string $host): bool
+    {
+        $ours = parse_url((string) config('app.url'), PHP_URL_HOST);
+
+        if (! is_string($ours) || $ours === '') {
+            return false;
+        }
+
+        $host = strtolower($host);
+        $ours = strtolower($ours);
+
+        return $host === $ours || str_ends_with($host, '.'.$ours);
     }
 
     /**

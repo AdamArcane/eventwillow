@@ -2,6 +2,8 @@
 
 return [
     'pricing_title' => 'Preços do Event Schedule: plano grátis, sem taxas de plataforma',
+    'home_title' => 'EventWillow - Calendário de eventos, ingressos e agendamentos, grátis',
+    'home_description' => 'Publique seus eventos em uma página de calendário, receba inscrições gratuitas sem limite e agendamentos. Venda ingressos no Pro, sem taxa de plataforma.',
     'pricing_description' => 'Comece grátis: eventos e inscrições ilimitados. O Pro adiciona a venda de ingressos pagos e o Enterprise lugares marcados. Sem taxa de plataforma.',
 
     'features_title' => 'Software de gestão de eventos: todos os recursos, sem taxas de plataforma',

@@ -6,6 +6,7 @@ use App\Models\Event;
 use App\Models\Role;
 use App\Utils\DateUtils;
 use App\Utils\ImageUtils;
+use App\Utils\ListWording;
 use App\Utils\UrlUtils;
 use Carbon\Carbon;
 use Illuminate\Http\JsonResponse;
@@ -37,8 +38,12 @@ trait CalendarDataTrait
         $user = auth()->user();
         $canEdit = false;
         if ($user && $userAdminRoleIds !== null) {
-            $canEdit = $user->id == $event->user_id
-                || $event->roles->contains(fn ($r) => in_array($r->id, $userAdminRoleIds));
+            $onOwnSchedule = $event->roles->contains(fn ($r) => in_array($r->id, $userAdminRoleIds));
+            // With no schedule in hand (the dashboard) the link is event.edit_admin, which looks
+            // for a schedule the event is on that this person edits: "I made it" alone opens
+            // nothing there. An event sent to somebody else's schedule was offered Edit Event,
+            // on the card's main button, and the page answered 403.
+            $canEdit = $role ? ($user->id == $event->user_id || $onOwnSchedule) : $onOwnSchedule;
         } elseif ($user) {
             $canEdit = $user->canEditEvent($event);
         }
@@ -73,6 +78,11 @@ trait CalendarDataTrait
             ...$imageFields,
             // What a card or a row may say about tickets (Event::cardTicketFields()): empty for a locked event.
             ...$event->cardTicketFields(),
+            // The event's own clock, always. cardTicketFields() names it only where tickets are
+            // on sale, and "Now", "over today" and the zone a card prints are asked of every
+            // event: without it they fell back to the page's clock, which is the viewer's on the
+            // dashboard and the curator's on a curator's page.
+            'zone' => $event->scheduleTimezone(),
             'can_edit' => $canEdit,
             'edit_url' => $canEdit
                 ? ($role ? app_url(route('event.edit', ['subdomain' => $role->subdomain, 'hash' => UrlUtils::encodeId($event->id)], false)) : app_url(route('event.edit_admin', ['hash' => UrlUtils::encodeId($event->id)], false)))
@@ -144,6 +154,9 @@ trait CalendarDataTrait
             'vote_poll_url' => (isset($role) && $role->isPro()) ? route('event.vote_poll', ['subdomain' => $role->subdomain, 'event_hash' => UrlUtils::encodeId($event->id), 'poll_hash' => 'POLL_HASH']) : null,
             // Read only against the schedule being viewed - see publicCustomFieldValuesFor().
             'custom_field_values' => $event->publicCustomFieldValuesFor($role),
+            // The card in the owner's own words, where the schedule has chosen that (Settings,
+            // Advanced, "Event list wording"; ListWording); null is the standard card.
+            'wording' => $guestView && $role ? ListWording::card($event, $role, $displayLang) : null,
             'fan_comments_enabled' => $event->isFanCommentsEnabled(),
             'fan_photos_enabled' => $event->isFanPhotosEnabled(),
             'fan_videos_enabled' => $event->isFanVideosEnabled(),
@@ -170,6 +183,7 @@ trait CalendarDataTrait
             $data['polls'] = [];
             $data['parts'] = [];
             $data['custom_field_values'] = [];
+            $data['wording'] = null;
         }
 
         return $data;

@@ -1071,7 +1071,7 @@
             ],
             [
                 'q' => 'Can I refund a pitch fee if a trader pulls out or the day is rained off?',
-                'a' => 'Yes, on every plan, from the Sales page, in full or in part. A fee paid through Stripe or PayPal goes back to the trader through that provider, and only then is the sale marked refunded. A fee paid by cash, a payment link or any other way shows Mark as Refunded instead, which records the refund without moving money. A partial refund keeps the pitch booked, and a full one frees it for somebody else. Event Schedule does not email the trader about a refund, so a word from you is still worth sending.',
+                'a' => 'Yes, on every plan, from the Sales page, in full or in part. A fee paid through Stripe, PayPal or Razorpay goes back to the trader through that provider, and only then is the sale marked refunded. A fee paid by cash, a payment link or any other way shows Mark as Refunded instead, which records the refund without moving money. A partial refund keeps the pitch booked, and a full one frees it for somebody else. Event Schedule does not email the trader about a refund, so a word from you is still worth sending.',
             ],
             [
                 'q' => 'How do shoppers hear about the market?',
@@ -1616,7 +1616,7 @@
                             ['Counted per market date', false, 'Thirty pitches means thirty on that date. Sell out on a Saturday in June and the rest of the season is unaffected.'],
                             ['Ask while they pay', true, 'Attach your own questions to the pitch fee: power, van length, insurance number. The answers arrive with the payment instead of in a separate thread.'],
                             ['Scan them in', false, 'Every buyer gets a QR code, and scanning it at the entrance to the square costs nothing. The live check-in dashboard, counting who is in as the morning goes on, is the Pro half.'],
-                            ['Money back when it rains', false, 'Refund a pitch fee from the Sales page, in full or in part. On Stripe or PayPal the money goes back to the trader through the provider; a cash or payment-link fee is marked as refunded for your records.'],
+                            ['Money back when it rains', false, 'Refund a pitch fee from the Sales page, in full or in part. On Stripe, PayPal or Razorpay the money goes back to the trader through the provider; a cash or payment-link fee is marked as refunded for your records.'],
                             ['Sell tickets too, if you need to', false, 'A ticketed cooking class or a harvest supper works the same way, on Pro and with the same zero platform fee. Post it before tickets open, switch on the "Notify me" card, and shoppers can leave an email address to hear when they do.'],
                         ] as [$pT, $pIsPro, $pD])
                             <div class="fm-paper fm-card" data-reveal>

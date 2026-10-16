@@ -2,6 +2,8 @@
 
 return [
     'pricing_title' => 'Prețuri Event Schedule: gratuit, fără comision de platformă',
+    'home_title' => 'EventWillow - calendar de evenimente, bilete și programări, gratuit',
+    'home_description' => 'Publică-ți evenimentele pe o pagină de calendar, primește înscrieri gratuite nelimitate și programări, și vinde bilete în planul Pro, fără comision de platformă.',
     'pricing_description' => 'Începe gratuit: evenimente și înscrieri nelimitate. Pro adaugă vânzarea biletelor cu plată, Enterprise locuri numerotate. Fără comision de platformă.',
 
     'features_title' => 'Software de gestionare a evenimentelor: toate funcțiile, fără comisioane de platformă',

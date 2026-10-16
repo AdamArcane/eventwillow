@@ -4,7 +4,7 @@
 
 ## Platform Overview
 
-Event Schedule is an open-source event management platform available as hosted SaaS at eventschedule.com or as a selfhosted deployment. It provides public schedule pages, unlimited free registration on every plan, paid ticketing with zero platform fees on the Pro and Enterprise plans, refunds through Stripe and PayPal, two-way Google, Outlook and CalDAV calendar sync, AI-powered event parsing, newsletters and automatic new-event digests, analytics, and a full REST API with an OpenAPI 3.0 spec.
+Event Schedule is an open-source event management platform available as hosted SaaS at eventschedule.com or as a selfhosted deployment. It provides public schedule pages, unlimited free registration on every plan, paid ticketing with zero platform fees on the Pro and Enterprise plans, refunds through Stripe, PayPal and Razorpay, two-way Google, Outlook and CalDAV calendar sync, AI-powered event parsing, newsletters and automatic new-event digests, analytics, and a full REST API with an OpenAPI 3.0 spec.
 
 ### Schedule Types
 
@@ -16,8 +16,8 @@ Every account organizes events under one or more **schedules**. There are three 
 
 ### Deployment Modes
 
-- **Hosted** (eventschedule.com): Multi-tenant SaaS using subdomains (e.g., `my-venue.eventschedule.com`). Email verification required for registration. Each schedule owner connects their own payment account: Stripe (through Stripe Connect), PayPal, Payfast (South African rand only) or Invoice Ninja, or takes payment through a payment link or in cash.
-- **Selfhosted**: Single-tenant deployment using path-based routing (e.g., `yourdomain.com/my-venue`). No email verification needed. Stripe runs on the install's own API keys; PayPal and Payfast can be supplied for the whole install or connected per owner; Invoice Ninja, payment links and cash work as on the hosted service. Every Pro and Enterprise feature is included.
+- **Hosted** (eventschedule.com): Multi-tenant SaaS using subdomains (e.g., `my-venue.eventschedule.com`). Email verification required for registration. Each schedule owner connects their own payment account: Stripe (through Stripe Connect), PayPal, Payfast (South African rand only), Razorpay (Indian rupees only) or Invoice Ninja, or takes payment through a payment link or in cash.
+- **Selfhosted**: Single-tenant deployment using path-based routing (e.g., `yourdomain.com/my-venue`). No email verification needed. Stripe runs on the install's own API keys; PayPal, Payfast and Razorpay can be supplied for the whole install or connected per owner; Invoice Ninja, payment links and cash work as on the hosted service. Every Pro and Enterprise feature is included.
 
 ### Key Differentiators
 
@@ -889,7 +889,7 @@ curl -X DELETE https://eventschedule.com/api/schedules/the-blue-note/groups/gP5r
 
 #### GET /events
 
-List events owned by the authenticated user. Can be filtered by schedule and date range. Only events belonging to Pro schedules are included in the results.
+List events owned by the authenticated user. Can be filtered by schedule, date range and whether the event is cancelled. Only events belonging to Pro schedules are included in the results. Drafts and cancelled events are listed beside the rest, so check `is_draft` and `is_cancelled` before republishing a row.
 
 **Authentication**: Required
 **Plan**: Pro required (events on non-Pro schedules are silently filtered out)
@@ -900,6 +900,8 @@ List events owned by the authenticated user. Can be filtered by schedule and dat
 | subdomain | string | - | Filter events by schedule subdomain |
 | starts_after | date | - | Filter events starting on or after this date (Y-m-d) |
 | starts_before | date | - | Filter events starting on or before this date (Y-m-d) |
+| is_cancelled | boolean | - | `true` for cancelled events only, `false` to leave them out. Without it both are listed |
+| external_id | string | - | The event your own system knows by this id, matched exactly. With `subdomain` it is one event or none |
 | page | integer | 1 | Page number |
 | per_page | integer | 100 | Results per page (max 500) |
 
@@ -1044,7 +1046,11 @@ Create a new event under a schedule.
 |-------|------|----------|-------------|
 | name | string | Yes | Event name (max 255 chars) |
 | starts_at | string | Yes | Start date/time in UTC (Y-m-d H:i:s format) |
-| duration | number | No | Duration in hours (0 to 24) |
+| flyer_image_url | string | No | The address of a picture to use as the flyer (http or https, max 2048 chars). It is fetched once, before anything is saved, and stored as our own file: a public address that answers within 10 seconds with a JPEG, PNG, GIF or WebP of at most 8 MB, else a `422` and nothing is created or changed. Larger than 2000 pixels is resized. On update a new address replaces the flyer, `null` removes it, and the address the event already reports is no change |
+| external_id | string | No | The id your own system knows this event by (text or a number, max 255 chars). Unique for the schedule that owns the event and compared exactly, so `aB3` and `Ab3` are two ids. An id the schedule already has an event for returns `409` with that event's `id` under `data`, and nothing is created, unless `upsert` is true |
+| upsert | boolean | No | With `external_id`: `true` updates the event that already has the id instead of answering `409`. The first call creates (201, `meta.created` true), later calls update (200, `meta.created` false). The update follows the rules of PUT /events/{id}: nothing is required, a field not sent keeps its stored value, a new event's defaults are not applied again (an event made a draft by hand stays a draft), and it is not counted against the daily cap. Send `tickets`, `addons` or `event_parts` only to change them, each existing row with its `id`. Without an `external_id` it is a `422` |
+| duration | number | No | Duration in hours (0 to 8760, decimals allowed) |
+| ends_at | string | No | The end in UTC (Y-m-d H:i:s format). Another way to give the length: send it instead of `duration`, and the length is the time between the two moments. Must be after the start and at most 8760 hours after it. If both are sent and disagree, the one that differs from the stored value wins on an update, and it is a `422` when both were changed or the event is new. `null` changes nothing |
 | description | string | No | Full description, supports markdown (max 10000 chars) |
 | short_description | string | No | Brief description (max 500 chars) |
 | event_url | string | No | External URL for the event (max 255 chars) |
@@ -1158,6 +1164,8 @@ Update an existing event. Supports partial updates; only the fields provided wil
 
 **Request body**: Same fields as POST /events/{subdomain}. All fields are optional.
 
+`external_id` is kept unless the request names it: a value sets or changes it, `null` clears it. Only an owner or admin of the schedule that owns the event can change it, and an id another event of that schedule holds is a `422`.
+
 **Example**:
 ```bash
 curl -X PUT https://eventschedule.com/api/events/vN4wR8 \
@@ -1194,9 +1202,9 @@ curl -X PUT https://eventschedule.com/api/events/vN4wR8 \
 
 #### DELETE /events/{id}
 
-Permanently delete an event.
+Permanently delete an event. An event that has sales is not deleted (422): cancel it with `POST /events/{id}/cancel` instead, which keeps the sale records.
 
-**Authentication**: Required (must have permission to edit)
+**Authentication**: Required (the person who made the event, or an owner or admin of the schedule that owns it; a schedule that only lists the event gets a 403)
 **Plan**: Pro required
 
 **Path parameters**:
@@ -1223,12 +1231,74 @@ curl -X DELETE https://eventschedule.com/api/events/vN4wR8 \
 - `401` - Missing or invalid API key
 - `403` - Unauthorized to delete this event, or not a Pro account
 - `404` - Event not found
+- `422` - The event has sales and cannot be deleted
+
+---
+
+#### POST /events/{id}/cancel
+
+Call an event off without deleting it. The event keeps its page, which now says it is cancelled, and it keeps every sale and registration. It leaves the schedule's public calendar and any connected Google, Outlook or CalDAV calendar, and stops selling. Running boost campaigns are stopped and refunded (one in a boost partner's own ad account is stopped; it was never prepaid here), and installment plans stop charging. Sales are not refunded by this call.
+
+Unless the event is a draft, an `event.cancelled` webhook is sent. Cancelling an event that is already cancelled changes nothing and answers 200. An appointment booking is cancelled through its sale, which frees the slot and emails the guest.
+
+**Authentication**: Required (must have permission to edit)
+**Plan**: Pro required
+
+**Path parameters**:
+| Parameter | Type | Description |
+|-----------|------|-------------|
+| id | string | The encoded ID of the event |
+
+**Request body** (JSON, optional):
+| Field | Type | Description |
+|-------|------|-------------|
+| notify_attendees | boolean | Email the people who bought, registered or asked to be told. Buyers are emailed only when the schedule sends from its own address. Nobody is emailed about a draft |
+| message | string | A note added under the cancellation email (max 280 chars) |
+
+**Example**:
+```bash
+curl -X POST https://eventschedule.com/api/events/vN4wR8/cancel \
+  -H "X-API-Key: es_abc123..." \
+  -H "Content-Type: application/json" \
+  -d '{"notify_attendees": true, "message": "The hall is flooded."}'
+```
+
+**Success response** (200): the Event object, with `is_cancelled` true and `cancelled_at` set, and `meta.message` "Event cancelled successfully".
+
+**Error responses**:
+- `401` - Missing or invalid API key
+- `403` - Unauthorized to edit this event, or not a Pro account
+- `404` - Event not found
+- `422` - Validation error (a message longer than 280 characters)
+
+---
+
+#### POST /events/{id}/restore
+
+Undo a cancellation. The event returns to the public calendar and to connected calendars, and sales reopen. Nobody is emailed. A boost campaign or installment plan that the cancellation stopped stays stopped. Unless the event is a draft, an `event.updated` webhook is sent. Restoring an event that is not cancelled changes nothing and answers 200.
+
+**Authentication**: Required (must have permission to edit)
+**Plan**: Pro required
+
+**Example**:
+```bash
+curl -X POST https://eventschedule.com/api/events/vN4wR8/restore \
+  -H "X-API-Key: es_abc123..."
+```
+
+**Success response** (200): the Event object, with `is_cancelled` false and `cancelled_at` null, and `meta.message` "Event restored successfully".
+
+**Error responses**:
+- `401` - Missing or invalid API key
+- `403` - Unauthorized to edit this event, or not a Pro account
+- `404` - Event not found
+- `422` - An appointment booking cannot be restored
 
 ---
 
 #### POST /events/flyer/{event_id}
 
-Upload a flyer image for an event. Any existing flyer image will be replaced.
+Upload a flyer image for an event. Any existing flyer image will be replaced, and an image larger than 2000 pixels is resized. To set a flyer from an address instead of a file, send `flyer_image_url` when creating or updating the event. To remove a flyer, send `"flyer_image_url": null` to PUT /events/{id}.
 
 **Authentication**: Required (must own the event)
 **Plan**: Pro required
@@ -1496,7 +1566,7 @@ curl -X PUT https://eventschedule.com/api/sales/sA9bC1 \
 ```
 
 **Notes**:
-- For a Stripe or PayPal sale, `refund` sends the money back through the provider and then updates the status. Every other method (Invoice Ninja, Payfast, a payment link, cash, or a sale marked paid by hand) only records the refund: return the money in that provider yourself.
+- For a Stripe, PayPal or Razorpay sale, `refund` sends the money back through the provider and then updates the status. Every other method (Invoice Ninja, Payfast, a payment link, cash, or a sale marked paid by hand) only records the refund: return the money in that provider yourself.
 - A refund the gateway refuses returns `422` and leaves the sale `paid`. A refund whose outcome could not be confirmed returns `409` and is not retried automatically; check your provider before acting.
 - A payment plan is refunded in full only; sending `amount` for one returns `422`.
 - Cancelling or refunding releases the seats back into stock and notifies anyone on the waitlist for that date. For a multi-event order, act on the primary sale: a non-primary row returns `403`, and the change cascades to the rest of the order.
@@ -1535,9 +1605,57 @@ Fan comments, photos and videos submitted on events for schedules you own or adm
 
 **Query parameters**: `type` (comment, photo or video), `event_id`, `subdomain`, `event_date` (Y-m-d), `is_approved`, `per_page` (1-500).
 
+### Appointment Endpoints
+
+For an agent that books on a guest's behalf, a voice agent answering a phone line most often. The key's account must be an owner or admin of the schedule, and the schedule must be on the Pro plan. Every time comes with a `label` written in the schedule's timezone and language, to read to the guest.
+
+#### GET /schedules/{subdomain}/appointment-types
+
+The appointment types a guest can book on the schedule right now, the list its /book page shows. On the hosted service, types with a price or an approval step are left out until the schedule has its own email settings: a guest booked through the API is sent a way to pay, or told the schedule's answer, only by email.
+
+**Authentication**: Required
+
+**Plan**: Pro required
+
+Each type: `id`, `name`, `description`, `duration_minutes`, `price`, `currency` (null when free), `payment` (`free`, `cash` paid at the appointment, or `online` paid from a link the guest is emailed), `location_type` (`in_person`, `online`, `phone`) and `location` (the address or number; a meeting link is sent with the confirmation), `host_name` (the team member the appointment is with, or null), `timezone`, `requires_approval`, `asks_phone`, `requires_phone`, `questions` (each with `key`, `label`, `type`, `required`, `options`), `next_available` (a slot, or null) and `booking_url`.
+
+#### GET /appointment-types/{id}/slots
+
+The open times for a type, from the same rules as its booking page: weekly hours, date overrides, buffers, minimum notice, the booking window, and what is already booked.
+
+**Query parameters**: `from` (Y-m-d in the schedule's timezone, default today), `days` (1-31, default 7).
+
+Each slot: `starts_at` (UTC, send it back as `slot` when booking), `date` (in the schedule's timezone) and `label`, such as "Tuesday, October 20 at 2:30 PM EDT". When the range has nothing open, `meta.next_available` is the first open time after it.
+
+#### POST /appointment-types/{id}/bookings
+
+Book a time for a guest. The booking belongs to the guest, never to the API caller, and the schedule's Bookings list and booking email say it came through the API.
+
+**Body**: `slot` (required, a slot's `starts_at`), `name` (required), `email` (required), `phone` (required when the type's `requires_phone` is true), `notes`, `guest_timezone` (IANA name), `answers` (object keyed by question `key`, each answer text or a number, or a list of them; required questions must be answered).
+
+**Header**: `Idempotency-Key` (optional, up to 64 letters, digits, dots, colons, dashes or underscores). A repeat of the same request with the same key within 24 hours answers with the booking the first one made, with an `Idempotent-Replayed: true` header. The same key on a different request is a 422.
+
+**Response 201**: `id`, `status` (`confirmed`, `pending_approval` or `awaiting_payment`), `appointment_type_id`, `appointment_type`, `host_name`, `starts_at`, `ends_at`, `label`, `timezone`, `name`, `email`, `phone`, `price`, `currency`, `pay_by` (when an unpaid hold is released; awaiting_payment only), `emails_sent`, `manage_url` (absolute; where the guest pays, changes the time or cancels) and `summary`, a sentence to read back, such as "I've emailed a payment link to j…@gmail.com; your time is held until Tuesday, October 20 at 3:30 PM EDT."
+
+**409**: `{"error": "slot_taken", "alternatives": [three nearest open slots]}` when the time was just taken; `already_booked`, with that `booking`, when the same guest already holds it (a retry whose first answer was lost); `idempotency_key_in_use` while a request with the same key is still being handled.
+
+**422**: field errors in `errors`, or the type is not taking bookings, or the daily cap on new bookings is reached.
+
 ---
 
 ## Data Models
+
+### Boost Partner Endpoints
+
+For a boost partner: a network whose schedules boost under its own Facebook Page and Meta ad account. Only the key of the account that is the partner can use these; any other key gets 403. A boost launches when its current version is approved AND its current budget is paid, in either order. Repeating an approve, decline, confirm-payment or stop answers the boost as it stands.
+
+- `GET /api/boosts`: the partner's boosts, oldest change first. Filters: `status` (pending_approval, awaiting_payment, ready, in_review, active, completed, declined, rejected, stopped), `schedule` (a subdomain), `updated_since` (ISO 8601; returns changes at or after it, so drop duplicates), `page`, `per_page` (up to 500).
+- `GET /api/boosts/{id}`: one boost: `ad` (headline, text, description, call_to_action, image_url, destination_url), `version`, `audience.summary`, `budget`, `approval` (approved_version, decided_at, note, decline_reason), `payment` (confirmed, reference, amount, currency, confirmed_at), `spend` (amount, currency, as_of, final), `meta_review`, `stopped_at`, `stop_reason`, `stop_code`.
+- `POST /api/boosts/{id}/approve` with `{"version": 2, "note": "..."}`. A version that is not the current one answers 409 (`code: stale_version`).
+- `POST /api/boosts/{id}/decline` with `{"note": "..."}` (required).
+- `POST /api/boosts/{id}/confirm-payment` with `{"reference": "pi_...", "amount": "60.00", "currency": "USD", "budget": "50.00"}`, where `budget` is the `budget.amount` you charged for (a 409 `stale_budget` if the business has changed it since); `DELETE` the same path to withdraw it before launch.
+- `POST /api/boosts/{id}/stop` with an optional `{"reason": "..."}`. Pauses the campaign at Meta and ends it.
+- `GET /api/boost-statements`, `GET /api/boost-statements/{yyyy-mm}` (`?currency=` when a month has two): the monthly fee of 20% on actual spend, line by line.
 
 ### Schedule Object
 
@@ -1574,12 +1692,16 @@ Fan comments, photos and videos submitted on events for schedules you own or adm
 | description | string | Yes | Full description (may contain markdown) |
 | starts_at | datetime | No | Start date/time in UTC (Y-m-d H:i:s) |
 | duration | number | Yes | Duration in hours |
+| ends_at | datetime | Yes | End date/time in UTC (Y-m-d H:i:s): the start plus the duration, to the minute. Null when the event has no length. For a recurring event, the end of the first date |
 | category_id | integer | Yes | Category ID |
 | event_url | string | Yes | External URL |
 | registration_url | string | Yes | External registration URL |
 | venue_id | string | Yes | Encoded ID of associated venue schedule |
-| flyer_image_url | string | Yes | URL of the flyer image |
+| flyer_image_url | string | Yes | Address of the flyer image in our storage. Sending an address in this field on create or update fetches that picture as the flyer |
 | is_private | boolean | No | Whether the event is private (hidden from calendar, only accessible via direct link) |
+| external_id | string | Yes | The id your own system gave the event. Look an event up with GET /events?external_id= |
+| is_cancelled | boolean | No | Whether the event is cancelled. Read-only: changed with POST /events/{id}/cancel and /restore. Sending back the value you read is accepted; a different one is a 422 |
+| cancelled_at | datetime | Yes | When the event was cancelled (ISO 8601) |
 | is_password_protected | boolean | No | Whether the event page is protected by a password |
 | schedule_type | string | No | "single" or "recurring" |
 | recurring_frequency | string | Yes | Recurrence frequency. Only present for recurring events |
@@ -1690,8 +1812,9 @@ Included in `meta` for paginated responses.
 
 | Endpoint Type | Limit | Window |
 |--------------|-------|--------|
-| GET requests | 300 requests | Per minute, per IP address |
-| POST/PUT/DELETE requests | 30 requests | Per minute, per IP address |
+| GET requests | 300 requests | Per minute, per account |
+| POST/PUT/DELETE requests | 30 requests | Per minute, per account |
+| Requests with no key or a wrong one | 30 requests | Per minute, per IP address |
 | Registration (POST /register) | 3 attempts | Per IP per hour |
 | Login (POST /login) | 5 attempts | Per IP per 15 minutes |
 | Verification codes (POST /register/send-code) | 5 codes | Per email per hour |
@@ -1733,7 +1856,7 @@ All errors follow a consistent format:
 | 401 | Missing or invalid API key |
 | 403 | Forbidden (insufficient permissions, not Pro, 2FA restriction) |
 | 404 | Resource not found |
-| 409 | Conflict (e.g., API key already exists) |
+| 409 | Conflict (e.g., API key already exists, an appointment time just taken) |
 | 422 | Validation error |
 | 429 | Rate limit exceeded |
 | 500 | Server error |
@@ -1839,7 +1962,7 @@ Create an event with ticket types and optionally upload a flyer. Requires an exi
 
 **Steps**:
 1. `create_event` - Create event with `tickets_enabled: true`, currency, payment method, and ticket array
-2. `upload_flyer` - Optionally upload a flyer image using the event ID from step 1
+2. `upload_flyer` - Optionally upload a flyer image file using the event ID from step 1 (a flyer at a public address needs no second step: send `flyer_image_url` in step 1)
 
 ### sell_tickets
 
@@ -1859,6 +1982,15 @@ List, view, update, or delete schedules.
 3. `update_schedule` - Update schedule fields
 4. `delete_schedule` - Permanently delete a schedule (owner only)
 
+### book_appointment
+
+Book an appointment for a guest, as a voice agent on a phone line would.
+
+**Steps**:
+1. `list_appointment_types` - List the bookable types on the schedule
+2. `list_appointment_slots` - List open times for the chosen type, reading each slot's `label` to the guest
+3. `create_appointment_booking` - Book the chosen time with an `Idempotency-Key`, then read the booking's `summary` back. On a 409 `slot_taken`, offer the `alternatives`.
+
 ---
 
 ## Features
@@ -1866,7 +1998,7 @@ List, view, update, or delete schedules.
 Beyond the API endpoints documented above, Event Schedule includes these platform features:
 
 - **Ticketing**: Ticket types with their own price, quantity and sales window, free RSVPs, QR tickets scanned at the door on every plan, per-occurrence inventory for recurring events, and a multi-event cart. Free registration and zero-price ticket types are unlimited on every plan; selling a ticket that carries a price needs Pro or Enterprise. Zero platform fees.
-- **Payments and refunds**: Stripe, PayPal, Payfast (South African rand only), Invoice Ninja, a payment link or cash, chosen per event. Putting a price on a ticket is Pro, and every payment method and refunds come with it. Stripe and PayPal sales can be refunded in full or in part from the Sales page or the API; other methods record the refund without moving money.
+- **Payments and refunds**: Stripe, PayPal, Payfast (South African rand only), Razorpay (Indian rupees only), Invoice Ninja, a payment link or cash, chosen per event. Putting a price on a ticket is Pro, and every payment method and refunds come with it. Stripe, PayPal and Razorpay sales can be refunded in full or in part from the Sales page or the API; other methods record the refund without moving money.
 - **Pro ticketing extras**: Promo codes, add-ons, passes and subscriptions, gift cards, the ticket waitlist, installment payments (Stripe), the live check-in dashboard, sales CSV export and bulk attendee import.
 - **Allocated seating** (Enterprise, venue schedules): Reusable seating plans, a guest seat picker with best-available selection, and a box office console.
 - **Interest list**: Once the organizer switches on the “Notify me” card (off by default), a visitor on a public event page leaves an email address to hear when tickets go on sale, if the event is cancelled and shortly before it starts, plus any notice the organizer chooses to send when the date or venue changes. Free, and no account is needed.
@@ -1876,7 +2008,7 @@ Beyond the API endpoints documented above, Event Schedule includes these platfor
 - **Analytics**: Privacy-first (no cookies) page view tracking, device/browser breakdown, traffic sources, social link clicks, and conversion funnels.
 - **Event graphics**: Auto-generated promotional images in multiple layouts, sized for social media sharing, on every plan (AI-written graphic text and scheduled graphic emails are Enterprise).
 - **Sub-schedules**: Color-coded event categories within a schedule, with filtering and separate URLs. Manageable via API.
-- **Custom fields** (Pro): Custom data fields on events, each of which can also be asked on the public event request form.
+- **Custom fields** (Pro): Custom data fields on events, each of which can also be asked on the public event request form, offered as a filter on the schedule, and shown on the public event page (off by default).
 - **Fan content**: YouTube videos, photos and comments on events, with an approval workflow.
 - **Embedding**: Responsive iframe calendar embed for any website, with light/dark mode support; an embeddable ticket widget on Pro.
 - **AI features**: Gemini-powered event parsing from text/images (50 a day, 100 on Enterprise, 10 while a schedule is on its trial), auto-translation across the 12 supported languages, and bulk import.
@@ -1906,7 +2038,7 @@ Everything needed to publish events and gather an audience:
 - Interest list, email subscribers and automatic new-event digests
 - Up to 10 newsletter emails per month (each recipient counts as one)
 - AI event parsing (50 a day, 10 during the trial)
-- Import events from a link: a calendar feed or a page's own event data is read directly with no AI; any other page counts as one AI parse. A one-time copy of up to 100 events per read, not a subscription
+- Import events from a link: a calendar feed or a page's own event data is read directly with no AI; any other page counts as one AI parse. A one-time copy of up to 100 events per read, not a subscription (for a standing one, see Feeds below)
 
 ### Pro Plan
 
@@ -1914,8 +2046,8 @@ $5/month or $50/year.
 
 Pro adds:
 - Selling tickets that carry a price, unlimited and with zero platform fees
-- Every payment method: Stripe, PayPal, Payfast, Invoice Ninja, a payment link or cash
-- Full and partial refunds (Stripe and PayPal refund through the provider)
+- Every payment method: Stripe, PayPal, Payfast, Razorpay, Invoice Ninja, a payment link or cash
+- Full and partial refunds (Stripe, PayPal and Razorpay refund through the provider)
 - Promo codes, add-ons, passes and subscriptions, gift cards, the ticket waitlist and installment payments
 - Live check-in dashboard, sales CSV export and bulk attendee import
 - REST API and webhooks
@@ -1937,6 +2069,7 @@ Enterprise adds everything in Pro, plus:
 - AI features: flyer generation, schedule and event detail generation, agenda scanning
 - WhatsApp event creation
 - Availability management
+- Feeds: an address a schedule keeps reading about once an hour, a calendar (.ics, webcal, a public Google or Outlook link), an RSS, Atom or JSON feed, or a page that carries event data. New events are published or held as drafts for review, a change at the source is copied except to a field the owner edited, and the owner chooses what happens to an event that leaves the feed (leave it, cancel it, remove it). An event people signed up for is never changed without the owner. No AI is used. Docs: https://eventschedule.com/docs/managing-schedules#feeds
 - Up to 1,000 newsletter emails per month
 - 100 AI event parses a day
 - Priority support
@@ -1961,13 +2094,20 @@ Event Schedule charges no percentage-based fees on ticket sales. You only pay th
 ### PayPal
 
 - Each schedule owner connects their own PayPal account; the credentials are verified with PayPal before they are saved. A selfhosted install can also supply one account for everyone in `.env`.
-- Works with the multi-event cart (one order, one capture). Not available for installments, gift cards or appointments.
+- Works with the multi-event cart (one order, one capture) and with paid appointments. Not available for installments or gift cards.
 - Full or partial refunds go back through PayPal.
 
 ### Payfast
 
-- For events priced in South African rand (ZAR) only. Cannot join the multi-event cart, use installments, sell gift cards or take appointment payments.
+- For events and appointments priced in South African rand (ZAR) only. Cannot join the multi-event cart, use installments or sell gift cards.
 - Refunds are recorded in Event Schedule; return the money in Payfast.
+
+### Razorpay
+
+- For events and appointments priced in Indian rupees (INR) only. Buyers pay on a Razorpay payment link by UPI, card, netbanking or wallet. Each schedule owner connects their own Key ID and Key Secret; a selfhosted install can also supply one account for everyone in `.env`.
+- The sale is confirmed when the buyer returns, or by the optional `payment_link.paid` webhook if they never come back; `payment_link.expired` gives the seats of an abandoned checkout back. Every confirmation is checked against Razorpay before a sale is marked paid.
+- Works with the multi-event cart and with paid appointments. Not available for installments or gift cards.
+- Full or partial refunds go back through Razorpay.
 
 ### Invoice Ninja
 
@@ -2035,7 +2175,7 @@ Event Schedule supports 12 languages:
 
 Event Schedule can be selfhosted on your own infrastructure. Requires PHP 8.2+, MySQL, and a web server. Install via Softaculous (one-click), Docker, or manual setup.
 
-Key differences from hosted mode: path-based routing instead of subdomains, no email verification, every Pro and Enterprise feature included, Stripe on the install's own API keys (PayPal and Payfast can also be supplied for the whole install), one-click updates, and a daily automatic import from a list of URLs, filtered by city.
+Key differences from hosted mode: path-based routing instead of subdomains, no email verification, every Pro and Enterprise feature included, Stripe on the install's own API keys (PayPal, Payfast and Razorpay can also be supplied for the whole install), one-click updates, and a daily automatic import from a list of URLs, filtered by city.
 
 For full installation instructions, see the [Selfhost Guide](https://eventschedule.com/docs/selfhost/installation).
 

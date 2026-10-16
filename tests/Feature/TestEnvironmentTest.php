@@ -5,6 +5,7 @@ namespace Tests\Feature;
 use App\Utils\GitHubUtils;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\Http;
+use PHPUnit\Framework\Attributes\Depends;
 use Tests\TestCase;
 
 /**
@@ -128,6 +129,34 @@ class TestEnvironmentTest extends TestCase
     }
 
     /**
+     * The platform's real Meta token, ad account and Page live in the deploying machine's .env.
+     * Pinned empty, every boost test runs on MetaAdsServiceFake unless it sets its own values
+     * with Http::fake(); a boost partner's partner share runs on that same token.
+     */
+    public function test_no_test_can_reach_the_platforms_meta_ad_account(): void
+    {
+        foreach (['access_token', 'ad_account_id', 'page_id', 'business_id', 'system_user_id', 'login_config_id'] as $key) {
+            $this->assertSame('', (string) config('services.meta.'.$key), 'phpunit.xml must pin META_'.strtoupper($key).' empty.');
+        }
+        $this->assertFalse(\App\Services\MetaAdsService::isBoostConfigured());
+    }
+
+    /**
+     * No test runs with the developer's real AI key.
+     *
+     * The suite loads the developer's .env, where GEMINI_API_KEY is a real, billed key, and CI
+     * has none. A page that offers AI import draws its form only where a key is set, so
+     * CustomFieldEventPageTest passed on a developer's machine and failed on CI for that alone;
+     * and a test one Http::fake() short of the parser would have spent real requests on fixtures.
+     * Asserted on the default every test inherits: removing the phpunit.xml entry fails this on
+     * any machine that has a key. A test that needs the AI branch sets the config itself.
+     */
+    public function test_no_test_runs_with_the_developers_ai_key(): void
+    {
+        $this->assertSame('', (string) config('services.google.gemini_key'), 'phpunit.xml must pin GEMINI_API_KEY empty.');
+    }
+
+    /**
      * The other half of the harness that only CI can disprove.
      *
      * public/build is gitignored and .github/workflows/test.yml never builds assets, so the real
@@ -147,6 +176,39 @@ class TestEnvironmentTest extends TestCase
             '',
             (string) app(\Illuminate\Foundation\Vite::class)(['resources/js/app.js']),
             'refreshApplication() dropped the withoutVite() stub, so every @vite page 500s on CI.'
+        );
+    }
+
+    /**
+     * A time limit set while handling a request lasts for the rest of the test run.
+     *
+     * A web request gets a fresh max_execution_time each time. A test runs its requests inside the
+     * PHPUnit process, so the limit a controller sets stays in force after the test ends. It also
+     * starts a new timer. AppController::translateData() calls set_time_limit(900), and
+     * CronEndpointSecurityTest calls that route with the real secret. CI ran for 900 more
+     * seconds of CPU time with nothing resetting the limit, then died with "Maximum execution
+     * time of 900 seconds exceeded" in a test that had nothing to do with it (at the time,
+     * PaymentGatewayRegistryTest). The CLI runs with no limit, and TestCase::tearDown() goes
+     * back to that after every test.
+     *
+     * The test that follows this one is the check. This one plays the controller.
+     */
+    public function test_a_request_sets_a_time_limit(): void
+    {
+        set_time_limit(900);
+
+        $this->assertSame('900', (string) ini_get('max_execution_time'));
+    }
+
+    #[Depends('test_a_request_sets_a_time_limit')]
+    public function test_a_time_limit_a_request_set_ends_with_its_test(): void
+    {
+        $this->assertSame(
+            '0',
+            (string) ini_get('max_execution_time'),
+            'The time limit the previous test set is still in force. TestCase::tearDown() must call '
+            .'set_time_limit(0), or the suite dies a fixed number of CPU seconds after the latest test '
+            .'that reached a set_time_limit() call, in whatever test is running at that moment.'
         );
     }
 
@@ -219,6 +281,44 @@ class TestEnvironmentTest extends TestCase
             'The test job must run with opcache.enable_cli=1 (setup-php ini-values in '
             .'.github/workflows/test.yml). Without it every app boot leaks the compiled '
             .'routes/web.php closures and the full suite runs out of memory near the end.'
+        );
+    }
+
+    /**
+     * On is not enough: opcache needs room for the whole suite.
+     *
+     * Once it fills, it keeps what it holds and caches nothing more, without a word, and every
+     * file first required after that is compiled again each time it is required: the leak the
+     * test above is about, by a quieter road. PHPUnit loads every test file before it runs one,
+     * and in 2026-10 those alone took 104 MB of the default 128. routes/web.php stopped fitting on
+     * CI and the run died at about test 5,150, long before this file's turn, with an OOM "in
+     * resources/lang/en/messages.php", which is why this cannot wait for the cache to be full: it
+     * fails at three quarters, while there is still room, and that is the day to raise
+     * opcache.memory_consumption in .github/workflows/test.yml. By this point in a run nearly
+     * everything the suite loads has been loaded (209 of 512 MB when this was written).
+     * tests/bootstrap.php prints a line at the end of any run whose cache did fill.
+     */
+    public function test_opcache_has_room_for_the_whole_suite_on_ci(): void
+    {
+        if (getenv('GITHUB_ACTIONS') !== 'true') {
+            $this->markTestSkipped('Asserted on CI only: locally the sizes are php.ini settings, and tests/bootstrap.php says when they ran out.');
+        }
+
+        $status = function_exists('opcache_get_status') ? opcache_get_status(false) : false;
+        $this->assertIsArray($status, 'opcache is not answering: see the test above.');
+
+        $memory = $status['memory_usage'];
+        $total = $memory['used_memory'] + $memory['free_memory'] + $memory['wasted_memory'];
+        $taken = $memory['used_memory'] + $memory['wasted_memory'];
+        $advice = 'Raise opcache.memory_consumption (and opcache.interned_strings_buffer with it) in '
+            .'setup-php\'s ini-values in .github/workflows/test.yml. A full opcache stops caching, '
+            .'every app boot then compiles its files again, and the suite runs out of memory.';
+
+        $this->assertFalse($status['cache_full'], 'opcache has filled up. '.$advice);
+        $this->assertLessThan(
+            0.75,
+            $taken / $total,
+            sprintf('opcache is %d%% full (%d of %d MB). ', round(100 * $taken / $total), $taken / 1048576, $total / 1048576).$advice
         );
     }
 }

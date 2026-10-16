@@ -120,6 +120,9 @@ class BackupService
         // event was not imported by anyone, and a batch id from elsewhere must never line up with
         // a live one here (it is what "Undo this import" deletes by).
         'import_source', 'import_batch',
+        // The ticket preset an event's tickets came from: a ticket_presets row on THIS install.
+        // Non-fillable, so the round-trip already skips it; listed so that stays a decision.
+        'ticket_preset_id',
         // Points at a seating_plans row on THIS install. It is fillable so event cloning
         // carries it, and both the exporter and importEvent() walk getFillable() - so a raw id
         // would either abort the WHOLE restore on the foreign key, or (restoring onto the same
@@ -131,6 +134,11 @@ class BackupService
         // creator_role_id - the importing schedule - which is why exportEvent() only carries values
         // that were keyed by the exporting schedule's own fields.
         'custom_field_values_role_id',
+        // The team member an appointment was booked with: a user id from THIS install, which on
+        // the install a backup is restored to is nobody, or somebody else. Non-fillable, so both
+        // halves already skip it; listed so that stays a decision. A restored type is unhosted
+        // too: exportAppointmentTypes() names its fields and leaves the host out.
+        'appointment_host_user_id',
     ];
 
     private const MAX_SCHEDULES = 50;
@@ -627,6 +635,12 @@ class BackupService
         $eventData['is_cancelled'] = (bool) $event->is_cancelled;
         $eventData['cancelled_at'] = optional($event->cancelled_at)->toDateTimeString();
         $eventData['ical_sequence'] = (int) $event->ical_sequence;
+        // Also not fillable. Only for an event this schedule owns: a restore makes the new
+        // schedule the owner of every event in the archive, the ones it merely listed included,
+        // and the id is unique per owner. Another schedule's id is not this archive's to carry.
+        if ($event->external_id !== null && (int) $event->creator_role_id === (int) $role->id) {
+            $eventData['external_id'] = $event->external_id;
+        }
         // Also not fillable: it gates the reschedule cooldown, so losing it on restore would let a
         // just-moved booking be moved again immediately.
         $eventData['rescheduled_at'] = optional($event->rescheduled_at)->toDateTimeString();
@@ -1948,6 +1962,17 @@ class BackupService
         $event->is_cancelled = (bool) ($data['is_cancelled'] ?? false);
         $event->cancelled_at = $data['cancelled_at'] ?? null;
         $event->ical_sequence = (int) ($data['ical_sequence'] ?? 0);
+        // Only when the archive has one: an event without it does not name the column at all.
+        // And only once per schedule: the id is unique for its owner, so an archive that names
+        // the same one twice (edited by hand, or an older export) would otherwise stop the whole
+        // restore on a duplicate key. The first event keeps it.
+        if (isset($data['external_id']) && is_scalar($data['external_id']) && (string) $data['external_id'] !== '') {
+            $externalId = TextUtils::clamp((string) $data['external_id'], 255);
+
+            if (! Event::where('creator_role_id', $role->id)->where('external_id', $externalId)->exists()) {
+                $event->external_id = $externalId;
+            }
+        }
         $event->rescheduled_at = $data['rescheduled_at'] ?? null;
         // ?? false keeps archives written before the column existed importable.
         $event->is_guest_submission = (bool) ($data['is_guest_submission'] ?? false);
@@ -1997,6 +2022,11 @@ class BackupService
         // Attach to role via pivot. Prefer the raw tri-state (null = pending approval) when present
         // so pending appointment bookings restore pending; fall back to the legacy bool.
         $pivotData = ['is_accepted' => array_key_exists('_is_accepted_raw', $data) ? $data['_is_accepted_raw'] : ($data['_is_accepted'] ?? true)];
+        // A request restored as waiting is old news: without this the next request mail would
+        // spell out every pending request in the backup as though it had just arrived.
+        if ($pivotData['is_accepted'] === null) {
+            $pivotData['request_notified_at'] = now();
+        }
         $groupRefId = $data['_group_ref_id'] ?? null;
         if ($groupRefId && isset($idMap['groups'][$groupRefId])) {
             $pivotData['group_id'] = $idMap['groups'][$groupRefId];

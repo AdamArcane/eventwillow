@@ -59,6 +59,10 @@ class AdminAlertService
         // Amber, beside it: no page is broken, but owners who switched a venue map on are
         // waiting for one that cannot be finished while the address search does not answer.
         'venue_map_lookups_failing',
+        // Amber, with the other things of ours that stopped: half of all feeds failing at once
+        // is not each source having a bad day. While it shows, no owner is mailed that their
+        // feed is broken and none is paused for it (FeedImporter::failed()).
+        'feeds_failing',
         // Above subscriptions_unrecognized: that customer at least still has the schedule they
         // are paying for. This one is being charged for a schedule that no longer exists, and
         // nothing left in the app lets them stop it.
@@ -77,10 +81,23 @@ class AdminAlertService
         'refunds_unconfirmed',
         'boosts_mismatch',
         'promos_pending',
+        // Boost partners: a partner share waiting for the one-time confirmation, a partner boost
+        // that has sat approved and paid without reaching Meta, and a monthly fee that failed.
+        'boost_partners_waiting',
+        'boost_partner_launches_stuck',
+        'boost_statements_failed',
+        // Amber, a queue to work through: accounts with a watched word ("paypal", "bitcoin") in a
+        // schedule they own or an event they made, or in their own name once they own a schedule
+        // (SpamWatch). Above the review queues of
+        // our own, because a spam schedule is a public page under our name until someone looks.
+        'spam_suspects',
         'federation_flagged',
         'federation',
         'translation_suggestions',
         'support_unread',
+        // Blue, a queue to read: posts the blog's writer finished and its check would not
+        // publish (BlogWriter::store()). Until 2026-10 a post that failed was thrown away.
+        'blog_posts_held',
         'boosts_disapproved',
         'domains_pending',
         'translations_unshared',
@@ -241,6 +258,16 @@ class AdminAlertService
                 return is_numeric($since) && $since <= now()->subHour()->timestamp ? 1 : 0;
             },
 
+            // How many feeds are failing, when that is many at once (EventFeed::manyFailing()):
+            // one feed that cannot be read is its schedule's news, not ours.
+            'feeds_failing' => function () {
+                if (! \App\Models\EventFeed::tablesReady() || ! \App\Models\EventFeed::manyFailing()) {
+                    return 0;
+                }
+
+                return \App\Models\EventFeed::whereNull('paused_at')->where('failure_count', '>', 0)->count();
+            },
+
             // A live subscription whose stripe_price is none of the four configured IDs.
             //
             // PlanPriceUtils resolves a tier ONLY by exact match against those four, so an
@@ -325,6 +352,31 @@ class AdminAlertService
             'federation' => fn () => $isNexus ? FederatedInstance::pending()->count() : 0,
 
             'translation_suggestions' => fn () => $isNexus ? TranslationSuggestion::pending()->count() : 0,
+
+            'blog_posts_held' => fn () => $isNexus ? \App\Models\BlogPost::heldForReview()->count() : 0,
+
+            // Guarded because spam_clearances is new and a selfhost install may not have
+            // migrated yet: the nav must not 500 in the middle of an update. Only a missing
+            // table is quiet; anything else is reported, or the row would vanish for good.
+            'spam_suspects' => function () {
+                try {
+                    return SpamWatch::count();
+                } catch (\Illuminate\Database\QueryException $e) {
+                    if ($e->getCode() !== '42S02') {
+                        report($e);
+                    }
+
+                    return 0;
+                }
+            },
+
+            'boost_partners_waiting' => fn () => $isHosted
+                ? \App\Models\BoostPartner::whereNotNull('enabled_at')->where('connection_method', 'partner_share')
+                    ->whereNotNull('ad_account_id')->whereNull('confirmed_at')->whereNull('connection_error')->count()
+                : 0,
+            'boost_partner_launches_stuck' => fn () => BoostCampaign::whereNotNull('boost_partner_id')->where('status', 'in_review')
+                ->whereNull('meta_campaign_id')->where('updated_at', '<=', now()->subMinutes(30))->count(),
+            'boost_statements_failed' => fn () => \App\Models\BoostStatement::whereIn('status', ['failed', 'action_required'])->count(),
 
             'support_unread' => fn () => $isHosted
                 ? SupportMessage::where('is_from_admin', false)->whereNull('read_at')->count()
@@ -519,6 +571,7 @@ class AdminAlertService
             'jobs_failed' => ['system', 'queue', 'admin.queue', [], '', 'red', __('messages.queue')],
             'realtime_prune_stalled' => ['system', 'queue', 'admin.queue', [], '', 'amber', __('messages.queue')],
             'venue_map_lookups_failing' => ['system', 'queue', 'admin.queue', [], '', 'amber', __('messages.queue')],
+            'feeds_failing' => ['manage', 'feeds', 'admin.feeds', ['state' => 'failing'], '', 'amber', __('messages.feeds_tab')],
             // Its own anchor, not #amount-mismatch: that block is a table of mismatched SALES,
             // and landing there would scroll past the thing the row is about.
             'subscriptions_orphaned' => ['insights', 'revenue', 'admin.revenue', [], '#orphaned-subscriptions', 'red', __('messages.revenue')],
@@ -533,6 +586,10 @@ class AdminAlertService
             // no new Route::has failure mode and the badge lands where the operator already
             // manages campaigns.
             'promos_pending' => ['manage', 'boost', 'admin.boost', [], '#promo-queue', 'amber', 'Boost'],
+            'boost_partners_waiting' => ['manage', 'boost', 'admin.boost', [], '#boost-partners', 'amber', 'Boost'],
+            'boost_partner_launches_stuck' => ['manage', 'boost', 'admin.boost', [], '#boost-partners', 'red', 'Boost'],
+            'boost_statements_failed' => ['manage', 'boost', 'admin.boost', [], '#boost-partners', 'red', 'Boost'],
+            'spam_suspects' => ['manage', 'blocked', 'admin.blocked', [], '#suspects', 'amber', __('messages.blocked')],
             // ?status=flagged, not approved: the filter behind it repeats this row's own
             // count query, so the link lands on exactly the instances it counted rather
             // than on every approved install with those merely sorted to the top.
@@ -540,6 +597,7 @@ class AdminAlertService
             'federation' => ['system', 'federation', 'admin.federation', [], '', 'amber', __('messages.federation')],
             'translation_suggestions' => ['system', 'translations', 'admin.translations.suggestions', [], '', 'blue', __('messages.translations')],
             'support_unread' => ['system', 'support', 'admin.support', [], '', 'blue', 'Support'],
+            'blog_posts_held' => ['manage', 'blog', 'blog.admin.index', ['held' => 1], '', 'blue', __('messages.blog')],
             'boosts_disapproved' => ['manage', 'boost', 'admin.boost', [], '#boost-alerts', 'amber', 'Boost'],
             'domains_pending' => ['manage', 'domains', 'admin.domains', ['status' => 'pending'], '', 'amber', __('messages.domains')],
             'translations_unshared' => ['system', 'translations', 'admin.translations', [], '', 'blue', __('messages.translations')],

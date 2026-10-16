@@ -4,12 +4,16 @@ namespace App\Services;
 
 use App\Jobs\SendNewsletterBatch;
 use App\Mail\NewsletterEmail;
+use App\Models\Event;
 use App\Models\Newsletter;
 use App\Models\NewsletterRecipient;
 use App\Models\NewsletterSegment;
 use App\Models\NewsletterUnsubscribe;
 use App\Models\Role;
+use App\Repos\EventRepo;
 use App\Utils\MarkdownUtils;
+use App\Utils\MoneyUtils;
+use Carbon\Carbon;
 use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Log;
@@ -180,6 +184,11 @@ class NewsletterService
             $mailable = new NewsletterEmail($newsletter, $recipient, $html, $processedBlocks);
 
             $role = $newsletter->role;
+            // The HTML above was rendered in the schedule's language; the text part is rendered by
+            // the mailer, later, in whatever locale the request or the worker has.
+            if ($role && is_valid_language_code($role->language_code)) {
+                $mailable->locale($role->language_code);
+            }
             if (config('app.hosted') && $role) {
                 if (! app(RoleMailerService::class)->sendForRole($role, $recipient->email, $mailable)) {
                     // The schedule's custom SMTP is failing; the message was not
@@ -381,11 +390,25 @@ class NewsletterService
         return $allRecipients->values();
     }
 
+    /**
+     * A newsletter's blocks with everything the views print already resolved: a Text block's HTML,
+     * each event as a plain row (eventRow()), the sponsors, the poll, the video's own link.
+     *
+     * Called once per send (SendNewsletterBatch hands the result to every recipient's render), so
+     * anything a view would otherwise ask each event for belongs here. Resolved in the SCHEDULE's
+     * language: the job runs in the dispatcher's locale, and a row carries month and weekday
+     * names, "Free" and "Sold Out".
+     */
     public function processBlocks(Newsletter $newsletter): array
+    {
+        return $this->inScheduleLocale($newsletter->role, fn () => $this->resolveBlocks($newsletter));
+    }
+
+    private function resolveBlocks(Newsletter $newsletter): array
     {
         $blocks = $newsletter->blocks ?? [];
         $role = $newsletter->role;
-        $allUpcomingEvents = null;
+        $upcoming = null;
 
         foreach ($blocks as &$block) {
             $type = $block['type'] ?? '';
@@ -401,18 +424,15 @@ class NewsletterService
             }
 
             if ($type === 'events') {
-                $useAll = $block['data']['useAllEvents'] ?? true;
-                $eventIds = $block['data']['eventIds'] ?? [];
+                $pairs = collect();
                 if ($role) {
-                    if ($useAll) {
-                        $allUpcomingEvents = $allUpcomingEvents ?? $this->getUpcomingEvents($role);
-                        $block['data']['resolvedEvents'] = $allUpcomingEvents;
-                    } else {
-                        $block['data']['resolvedEvents'] = $this->getUpcomingEvents($role, $eventIds);
-                    }
-                } else {
-                    $block['data']['resolvedEvents'] = collect();
+                    $pairs = ($block['data']['useAllEvents'] ?? true)
+                        ? ($upcoming ??= $this->upcomingEvents($role))
+                        : $this->pickedEvents($role, $block['data']['eventIds'] ?? []);
                 }
+
+                $block['data']['resolvedEvents'] = $pairs->map(fn (array $pair) => $this->eventRow($pair['event'], $pair['date'], $role))->values();
+                $block['data']['scheduleUrl'] = $role?->getGuestUrl(true);
             }
 
             // Everything the block prints comes from the video id read out of its YouTube link:
@@ -433,8 +453,7 @@ class NewsletterService
             if ($type === 'sponsors') {
                 $source = $block['data']['source'] ?? 'schedule';
                 if ($source === 'first_event' && $role) {
-                    $allUpcomingEvents = $allUpcomingEvents ?? $this->getUpcomingEvents($role);
-                    $firstEvent = $allUpcomingEvents->first();
+                    $firstEvent = ($upcoming ??= $this->upcomingEvents($role))->first()['event'] ?? null;
                     $block['data']['resolvedSponsors'] = $firstEvent
                         ? $firstEvent->getEffectiveSponsorLogos($role)
                         : [];
@@ -449,15 +468,15 @@ class NewsletterService
             if ($type === 'poll') {
                 $block['data']['resolvedPoll'] = null;
                 if ($role) {
-                    $allUpcomingEvents = $allUpcomingEvents ?? $this->getUpcomingEvents($role);
-                    foreach ($allUpcomingEvents as $event) {
+                    foreach ($upcoming ??= $this->upcomingEvents($role) as $pair) {
+                        $event = $pair['event'];
                         $poll = $event->activePolls()->first();
                         if ($poll) {
                             $block['data']['resolvedPoll'] = [
                                 'question' => $poll->question,
                                 'options' => $poll->options,
                                 'eventName' => $event->name,
-                                'eventUrl' => $event->getGuestUrl($role->subdomain, null, true),
+                                'eventUrl' => $event->getGuestUrl($role->subdomain, $event->days_of_week ? $pair['date'] : null, true),
                             ];
                             break;
                         }
@@ -512,7 +531,26 @@ class NewsletterService
         $role = $newsletter->role;
         $isRtl = $role ? $role->isRtl() : false;
 
-        $originalLocale = app()->getLocale();
+        return $this->inScheduleLocale($role, fn () => view('emails.newsletter', [
+            'newsletter' => $newsletter,
+            'style' => $style,
+            'blocks' => $blocks,
+            'role' => $role,
+            'unsubscribeUrl' => $unsubscribeUrl,
+            'manageUrl' => $manageUrl,
+            'recipient' => $recipient,
+            'showBranding' => $role ? $role->showBranding() : false,
+            'isRtl' => $isRtl,
+        ])->render());
+    }
+
+    /**
+     * Run $work in the schedule's language, or in English for a platform newsletter, and put the
+     * locale back whatever happens.
+     */
+    private function inScheduleLocale(?Role $role, callable $work): mixed
+    {
+        $original = app()->getLocale();
 
         try {
             if ($role && is_valid_language_code($role->language_code)) {
@@ -521,19 +559,9 @@ class NewsletterService
                 app()->setLocale('en');
             }
 
-            return view('emails.newsletter', [
-                'newsletter' => $newsletter,
-                'style' => $style,
-                'blocks' => $blocks,
-                'role' => $role,
-                'unsubscribeUrl' => $unsubscribeUrl,
-                'manageUrl' => $manageUrl,
-                'recipient' => $recipient,
-                'showBranding' => $role ? $role->showBranding() : false,
-                'isRtl' => $isRtl,
-            ])->render();
+            return $work();
         } finally {
-            app()->setLocale($originalLocale);
+            app()->setLocale($original);
         }
     }
 
@@ -547,12 +575,24 @@ class NewsletterService
         return $html;
     }
 
+    /**
+     * What ties a click link to the one address it was written for. Without it the link went
+     * wherever its last segment said, for anybody holding any recipient's token.
+     */
+    public static function clickSignature(string $token, string $url): string
+    {
+        return substr(hash_hmac('sha256', 'newsletter-click|'.$token.'|'.$url, (string) config('app.key')), 0, 32);
+    }
+
     public function rewriteLinks(string $html, NewsletterRecipient $recipient): string
     {
         return preg_replace_callback(
             '/<a\s([^>]*?)href=["\']([^"\']+)["\']/i',
             function ($matches) use ($recipient) {
-                $url = $matches[2];
+                // The attribute as a browser reads it. Blade writes "&" as "&amp;", and encoding
+                // that text sent every reader of a link with two query parameters to
+                // "?a=1&amp;b=2": the second parameter arrived named "amp;b".
+                $url = html_entity_decode($matches[2], ENT_QUOTES | ENT_HTML5);
                 // Don't rewrite unsubscribe links or mailto links.
                 //
                 // /sub/m/ is exempt for a different reason than /nl/u/: a mail gateway that
@@ -560,16 +600,18 @@ class NewsletterService
                 // NewsletterTrackingController, inflating click-through for every schedule that
                 // sends one. The page itself is prefetch-safe - it mutates nothing - but the
                 // tracking hop in front of it is not.
-                if (str_contains($url, '/nl/u/') || str_contains($url, '/sub/m/') || str_starts_with($url, 'mailto:') || str_starts_with($url, 'tel:') || $url === '#') {
+                // The scheme in any case: a phone's keyboard writes "Mailto:", which the views link
+                // (UrlUtils::safeActionHref()) and the tracking route then refused with a 404.
+                if (str_contains($url, '/nl/u/') || str_contains($url, '/sub/m/') || preg_match('/^(?:mailto|tel):/i', $url) || $url === '#') {
                     return $matches[0];
                 }
                 $encodedUrl = rtrim(strtr(base64_encode($url), '+/', '-_'), '=');
-                $trackingUrl = url('/nl/c/'.$recipient->token.'/'.$encodedUrl);
+                $trackingUrl = url('/nl/c/'.$recipient->token.'/'.self::clickSignature((string) $recipient->token, $url).'/'.$encodedUrl);
 
                 return '<a '.$matches[1].'href="'.$trackingUrl.'"';
             },
             $html
-        );
+        ) ?? $html;
     }
 
     public function insertTrackingPixel(string $html, NewsletterRecipient $recipient): string
@@ -584,29 +626,246 @@ class NewsletterService
         return $html.$pixel;
     }
 
-    public function getUpcomingEvents(Role $role, ?array $eventIds = null): Collection
-    {
-        if ($eventIds !== null) {
-            $events = $role->events()
-                ->whereIn('events.id', $eventIds)
-                ->get();
+    /** How far ahead a series may begin and still be listed. The schedule page's own list stops at 60 days. */
+    private const SERIES_HORIZON_DAYS = 366;
 
-            return collect($eventIds)
-                ->map(fn ($id) => $events->firstWhere('id', $id))
-                ->filter()
-                ->filter(fn ($e) => ! $e->is_draft && ! $e->is_private && ! $e->is_cancelled && ! $e->isPasswordProtected())
-                ->values();
+    /**
+     * What the schedule's own page lists as upcoming, as [event, date] pairs: accepted on the
+     * schedule, public, and a recurring series under its NEXT date (EventRepo::upcomingForGuest()).
+     *
+     * This used to be `$role->events()` filtered to `starts_at >= now`. That relation has no
+     * accepted filter, so a booking request the schedule had not answered was mailed to its
+     * audience as one of its events; and a series, whose starts_at is its FIRST date, dropped out
+     * the day after it began.
+     *
+     * Two things differ from the page. A series may begin up to a year out, as a one-off may: the
+     * page's 60 days would leave out a weekly night announced three months ahead. And each pair is
+     * the occurrence a reader can still go to (aheadOfNow()), which is why twice the number wanted
+     * is asked for: a series moved to its next date can fall behind events that were below the cut.
+     *
+     * @return Collection<int, array{event: Event, date: ?string}>
+     */
+    private function upcomingEvents(Role $role, int $limit = 10): Collection
+    {
+        $pairs = app(EventRepo::class)->upcomingForGuest($role, null, $limit * 2, self::SERIES_HORIZON_DAYS)
+            ->map(fn (array $pair) => $this->aheadOfNow($pair['event'], $pair['date']))
+            ->filter()
+            ->sortBy(fn (array $pair) => $pair['date'].' '.$pair['event']->localTimeOfDay())
+            ->take($limit)
+            ->values();
+
+        $this->loadForRows($pairs->pluck('event'));
+
+        return $pairs;
+    }
+
+    /**
+     * What the builder's event picker offers: the events a mail could list, each under the date
+     * the mail would print it with.
+     *
+     * From the same list as the mail, and that is the point. The picker used to run its own
+     * query (`$role->events()` from today on), so it offered events the mail then left out (not
+     * accepted, private, cancelled, behind a password) and could not offer a running series,
+     * whose starts_at is its first date.
+     *
+     * @return array<int, array{id: int, name: string, date: string}>
+     */
+    public function eventChoices(Role $role, int $limit = 50): array
+    {
+        return $this->upcomingEvents($role, $limit)
+            ->map(fn (array $pair) => [
+                'id' => $pair['event']->id,
+                'name' => $pair['event']->name,
+                'date' => (string) ($this->eventRow($pair['event'], $pair['date'], $role)['date'] ?? ''),
+            ])
+            ->all();
+    }
+
+    /**
+     * The events an owner picked by hand, as [event, date] pairs in the order of the dates they
+     * will show: a series under its next date, anything else under its own.
+     *
+     * Not in the stored order. The builder's picker is a column of tick boxes, so that order is
+     * only the order they were ticked in, and it printed 11, 16, 8 down a column of dates.
+     *
+     * One that is over is left out, like a cancelled one. A cloned newsletter or a saved template
+     * carries its ticked ids for months, the builder lists only what is coming and so cannot
+     * untick them, and in date order a finished show would lead the mail.
+     *
+     * @return Collection<int, array{event: Event, date: ?string}>
+     */
+    private function pickedEvents(Role $role, array $eventIds): Collection
+    {
+        $events = $role->events()
+            ->whereIn('events.id', $eventIds)
+            ->wherePivot('is_accepted', true)
+            ->with(['roles', 'creatorRole'])
+            ->get()
+            ->filter(fn (Event $event) => ! $event->is_draft && ! $event->is_private && ! $event->is_cancelled && ! $event->isPasswordProtected())
+            ->unique('id');
+
+        $pairs = $events
+            ->map(fn (Event $event) => $event->days_of_week
+                ? $this->aheadOfNow($event, $this->nextOccurrence($event))
+                : ($this->isOver($event) ? null : ['event' => $event, 'date' => $event->saleEventDateFromStartsAt()]))
+            ->filter()
+            ->sortBy(fn (array $pair) => ($pair['date'] ?? '9999-99-99').' '.$pair['event']->localTimeOfDay())
+            ->values()
+            ->toBase();
+
+        $this->loadForRows($pairs->pluck('event'));
+
+        return $pairs;
+    }
+
+    /**
+     * [event, date] for the occurrence a reader can still go to, or null when a series has none.
+     *
+     * A series is dated by DAY: nextOccurrenceFrom() answers today whatever the clock says, so a
+     * daily nine o'clock class mailed at two was listed first, under this morning, with a price
+     * and a Get Tickets button for a date its own page refuses. Once today's has begun the pair
+     * is the next one (Event::occurrencesAfter(), which the schedule page's lead uses too).
+     */
+    private function aheadOfNow(Event $event, ?string $date): ?array
+    {
+        if (! $event->days_of_week) {
+            return ['event' => $event, 'date' => $date];
         }
 
-        return $role->events()
-            ->upcomingOrOngoing()
-            ->where('is_draft', false)
-            ->where('is_cancelled', false)
-            ->where('is_private', false)
-            ->whereNull('event_password')
-            ->orderBy('starts_at', 'asc')
-            ->limit(10)
-            ->get();
+        if (! $date) {
+            return null;
+        }
+
+        $zone = $event->scheduleTimezone();
+
+        if ($event->getStartDateTime($date, true, $zone)->gt(Carbon::now($zone))) {
+            return ['event' => $event, 'date' => $date];
+        }
+
+        $next = $event->occurrencesAfter(null, 1)[0] ?? null;
+
+        return $next ? ['event' => $event, 'date' => $next] : null;
+    }
+
+    /**
+     * A series' next day within the horizon, or null: none left, or a recurrence that cannot be
+     * read. matchesDate() throws on a restored series (an interval of 0, a days_of_week shorter
+     * than seven characters, an end date that is not a date), and one such event must cost
+     * itself, not the newsletter: EventRepo::nextOccurrenceOrNull() guards the page the same way.
+     */
+    private function nextOccurrence(Event $event): ?string
+    {
+        try {
+            return $event->nextOccurrenceFrom(null, self::SERIES_HORIZON_DAYS);
+        } catch (\Throwable $e) {
+            report($e);
+
+            return null;
+        }
+    }
+
+    /** Whether a one-off event has ended: nothing a reader can still go to. */
+    private function isOver(Event $event): bool
+    {
+        if (! $event->starts_at) {
+            return false;
+        }
+
+        return $event->getEndDateTime(null, true)->isPast();
+    }
+
+    /** One query for every event's tickets, which a row's price line reads. */
+    private function loadForRows(Collection $events): void
+    {
+        \Illuminate\Database\Eloquent\Collection::make($events->all())->loadMissing('tickets');
+    }
+
+    /**
+     * One event as the plain strings a newsletter prints, for the occurrence on $date.
+     *
+     * Resolved here, once per send, and not in the view: the view is rendered once per RECIPIENT,
+     * and it used to ask each event for its address, its venue and its picture every time. The
+     * views and the x-newsletter components read these keys and nothing else of an event.
+     *
+     * The clock is the event's own schedule's (getStartDateTime() with no override), and the
+     * names of months and days are the mail's language: this runs inside inScheduleLocale().
+     */
+    private function eventRow(Event $event, ?string $date, Role $role): array
+    {
+        // An event with no owning schedule (older rows) has no clock of its own and would print
+        // on the app's: the sender's is the one its page on this schedule has always used.
+        $zone = $event->creator_role_id ? $event->scheduleTimezone() : ($role->timezone ?: $event->scheduleTimezone());
+        $start = $event->starts_at ? $event->getStartDateTime($date, true, $zone) : null;
+        $thisYear = $start && $start->year === Carbon::now($zone)->year;
+
+        // The flyer, else a performer's photo. Never the sending schedule's own picture: it is
+        // already the masthead, and on a venue's newsletter it stood in for every flyer-less event.
+        $image = $large = $size = null;
+        if ($event->flyer_image_url) {
+            $image = $event->getImageUrl(480);
+            $large = $event->getImageUrl(960);
+            $size = $event->imageSourceDimensions();
+        } elseif (($talent = $event->role()) && $talent->id !== $role->id && $talent->profile_image_url) {
+            $image = $large = $talent->getProfileImageUrl(480);
+            $size = $talent->imageSourceDimensions();
+        }
+
+        $venue = $event->venue;
+        // The event page's own gate for its price line (event/show-guest): sign-up events and
+        // tickets sold elsewhere print none, and neither does a date that can no longer be bought.
+        $selling = ! $event->rsvp_enabled && $event->canSellTickets($date);
+        $summary = $selling ? $event->ticketPriceSummary($date) : null;
+        $state = $selling ? $event->ticketSaleState($date) : null;
+        $buy = $summary && ! $summary['free'] && $state === 'open';
+
+        return [
+            'name' => $event->name,
+            'url' => $event->getGuestUrl($role->subdomain, $event->days_of_week ? $date : null, true),
+            'image' => $image,
+            'imageLarge' => $large,
+            'ratio' => $size ? $size[0] / max(1, $size[1]) : null,
+            'month' => $start?->translatedFormat('M'),
+            'day' => $start?->format('j'),
+            'weekday' => $start?->translatedFormat('l'),
+            'date' => match (true) {
+                ! $start => null,
+                (bool) $event->is_multi_day => $this->shortDateRange($start, $start->copy()->addMinutes($event->durationInMinutes()), $thisYear),
+                default => $start->translatedFormat($thisYear ? 'D, M j' : 'D, M j, Y'),
+            },
+            // format(), not translatedFormat(): Carbon translates the meridiem in some languages
+            // ("8:00 's middags" in Dutch, "8:00 вечера" in Russian) and the event page, which
+            // the row links to, says "8:00 PM" in all of them (Event::getStartEndTime()).
+            'time' => $start && ! $event->is_multi_day && ! $event->hasDateOnlyStart()
+                ? $start->format($role->use_24_hour_time ? 'H:i' : 'g:i A')
+                : null,
+            'multiDay' => (bool) $event->is_multi_day,
+            'repeat' => $event->recurrenceSummary()['label'] ?? null,
+            // A venue's own name under every one of its own events says nothing.
+            'venue' => $venue && $venue->id !== $role->id ? trim((string) $venue->name) : null,
+            'price' => match (true) {
+                $state === 'sold_out' => __('messages.sold_out'),
+                ! $summary => null,
+                // Event::priceWording(): a free type beside paid ones is Free, never "From $0".
+                $summary['says'] === 'free' => __('messages.free'),
+                $summary['says'] === 'from' => __('messages.price_from', ['price' => MoneyUtils::format($summary['min'], $summary['currency'])]),
+                default => MoneyUtils::format($summary['min'], $summary['currency']),
+            },
+            'soldOut' => $state === 'sold_out',
+            'low' => $state === 'open' && ($summary['low'] ?? false) ? __('messages.few_left') : null,
+            // Whether the action sells: Bold fills that button and outlines one that only opens the page.
+            'buy' => $buy,
+            'cta' => $buy ? __('messages.get_tickets') : __('messages.view_event'),
+        ];
+    }
+
+    /** "Nov 1 - 3", "Oct 30 - Nov 1", with the year only when it is not this one. */
+    private function shortDateRange(Carbon $start, Carbon $end, bool $thisYear): string
+    {
+        $year = $thisYear && $end->year === $start->year ? '' : ', '.$end->year;
+
+        return $start->month === $end->month && $start->year === $end->year
+            ? $start->translatedFormat('M j').' - '.$end->format('j').$year
+            : $start->translatedFormat('M j').' - '.$end->translatedFormat('M j').$year;
     }
 
     public function selectAbTestWinner(\App\Models\NewsletterAbTest $abTest): void

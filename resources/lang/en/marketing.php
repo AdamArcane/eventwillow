@@ -10,6 +10,8 @@
 return [
     'pricing_title' => 'Event Schedule Pricing: Free Plan, Zero Platform Fees',
     'pricing_description' => 'Start free with unlimited events and unlimited free registration. Pro adds paid ticketing, Enterprise adds reserved seating. Zero platform fees on every plan.',
+    'home_title' => 'EventWillow - Free Event Calendar, Ticketing & Booking',
+    'home_description' => 'Publish your events on one calendar page, take bookings and unlimited free registrations, and sell tickets on Pro with zero platform fees. Free to start.',
 
     'features_title' => 'Event Management Software: Every Feature, No Platform Fees',
     'features_description' => 'Every feature in five chapters: tickets through Stripe or PayPal with no platform fee, two-way calendar sync, newsletters, AI import and analytics.',

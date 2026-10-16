@@ -9,6 +9,7 @@ use App\Models\PromoCode;
 use App\Models\Role;
 use App\Models\Sale;
 use App\Models\Ticket;
+use App\Models\TicketPreset;
 use App\Models\User;
 use App\Utils\SetupGuide;
 use App\Utils\UrlUtils;
@@ -170,6 +171,142 @@ class EventFormJourneyTest extends DuskTestCase
         }
 
         return $event->fresh();
+    }
+
+    /** Regular (the default) and Special on the talent schedule, as Settings > Ticket presets saves them. */
+    private function makePresets(): array
+    {
+        $regular = TicketPreset::create(['role_id' => $this->talent->id, 'name' => 'Regular', 'kind' => 'tickets', 'is_default' => true, 'sort_order' => 0, 'settings' => [
+            'currency_code' => 'USD', 'payment_method' => 'cash', 'payment_instructions' => 'Pay at the door',
+            'tickets' => [['type' => 'Entry', 'price' => 5], ['type' => 'Reduced', 'price' => 3]],
+        ]]);
+        $special = TicketPreset::create(['role_id' => $this->talent->id, 'name' => 'Special', 'kind' => 'tickets', 'is_default' => false, 'sort_order' => 1, 'settings' => [
+            'currency_code' => 'USD', 'payment_method' => 'cash', 'payment_instructions' => 'Pay online before the show',
+            'tickets' => [['type' => null, 'price' => 20]],
+        ]]);
+
+        return [$regular, $special];
+    }
+
+    public function test_a_preset_chip_fills_the_tab_and_a_hand_edit_puts_it_out(): void
+    {
+        [, $special] = $this->makePresets();
+
+        $this->browse(function (Browser $browser) use ($special) {
+            $this->openNew($browser);
+            $this->fillBasics($browser, 'Preset Night');
+            $browser->click('a[data-section="section-tickets"]');
+            $browser->waitUntil('document.getElementById("section-tickets").style.display === "block"', 10);
+
+            // A new event starts on the default, both of its types.
+            $state = $browser->script('return {
+                lit: document.querySelector("[data-preset-chip].is-on") && document.querySelector("[data-preset-chip].is-on").innerText.trim(),
+                prices: window.vueApp.tickets.map(function (t) { return [t.type, t.price]; }),
+            };')[0];
+            $this->assertSame('Regular · $3 to $5', $state['lit']);
+            $this->assertSame([['Entry', 5], ['Reduced', 3]], $state['prices']);
+
+            $this->press($browser, '[data-preset-chip="'.$special->encodeId().'"]');
+            $state = $browser->script('return {
+                lit: document.querySelector("[data-preset-chip].is-on").innerText.trim(),
+                prices: window.vueApp.tickets.map(function (t) { return [t.type, t.price]; }),
+                summary: document.querySelector("a[data-section=section-tickets] .section-nav-summary").innerText.trim(),
+                posted: document.querySelector("input[name=ticket_preset_id]").value,
+            };')[0];
+            $this->assertSame('Special · $20', $state['lit']);
+            $this->assertSame([['', 20]], $state['prices']);
+            $this->assertSame('Special · $20', $state['summary']);
+            $this->assertSame($special->encodeId(), $state['posted']);
+            $this->assertStringContainsString('Tickets: Special · $20', $this->barText($browser));
+            // The instructions box is a markdown editor that keeps its own text and writes it back
+            // on submit: the preset's instructions must be in the editor, not only in the model.
+            $this->assertSame('Pay online before the show', $browser->script('var f = document.getElementById("payment_instructions"); return f._easyMDE ? f._easyMDE.value() : f.value;')[0]);
+
+            // The first change by hand: the tab no longer stands on the preset.
+            $browser->script('var el = document.querySelector("input[name=\"tickets[0][price]\"]"); el.value = "18"; el.dispatchEvent(new Event("input", { bubbles: true }));');
+            $browser->pause(300);
+            $this->assertSame(0, $browser->script('return document.querySelectorAll("[data-preset-chip].is-on").length;')[0]);
+            $this->assertSame('', $browser->script('return document.querySelector("input[name=ticket_preset_id]").value;')[0]);
+
+            $this->save($browser);
+        });
+
+        $event = Event::where('name', 'Preset Night')->firstOrFail();
+        $this->assertSame([18.0], Ticket::where('event_id', $event->id)->where('is_deleted', false)->pluck('price')->map(fn ($p) => (float) $p)->all());
+        $this->assertSame('Pay online before the show', $event->payment_instructions);
+        $this->assertNull($event->ticket_preset_id);
+    }
+
+    public function test_a_chip_asks_before_replacing_what_was_typed_and_the_bar_says_what_save_removes(): void
+    {
+        [$regular, $special] = $this->makePresets();
+        $event = $this->ticketEvent();
+
+        $this->browse(function (Browser $browser) use ($special, $event) {
+            // A new event, on Regular: something typed on the tab that a chip would replace.
+            $this->openNew($browser);
+            $this->fillBasics($browser, 'Asked First');
+            $this->openTickets($browser);
+            $browser->script('window.__asked = 0; window.confirm = function () { window.__asked++; return false; };');
+            $browser->script('var el = document.querySelector("input[name=terms_url]"); el.value = "https://example.org/terms"; el.dispatchEvent(new Event("input", { bubbles: true }));');
+            $browser->pause(200);
+
+            $this->press($browser, '[data-preset-chip="'.$special->encodeId().'"]');
+            $state = $browser->script('return { asked: window.__asked, lit: document.querySelector("[data-preset-chip].is-on").innerText.trim(), terms: document.querySelector("input[name=terms_url]").value };')[0];
+            $this->assertSame(1, $state['asked'], 'a chip asks before it replaces what was typed');
+            $this->assertSame('Regular · $3 to $5', $state['lit'], 'and said no, nothing changed');
+            $this->assertSame('https://example.org/terms', $state['terms']);
+
+            // A saved event with ticket types: a chip, then Not needed. Save deletes the types,
+            // and the bar says that, not that a preset replaces them.
+            $this->leave($browser);
+            $this->openExisting($browser, $event);
+            $this->openTickets($browser);
+            $this->press($browser, '[data-preset-chip="'.$special->encodeId().'"]');
+            $this->assertStringContainsString('Special', $this->barText($browser));
+            $this->press($browser, '#ticket_choice_none');
+            $bar = $this->barText($browser);
+            $this->assertStringContainsString(__('messages.saving_removes_ticket_types'), $bar);
+            $this->assertStringNotContainsString('Special', $bar);
+        });
+    }
+
+    public function test_a_team_member_picks_a_preset_and_never_types_a_price(): void
+    {
+        [, $special] = $this->makePresets();
+        $member = User::factory()->create(['email_verified_at' => now()]);
+        $this->talent->users()->attach($member->id, ['level' => 'admin']);
+        \App\Services\TicketPresets::setTeamUsesPresets($this->talent, true);
+
+        $this->browse(function (Browser $browser) use ($member, $special) {
+            $this->leave($browser);
+            $browser->loginAs($member)
+                ->visit('/journeytalent/add-event?visit='.uniqid())
+                ->waitFor('#event_name', 15)
+                ->waitUntil('window.vueApp !== undefined', 15);
+            $this->fillBasics($browser, 'Staff Night');
+            $browser->click('a[data-section="section-tickets"]');
+            $browser->waitUntil('document.getElementById("section-tickets").style.display === "block"', 10);
+
+            $state = $browser->script('return {
+                priceFields: document.querySelectorAll("#section-tickets input[name*=price]").length,
+                modeTiles: document.querySelectorAll("#section-tickets .ticket-mode-radio").length,
+                lit: document.querySelector("[data-preset-tile].is-on").innerText.trim(),
+            };')[0];
+            $this->assertSame(0, $state['priceFields'], 'nothing on a bound member\'s tab takes a price');
+            $this->assertSame(0, $state['modeTiles']);
+            $this->assertStringContainsString('Regular', $state['lit']);
+
+            $this->press($browser, '[data-preset-tile="'.$special->encodeId().'"]');
+            $this->assertStringContainsString('$20', $browser->script('return document.getElementById("ticket-preset-picked").innerText;')[0]);
+            $this->assertSame('1', $browser->script('return document.querySelector("input[name=ticket_preset_apply]").value;')[0]);
+
+            $this->save($browser);
+        });
+
+        $event = Event::where('name', 'Staff Night')->firstOrFail();
+        $this->assertSame([20.0], Ticket::where('event_id', $event->id)->where('is_deleted', false)->pluck('price')->map(fn ($p) => (float) $p)->all());
+        $this->assertSame($this->owner->id, (int) $event->user_id, 'on the owner\'s account');
     }
 
     public function test_free_registration_is_one_press_on_the_tickets_tab(): void
@@ -485,6 +622,61 @@ class EventFormJourneyTest extends DuskTestCase
 
         $event = Event::where('name', 'Two Venues')->firstOrFail();
         $this->assertSame(['findmehall'], $event->roles()->where('roles.type', 'venue')->pluck('subdomain')->all());
+    }
+
+    /**
+     * A person who picks from a dropdown makes the browser fire `input` and then `change`, and
+     * between the two the page has room to redraw. The form wrote its unsaved-changes note on
+     * that `input`, Vue redrew, and the redraw put the dropdown back on the value its model still
+     * held, so `change` read "Please select". From 1.0.135 nothing could be picked from a list on
+     * this form: not a venue (on a new event, a duplicate or one being edited), nor a frequency,
+     * a payment method or a performer.
+     *
+     * select() cannot see it. It sets the option from a script and fires `change` alone, which is
+     * why the journey above passed the whole time. Here the choice is typed into the dropdown,
+     * which the browser answers with its own two events.
+     */
+    public function test_a_dropdown_keeps_what_is_picked_from_it_by_hand(): void
+    {
+        $this->browse(function (Browser $browser) {
+            $this->openNew($browser);
+
+            // The first thing done on the page, and the events the browser itself fired for it.
+            $browser->waitFor('#selected_venue', 5);
+            $browser->script('
+                window._picked = [];
+                var list = document.getElementById("selected_venue");
+                ["input", "change"].forEach(function (type) {
+                    list.addEventListener(type, function () { window._picked.push(type + ":" + list.selectedIndex); });
+                });
+            ');
+            $browser->keys('#selected_venue', 'B')->pause(400);
+
+            $this->assertSame(['input:1', 'change:1'], $browser->script('return window._picked;')[0], 'the browser fires both, and the choice is still there for the second');
+            $this->assertStringContainsString('Blue Note, 131 W 3rd St, New York', $browser->script('return document.querySelector("#event-location .event-picked").innerText;')[0]);
+            $this->assertSame(UrlUtils::encodeId($this->venue->id), $browser->script('return document.querySelector("#edit-form input[name=venue_id]").value;')[0]);
+            // The choice still counts as a change to the page, now that only `change` says so.
+            $this->assertTrue($browser->script('return window.vueApp.isDirty && window.vueApp.sectionDirty["section-details"] === true;')[0]);
+
+            $this->fillBasics($browser, 'Picked By Hand');
+            $this->save($browser);
+        });
+
+        $event = Event::where('name', 'Picked By Hand')->firstOrFail();
+        $this->assertSame(['journeyvenue'], $event->roles()->where('roles.type', 'venue')->pluck('subdomain')->all());
+
+        // A dropdown that already holds a value: it used to go back to that one.
+        $this->browse(function (Browser $browser) {
+            $this->openNew($browser);
+            $browser->script('document.getElementById("recurring").click();');
+            $browser->waitFor('select[name="recurring_frequency"]', 5);
+            $this->assertSame('weekly', $browser->script('return window.vueApp.event.recurring_frequency;')[0]);
+
+            $browser->keys('select[name="recurring_frequency"]', 'Y')->pause(400);
+
+            $this->assertSame('yearly', $browser->script('return window.vueApp.event.recurring_frequency;')[0]);
+            $this->assertSame('yearly', $browser->script('return document.querySelector("select[name=recurring_frequency]").value;')[0]);
+        });
     }
 
     public function test_an_event_that_exists_opens_on_its_fields_and_says_what_a_change_will_do(): void

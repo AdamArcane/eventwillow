@@ -2,6 +2,7 @@
 
 namespace App\Support;
 
+use App\Models\AppointmentType;
 use App\Models\Event;
 use App\Models\Role;
 use App\Models\Sale;
@@ -23,9 +24,10 @@ class AppointmentRescheduleGate
     /**
      * Null when the move is allowed, otherwise the translated message to show.
      *
-     * Deliberately NOT expressed in terms of AppointmentController::bookingState(): that checks the pivot
-     * before payment, so a requires_approval + stripe booking is pivot-null AND unpaid and reports
-     * 'pending', which would slip straight through a state allow-list.
+     * Deliberately NOT expressed in terms of AppointmentController::bookingState(): that is the guest
+     * page's wording, which folds several facts into one word (an unpaid booking whose time has gone
+     * reads 'passed', one whose payment is on its way 'in_review'), and a state allow-list built on it
+     * would let through whichever fact the word happened to hide.
      *
      * There is no plan check here. It used to carry one, plus a $planIsCurrent parameter so a 50-row
      * page did not fan out to a subscription lookup per row. Appointments are now on every plan, so
@@ -35,7 +37,8 @@ class AppointmentRescheduleGate
         Event $event,
         Sale $sale,
         ?Role $role = null,
-        bool $checkCooldown = true
+        bool $checkCooldown = true,
+        bool $ownerMode = false
     ): ?string {
         $role = $role ?: $event->creatorRole;
         $type = $event->appointmentType;
@@ -52,12 +55,12 @@ class AppointmentRescheduleGate
         // An unpaid card hold expires on its CREATION clock (ReleaseTickets keys off sales.created_at),
         // so moving it would hand the guest a slot that silently dies. They pay first. Note cash
         // bookings are 'unpaid' too but never expire, so they are intentionally not caught here.
-        if ($sale->status !== 'paid' && in_array($event->payment_method, ['stripe', 'payment_url'], true)) {
+        if ($sale->status !== 'paid' && AppointmentType::paysOnline($event->payment_method)) {
             return __('messages.appointments_reschedule_blocked_payment');
         }
 
-        // Load-bearing on its own: bookingState() checks the pivot first, so a pending booking never
-        // reports 'passed'.
+        // Load-bearing on its own: bookingState() names one fact per booking (a pending booking never
+        // reports 'passed', nor does one whose payment is on its way).
         if ($event->getStartDateTime()->isPast()) {
             return $unavailable();
         }
@@ -66,7 +69,11 @@ class AppointmentRescheduleGate
         // exist and be active. Pointedly NOT the full isBookable() check - that also requires
         // paymentMethodAvailable(), which would freeze an already-paid booking the moment the owner
         // disconnected Stripe.
-        if (! $type || $type->is_deleted || ! $type->is_active) {
+        //
+        // Except for the schedule's own people ($ownerMode): a type switched off because its host
+        // left the team (AppointmentHostService::releaseHost()) still has bookings somebody has
+        // to move, and the owner is sent to the Bookings list to do exactly that.
+        if (! $type || $type->is_deleted || (! $type->is_active && ! $ownerMode)) {
             return $unavailable();
         }
 

@@ -83,6 +83,16 @@ class PayfastGateway extends PaymentGatewayDriver
     }
 
     /**
+     * An Instant EFT can clear hours after the buyer leaves (see handleWebhook()), and a payment
+     * that lands after the slot was released does not restore the booking. The same day the payment
+     * URL gives its guests.
+     */
+    public function appointmentHoldHours(): int
+    {
+        return 24;
+    }
+
+    /**
      * All three of merchant id, merchant key and passphrase are required before Payfast is offered as
      * a payment method - from the owner's own account, or from the installation's.
      *
@@ -325,15 +335,14 @@ class PayfastGateway extends PaymentGatewayDriver
                 'total' => $total,
             ]);
 
-            // Release the seats before bailing. The Sale rows are already committed by this point
+            // Release the seats before bailing (refuseCheckout() does, for a ticket sale; a booking
+            // keeps its hold, which ReleaseTickets sweeps). The Sale rows are already committed by this point
             // and SaleTicket::created has already incremented `sold`, so simply returning would hold
             // inventory FOREVER: events.expire_unpaid_tickets defaults to 0 and ReleaseTickets only
             // sweeps events that opted in, so nothing would ever reclaim it. And because back()
             // re-renders the form with the buyer's quantities restored, the obvious retry would burn
             // another seat - a misconfigured event would quietly sell itself out.
-            $this->releaseAbandonedSale($sale, 'payfast_refused');
-
-            return back()->withInput()->with('error', __('messages.payfast_checkout_unavailable'));
+            return $this->refuseCheckout($sale, 'payfast_refused', __('messages.payfast_checkout_unavailable'));
         }
 
         $encodedSaleId = UrlUtils::encodeId($sale->id);

@@ -1,4 +1,4 @@
-<x-marketing-layout>
+<x-marketing-layout :hp="true">
     @php
         // Every Google Wallet claim on this page reads the same predicate the button itself does
         // (GoogleWalletService::isConfigured()), so an install without an issuer account never
@@ -26,7 +26,7 @@
                 "@type": "HowToStep",
                 "position": 1,
                 "name": "Connect a payment method",
-                "text": "Connect your own Stripe or PayPal account, or Invoice Ninja, Payfast, or a payment URL, or take cash at the door. Money from card sales settles into your account, not ours."
+                "text": "Connect your own Stripe or PayPal account, or Invoice Ninja, Payfast, Razorpay, or a payment URL, or take cash at the door. Money from card sales settles into your account, not ours."
             },
             {
                 "@type": "HowToStep",
@@ -536,6 +536,18 @@
         @media (prefers-reduced-motion: reduce) {
             .es-turn-tick { animation: none !important; top: 42% !important; }
         }
+
+        /* On a phone the page's own object (the thing in the hero's second column) sat below
+           the first screen, so every page opened on the same pill, headline, paragraph and two
+           buttons. A little less air, a headline one step down and a 16px lede bring its top
+           into view. Phones only; nothing changes from 640px up. */
+        @media (max-width: 639.98px) {
+            #top { padding-top: 2.5rem; }
+            #top h1 { font-size: 2.125rem; margin-bottom: 1.25rem; }
+            #top h1 > :first-child { margin-bottom: 1.25rem; }
+            #top h1 + p { font-size: 1rem; line-height: 1.5rem; margin-bottom: 1.5rem; }
+            #top div:has(> div > h1) { gap: 2rem; }
+        }
     </style>
 
     @php
@@ -577,7 +589,7 @@
         // row exists only where the install can issue a pass ($walletLive), so without one it is
         // swapped for the free-registration row rather than dropped, and the door side stays at ten.
         $saleSide = [
-            ['Tell me when tickets go on sale', 'Switch on the "Notify me" card and, before anything is on sale, a visitor can leave an email address, no account needed, and hear once when tickets go on sale and again shortly before it starts. You see how many are waiting. Free on every plan.'],
+            ['Tell me when tickets go on sale', 'Switch on the "Notify me" card and, before anything is on sale, a visitor can leave an email address, no account needed, and hear once when tickets go on sale and again shortly before it starts. You see how many are waiting. Free on every plan.', 'interest-list'],
             ['Ticket types', 'Each one has its own name, price, quantity, optional sales window and optional cap per order, so one buyer cannot take the whole allocation. Zero is a valid price, and that ticket still gets a QR code.'],
             ['Promo codes and group rates', 'A code takes a percentage or a fixed amount off, with usage limits, an expiry date and per-ticket targeting. A volume discount unlocks a lower rate once one ticket line reaches a set quantity.'],
             ['Add-ons', 'Parking, merchandise, a meal package. Priced separately and never discounted by a promo code.'],
@@ -585,8 +597,8 @@
             ['Passes and subscriptions', 'One purchase a guest reuses across many events, with its own usage rules.'],
             ['Your own Stripe or PayPal', 'Buyers pay by card, Apple Pay or Google Pay through Stripe, or from a PayPal balance or card, straight into your account. You choose the method per event.'],
             ['Installments', 'A buyer splits the price over monthly charges. The first is taken at checkout and the ticket is valid straight away; the rest come off the saved card on their own.'],
-            ['One cart, several events', 'Somebody buying into three of your nights pays once, as a single amount, instead of running checkout three times.'],
-            ['Refunds that move the money', 'Refund a Stripe or PayPal sale in full or in part from the Sales list, and the money goes back through the provider. A partial refund keeps the tickets valid; a full one puts them back on sale. On Pro, like the sale it reverses.'],
+            ['One cart, several events', 'Somebody buying into three of your nights pays once, as a single amount, instead of running checkout three times.', 'cart'],
+            ['Refunds that move the money', 'Refund a Stripe, PayPal or Razorpay sale in full or in part from the Sales list, and the money goes back through the provider. A partial refund keeps the tickets valid; a full one puts them back on sale. On Pro, like the sale it reverses.', 'refunds'],
         ];
 
         $doorSide = [
@@ -595,7 +607,7 @@
                 ? ['Add to Google Wallet', 'The ticket page, the order page and the confirmation email carry an Add to Google Wallet button, free registrations included. The pass holds the same QR code, so it scans like any other ticket.']
                 : ['Free registrations too', 'A free registration gets a QR code in its confirmation email on the same terms as a paid ticket, and checks in the same way.'],
             ['Your own email sender', 'Optional. Add one once in the schedule\'s settings, under Integrations, Email Settings, and confirmations leave from your own address. Until you do, they leave from ours.'],
-            ['Individual tickets', 'Turn it on and every guest on the order gets their own email and their own code.'],
+            ['Individual tickets', 'Turn it on and every guest on the order gets their own email and their own code.', 'individual-tickets'],
             ['If the plans change', 'Change the date, the time or the venue and the editor asks whether to email everyone holding a ticket, with a note from you; cancelling offers the same. Buyers hear once your own email sender is added, and the interest list hears either way.'],
             ['Scan from a phone', 'Sales, then Scan Tickets, then point the camera. No hardware to buy or rent.'],
             ['One admission per ticket', 'A second scan comes back as an orange warning over the holder details, and no second admission is recorded.'],
@@ -605,10 +617,10 @@
         ];
 
         $afterSale = [
-            ['Sale notification emails', 'An email each time a ticket sells, with the buyer, the ticket type, the amount, the status and any code used. The first paid sale on an event notifies you, whatever plan you are on.', 'Pro'],
-            ['Sales CSV export', 'Buyer, ticket type, amount, promo code, payment method, check-in status and every custom answer.', 'Pro'],
+            ['Sale notification emails', 'An email each time a ticket sells, with the buyer, the ticket type, the amount, the status and any code used. The first paid sale on an event notifies you, whatever plan you are on.', 'Pro', 'sale-notifications'],
+            ['Sales CSV export', 'Buyer, ticket type, amount, promo code, payment method, check-in status and every custom answer.', 'Pro', 'sales-export'],
             ['Ticket waitlist', 'When a date sells out, guests can join. One person is notified at a time, with a 24 hour link to buy.', 'Pro'],
-            ['Bulk attendee import', 'Paste rows or upload a CSV for people who paid out of band. Up to 5,000 in one go.', 'Pro'],
+            ['Bulk attendee import', 'Paste rows or upload a CSV for people who paid out of band. Up to 5,000 in one go.', 'Pro', 'attendee-import'],
             ['Gift cards', 'Sell a balance somebody sends to a recipient by email, redeemable against tickets on your schedule.', 'Pro'],
             ['Post-event feedback', 'Star ratings and comments collected from ticket buyers and registrants after the event ends.', 'Pro'],
             ['Webhooks', 'POST notifications for sales, cancellations and check-ins, into whatever you already run.', 'Pro'],
@@ -616,7 +628,7 @@
         ];
 
         $steps = [
-            ['01', 'Connect a payment method', 'Your own Stripe or PayPal account, Invoice Ninja, Payfast, a payment URL, or cash at the door. The money settles into your account, not ours.'],
+            ['01', 'Connect a payment method', 'Your own Stripe or PayPal account, Invoice Ninja, Payfast, Razorpay, a payment URL, or cash at the door. The money settles into your account, not ours.'],
             ['02', 'Add your ticket types', 'A name, a price, a quantity, and a sales window if you want one. Promo codes, add-ons and custom questions have their own tabs.'],
             ['03', 'Scan at the door', 'Open Sales on your phone and tap Scan Tickets. Each ticket admits once, and the dashboard keeps the count.'],
         ];
@@ -649,11 +661,11 @@
             ],
             [
                 'q' => 'What payment methods are supported?',
-                'a' => 'Stripe for credit cards, Apple Pay and Google Pay; PayPal, where buyers pay from a PayPal balance or a card; Payfast for South African rand; Invoice Ninja for invoice or payment-link billing; a custom payment URL to send buyers to any system you already use; or cash, where you add payment instructions to the confirmation email and mark the sale paid yourself.',
+                'a' => 'Stripe for credit cards, Apple Pay and Google Pay; PayPal, where buyers pay from a PayPal balance or a card; Payfast for South African rand; Razorpay for Indian rupees (INR), by UPI, card, netbanking or wallet; Invoice Ninja for invoice or payment-link billing; a custom payment URL to send buyers to any system you already use; or cash, where you add payment instructions to the confirmation email and mark the sale paid yourself.',
             ],
             [
                 'q' => 'How are refunds handled?',
-                'a' => 'From the Sales list, on Pro. For a Stripe or PayPal sale the money goes back through the provider, in full or in part, and the list shows how much has been refunded so far. A partial refund leaves the sale paid and its tickets valid; a full refund, like a cancellation, returns the tickets to the pool for that date, which can trigger the next waitlist notification. An installment plan is refunded in full only, one charge at a time. Every other method shows Mark as Refunded, which records the refund while you return the money yourself. Either way, the refund policy stays yours.',
+                'a' => 'From the Sales list, on Pro. For a Stripe, PayPal or Razorpay sale the money goes back through the provider, in full or in part, and the list shows how much has been refunded so far. A partial refund leaves the sale paid and its tickets valid; a full refund, like a cancellation, returns the tickets to the pool for that date, which can trigger the next waitlist notification. An installment plan is refunded in full only, one charge at a time. Every other method shows Mark as Refunded, which records the refund while you return the money yourself. Either way, the refund policy stays yours.',
             ],
             [
                 'q' => 'Can I offer promo codes or discounts?',
@@ -722,15 +734,15 @@
                     </p>
 
                     <div class="es-fade-up es-d-3 flex flex-col items-start gap-4 sm:flex-row">
+                        <a href="{{ route('marketing.docs.tickets') }}" class="glass group inline-flex items-center justify-center gap-2 whitespace-nowrap rounded-2xl px-7 py-4 text-lg font-semibold transition-all duration-200 hover:-translate-y-0.5 hover:shadow-lg">
+                            Read the Ticketing guide
+                            <svg aria-hidden="true" class="h-5 w-5 transition-transform group-hover:translate-x-1 rtl:rotate-180" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 7l5 5m0 0l-5 5m5-5H6" /></svg>
+                        </a>
                         <a href="{{ app_url('/sign_up') }}" class="es-turn-btn group inline-flex items-center justify-center gap-2 whitespace-nowrap rounded-2xl px-8 py-4 text-lg font-semibold text-white transition-all duration-200 hover:-translate-y-0.5 hover:scale-[1.02]">
                             Start selling tickets
                             <svg aria-hidden="true" class="h-5 w-5 transition-transform group-hover:translate-x-1 rtl:rotate-180" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                                 <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 7l5 5m0 0l-5 5m5-5H6" />
                             </svg>
-                        </a>
-                        <a href="{{ route('marketing.docs.tickets') }}" class="glass group inline-flex items-center justify-center gap-2 whitespace-nowrap rounded-2xl px-7 py-4 text-lg font-semibold transition-all duration-200 hover:-translate-y-0.5 hover:shadow-lg">
-                            Read the Ticketing guide
-                            <svg aria-hidden="true" class="h-5 w-5 transition-transform group-hover:translate-x-1 rtl:rotate-180" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 7l5 5m0 0l-5 5m5-5H6" /></svg>
                         </a>
                     </div>
                 </div>
@@ -809,8 +821,10 @@
                 <div class="es-turn-card p-6 sm:p-7" data-reveal="panel">
                     <p class="es-turn-tag mb-5">The sale side</p>
                     <dl class="space-y-4" data-reveal-group="60">
-                        @foreach ($saleSide as [$sTitle, $sBody])
-                            <div data-reveal>
+                        {{-- A row with a third entry is one /features links to by name, so it carries that id. --}}
+                        @foreach ($saleSide as $saleRow)
+                            @php [$sTitle, $sBody] = $saleRow; $sAnchor = $saleRow[2] ?? null; @endphp
+                            <div @if ($sAnchor) id="{{ $sAnchor }}" @endif class="scroll-mt-24" data-reveal>
                                 <dt class="es-turn-ink text-sm font-bold">{{ $sTitle }}</dt>
                                 <dd class="es-turn-muted mt-1 text-sm leading-relaxed">{{ $sBody }}</dd>
                             </div>
@@ -831,8 +845,9 @@
                 <div class="es-turn-card p-6 sm:p-7" data-reveal="panel">
                     <p class="es-turn-tag mb-5">The door side</p>
                     <dl class="space-y-4" data-reveal-group="60">
-                        @foreach ($doorSide as [$dTitle, $dBody])
-                            <div data-reveal>
+                        @foreach ($doorSide as $doorRow)
+                            @php [$dTitle, $dBody] = $doorRow; $dAnchor = $doorRow[2] ?? null; @endphp
+                            <div @if ($dAnchor) id="{{ $dAnchor }}" @endif class="scroll-mt-24" data-reveal>
                                 <dt class="es-turn-ink text-sm font-bold">{{ $dTitle }}</dt>
                                 <dd class="es-turn-muted mt-1 text-sm leading-relaxed">{{ $dBody }}</dd>
                             </div>
@@ -900,10 +915,15 @@
                 </div>
             </div>
 
-            <div class="mt-8 grid gap-4 md:grid-cols-3" data-reveal-group="90">
+            {{-- Four, so the pair /features names in one row, sales windows and group rates, sit side by side. --}}
+            <div class="mt-8 grid gap-4 md:grid-cols-2" data-reveal-group="90">
                 <div class="es-turn-card p-6" data-reveal="panel">
                     <h3 class="es-turn-ink mb-2 text-base font-bold">A window is a date, not a countdown</h3>
                     <p class="es-turn-muted text-sm leading-relaxed">A sales start and end are stored as single moments in time, so an early bird ends on the date you set. Separately, a per-event option keeps selling until the event ends rather than stopping at the start time.</p>
+                </div>
+                <div class="es-turn-card p-6" data-reveal="panel">
+                    <h3 class="es-turn-ink mb-2 text-base font-bold">A group rate rewards the bigger order</h3>
+                    <p class="es-turn-muted text-sm leading-relaxed">Give a ticket type a minimum quantity, two or more, and a percentage or a fixed amount comes off once one order reaches it. It comes off that ticket line only, never off an add-on, and a promo code is then worked out on what is left, so the two never discount the same money twice.</p>
                 </div>
                 <div class="es-turn-card p-6" data-reveal="panel">
                     <h3 class="es-turn-ink mb-2 text-base font-bold">Inventory is per date</h3>
@@ -1098,8 +1118,8 @@
 
                     <div data-reveal class="es-turn-card flex flex-col p-6">
                         <svg aria-hidden="true" class="es-turn-accent mb-4 h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="1.8"><path stroke-linecap="round" stroke-linejoin="round" d="M3.055 11H5a2 2 0 012 2v1a2 2 0 002 2 2 2 0 012 2v2.945M8 3.935V5.5A2.5 2.5 0 0010.5 8h.5a2 2 0 012 2 2 2 0 104 0 2 2 0 012-2h1.064M15 20.488V18a2 2 0 012-2h3.064M21 12a9 9 0 11-18 0 9 9 0 0118 0z" /></svg>
-                        <h3 class="es-turn-ink mb-2 text-base font-bold">Payfast</h3>
-                        <p class="es-turn-muted text-sm leading-relaxed">For events priced in South African rand, paid into your own Payfast account.</p>
+                        <h3 class="es-turn-ink mb-2 text-base font-bold">Payfast and Razorpay</h3>
+                        <p class="es-turn-muted text-sm leading-relaxed">For events priced in South African rand (Payfast) or Indian rupees (Razorpay), paid into your own account.</p>
                     </div>
 
                     <div data-reveal class="es-turn-card flex flex-col p-6">
@@ -1193,8 +1213,9 @@
             </div>
 
             <div class="grid gap-4 md:grid-cols-2 lg:grid-cols-4" data-reveal-group="70">
-                @foreach ($afterSale as [$aTitle, $aBody, $aPlan])
-                    <div class="es-turn-card flex flex-col p-6" data-reveal="panel">
+                @foreach ($afterSale as $afterRow)
+                    @php [$aTitle, $aBody, $aPlan] = $afterRow; $aAnchor = $afterRow[3] ?? null; @endphp
+                    <div @if ($aAnchor) id="{{ $aAnchor }}" @endif class="es-turn-card flex scroll-mt-24 flex-col p-6" data-reveal="panel">
                         <span class="es-turn-plan es-turn-plan-pro mb-3 self-start">{{ $aPlan }}</span>
                         <h3 class="es-turn-ink mb-2 text-base font-bold">{{ $aTitle }}</h3>
                         <p class="es-turn-muted text-sm leading-relaxed">{{ $aBody }}</p>
@@ -1234,90 +1255,10 @@
 
     @include('marketing.partials.pricing-nudge')
 
-    <!-- ============================================================ -->
-    <!-- 9. Related features                                          -->
-    <!-- ============================================================ -->
-    <section class="py-20">
-        <div class="mx-auto max-w-3xl px-4 sm:px-6 lg:px-8">
-            <h2 class="es-turn-ink mb-8 text-center text-2xl font-black tracking-tight md:text-3xl" data-reveal>Related features</h2>
-            <div class="space-y-3" data-reveal-group="70">
-                <div data-reveal>
-                    <x-feature-link-card name="Stripe Payments" description="Accept credit cards, Apple Pay, and Google Pay with zero platform fees" :url="marketing_url('/stripe')" icon-color="blue">
-                        <x-slot:icon><svg aria-hidden="true" class="w-5 h-5 text-blue-600 dark:text-blue-400" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 10h18M7 15h1m4 0h1m-7 4h12a3 3 0 003-3V8a3 3 0 00-3-3H6a3 3 0 00-3 3v8a3 3 0 003 3z" /></svg></x-slot:icon>
-                    </x-feature-link-card>
-                </div>
-                <div data-reveal>
-                    <x-feature-link-card name="PayPal Checkout" description="Let buyers pay from a PayPal balance or card, with zero platform fees" :url="route('marketing.paypal')" icon-color="blue">
-                        <x-slot:icon><svg aria-hidden="true" class="w-5 h-5 text-blue-600 dark:text-blue-400" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M17 9V7a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2m2 4h10a2 2 0 002-2v-6a2 2 0 00-2-2H9a2 2 0 00-2 2v6a2 2 0 002 2zm7-5a2 2 0 11-4 0 2 2 0 014 0z" /></svg></x-slot:icon>
-                    </x-feature-link-card>
-                </div>
-                <div data-reveal>
-                    <x-feature-link-card name="Custom Fields" description="Collect additional info from ticket buyers with custom form fields" :url="marketing_url('/features/custom-fields')" icon-color="amber">
-                        <x-slot:icon><svg aria-hidden="true" class="w-5 h-5 text-amber-600 dark:text-amber-400" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2m-3 7h3m-3 4h3m-6-4h.01M9 16h.01" /></svg></x-slot:icon>
-                    </x-feature-link-card>
-                </div>
-                <div data-reveal>
-                    <x-feature-link-card name="Newsletters" description="Send branded newsletters to followers and ticket buyers" :url="marketing_url('/features/newsletters')" icon-color="sky">
-                        <x-slot:icon><svg aria-hidden="true" class="w-5 h-5 text-sky-600 dark:text-sky-400" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 8l7.89 5.26a2 2 0 002.22 0L21 8M5 19h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z" /></svg></x-slot:icon>
-                    </x-feature-link-card>
-                </div>
-                <div data-reveal>
-                    <x-feature-link-card name="Embed Calendar" description="Embed your full event calendar on any website" :url="marketing_url('/features/embed-calendar')" icon-color="blue">
-                        <x-slot:icon><svg aria-hidden="true" class="w-5 h-5 text-blue-600 dark:text-blue-400" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10 20l4-16m4 4l4 4-4 4M6 16l-4-4 4-4" /></svg></x-slot:icon>
-                    </x-feature-link-card>
-                </div>
-                <div data-reveal>
-                    <x-feature-link-card name="Embed Tickets" description="Embed a ticket purchase or RSVP form on any website with one line of code" :url="marketing_url('/features/embed-tickets')" icon-color="blue">
-                        <x-slot:icon><svg aria-hidden="true" class="w-5 h-5 text-blue-600 dark:text-blue-400" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 5v2m0 4v2m0 4v2M5 5a2 2 0 00-2 2v3a2 2 0 110 4v3a2 2 0 002 2h14a2 2 0 002-2v-3a2 2 0 110-4V7a2 2 0 00-2-2H5z" /></svg></x-slot:icon>
-                    </x-feature-link-card>
-                </div>
-            </div>
-            <div class="mt-6 text-center">
-                <a href="{{ marketing_url('/features') }}" class="es-turn-link inline-flex items-center font-medium hover:underline">
-                    See all features
-                    <svg aria-hidden="true" class="ml-1 h-4 w-4 rtl:ml-0 rtl:mr-1 rtl:rotate-180" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 7l5 5m0 0l-5 5m5-5H6" />
-                    </svg>
-                </a>
-            </div>
-        </div>
-    </section>
-
     <hr class="es-turn-perf mx-auto max-w-7xl" aria-hidden="true">
 
     <!-- ============================================================ -->
-    <!-- 10. Keep reading                                             -->
-    <!-- ============================================================ -->
-    <section class="py-16 lg:py-20">
-        <div class="mx-auto max-w-5xl px-4 sm:px-6 lg:px-8">
-            <h2 class="es-turn-ink mb-8 text-center text-2xl font-black tracking-tight md:text-3xl" data-reveal>Keep reading</h2>
-            <div class="grid grid-cols-2 gap-4 md:grid-cols-3" data-reveal-group="70">
-                @php
-                    $keepReading = [
-                        [route('marketing.docs.tickets'), 'Ticketing guide', 'Every tab, field and setting, written out.'],
-                        [route('marketing.passes'), 'Passes and subscriptions', 'Class packs, memberships and season tickets on one QR code.'],
-                        [route('marketing.check_in'), 'Check-in', 'The door scanner and the live dashboard, in detail.'],
-                        [marketing_url('/for-musicians'), 'For musicians', 'Selling to a room you booked yourself.'],
-                        [marketing_url('/for-venues'), 'For venues', 'A door count for somebody else\'s show.'],
-                        [marketing_url('/for-comedy-clubs'), 'For comedy clubs', 'Several shows a night, each with its own count.'],
-                    ];
-                @endphp
-                @foreach ($keepReading as [$krHref, $krName, $krBlurb])
-                    <a href="{{ $krHref }}" class="es-turn-card es-turn-hover group flex flex-col p-5 transition-all duration-200 hover:shadow-md" data-reveal>
-                        <span class="es-turn-hover-title es-turn-ink mb-2 text-sm font-bold transition-colors">{{ $krName }}</span>
-                        <span class="es-turn-muted mb-3 text-xs leading-relaxed">{{ $krBlurb }}</span>
-                        <span class="es-turn-hover-arrow es-turn-muted mt-auto inline-flex items-center gap-1 text-xs font-semibold transition-colors">
-                            Read more
-                            <svg aria-hidden="true" class="h-3.5 w-3.5 transition-transform group-hover:translate-x-0.5 rtl:rotate-180" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M9 5l7 7-7 7" /></svg>
-                        </span>
-                    </a>
-                @endforeach
-            </div>
-        </div>
-    </section>
-
-    <!-- ============================================================ -->
-    <!-- 11. FAQ                                                      -->
+    <!-- 9. FAQ                                                       -->
     <!-- ============================================================ -->
     <x-seo.faq-schema :items="$faqs" />
 
@@ -1348,8 +1289,10 @@
         </div>
     </section>
 
+    <x-marketing.related-pages />
+
     <!-- ============================================================ -->
-    <!-- 12. Finale                                                   -->
+    <!-- 10. Finale                                                   -->
     <!-- ============================================================ -->
     <section id="claim" class="relative scroll-mt-24 px-2 py-16 sm:px-4 lg:py-24">
         <div class="mx-auto max-w-6xl">
@@ -1379,14 +1322,14 @@
 
                     <div class="mx-auto flex max-w-2xl flex-col items-stretch justify-center gap-3 sm:flex-row">
                         <label for="es-claim-input" class="sr-only">Your schedule name</label>
-                        <div dir="ltr" class="es-claim flex min-w-0 flex-1 items-center rounded-2xl border border-white/15 bg-white/[0.07] px-5 py-4 backdrop-blur-md transition-all">
+                        <div dir="ltr" class="es-claim flex min-w-0 flex-1 items-center rounded-2xl border border-white/15 bg-white/[0.07] px-4 sm:px-5 py-4 backdrop-blur-md transition-all">
                             <input id="es-claim-input" type="text" placeholder="your-schedule" autocomplete="off" spellcheck="false" maxlength="30"
-                                class="min-w-0 flex-1 border-0 bg-transparent p-0 text-right font-mono text-sm font-semibold text-white placeholder-gray-500 focus:outline-none focus:ring-0 sm:text-base">
+                                class="min-w-0 flex-1 border-0 bg-transparent p-0 text-right font-mono text-base font-semibold text-white placeholder-gray-500 focus:outline-none focus:ring-0">
                             <span class="shrink-0 select-none font-mono text-sm text-gray-400 sm:text-base">.eventschedule.com</span>
                         </div>
                         <a href="{{ app_url('/sign_up') }}" class="es-turn-btn group relative inline-flex shrink-0 items-center justify-center gap-2 overflow-hidden rounded-2xl px-8 py-4 text-lg font-semibold text-white transition-all duration-200 hover:-translate-y-0.5 hover:scale-[1.02]">
                             <span class="relative z-10 flex items-center gap-2">
-                                Get Started Free
+                                Start for free
                                 <svg aria-hidden="true" class="h-5 w-5 transition-transform group-hover:translate-x-1 rtl:rotate-180" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                                     <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 7l5 5m0 0l-5 5m5-5H6" />
                                 </svg>
@@ -1416,8 +1359,6 @@
     </nav>
 
     </div>
-
-    <x-marketing.related-pages />
 
     <script src="{{ asset('vendor/canvas-confetti/confetti.browser.min.js') }}" {!! nonce_attr() !!} defer></script>
     @vite('resources/js/marketing-home.js')

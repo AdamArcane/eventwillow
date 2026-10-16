@@ -1,37 +1,20 @@
+{{-- The schedule's picture in the flow of the mail. One that OPENS the mail is the masthead instead
+     (the newsletter masthead component), which the shell renders. With no size on record the
+     picture keeps its own shape. It is the WebP derivative, so Outlook for Windows is not sent it. --}}
 @php
-    $template = $template ?? 'modern';
+    $size = $role->imageSourceDimensions();
+    $ratio = $size ? $size[0] / max(1, $size[1]) : 1;
+    $box = $nl->design === 'compact' ? 72 : 120;
+    $w = $ratio > 1.6 ? 200 : ($ratio >= 1 ? $box : (int) round($box * $ratio));
+    $h = (int) round($w / $ratio);
+    $sized = $size
+        ? 'width="'.$w.'" height="'.$h.'" style="width: '.$w.'px; height: '.$h.'px;'
+        : 'style="width: auto; height: auto; max-width: 200px; max-height: '.$box.'px;';
 @endphp
-@if ($role?->profile_image_url)
-@if ($template === 'classic')
+<!--[if !mso]><!-->
 <tr>
-    <td align="center" style="padding-bottom: 20px;">
-        <img src="{{ $role?->profile_image_url }}" alt="{{ $role?->name }}" width="200" style="max-width: 200px; height: auto; border-radius: 0;" />
-    </td>
+<td align="center" class="nl-g" style="padding: 0 {{ $nl->gutter }}px {{ $nl->gap }}px; text-align: center;">
+<img src="{{ $role->getProfileImageUrl(480) }}" alt="{{ $role->name }}" {!! $sized !!} display: block; margin: 0 auto; border: 0; border-radius: {{ $nl->cardRadius }}px;">
+</td>
 </tr>
-@elseif ($template === 'minimal')
-<tr>
-    <td align="center" style="padding-bottom: 14px;">
-        <img src="{{ $role?->profile_image_url }}" alt="{{ $role?->name }}" width="150" style="max-width: 150px; height: auto; border-radius: 4px;" />
-    </td>
-</tr>
-@elseif ($template === 'bold')
-<tr>
-    <td align="center" style="padding-bottom: 20px;">
-        <img src="{{ $role?->profile_image_url }}" alt="{{ $role?->name }}" width="200" style="max-width: 200px; height: auto; border-radius: 8px; border: 3px solid {{ $style['accentColor'] }};" />
-    </td>
-</tr>
-@elseif ($template === 'compact')
-<tr>
-    <td align="center" style="padding-bottom: 10px;">
-        <img src="{{ $role?->profile_image_url }}" alt="{{ $role?->name }}" width="80" style="max-width: 80px; height: auto; border-radius: 4px;" />
-    </td>
-</tr>
-@else
-{{-- Modern (default) --}}
-<tr>
-    <td align="center" style="padding-bottom: 20px;">
-        <img src="{{ $role?->profile_image_url }}" alt="{{ $role?->name }}" width="200" style="max-width: 200px; height: auto; border-radius: 8px;" />
-    </td>
-</tr>
-@endif
-@endif
+<!--<![endif]-->

@@ -1,0 +1,242 @@
+<?php
+
+namespace App\Models;
+
+use Illuminate\Database\Eloquent\Model;
+use Illuminate\Database\Eloquent\Relations\BelongsTo;
+use Illuminate\Database\Eloquent\Relations\HasMany;
+use Illuminate\Support\Facades\Schema;
+
+/**
+ * An address a schedule keeps reading for events. See the migration for what each column is,
+ * and App\Services\Feeds for what reads them.
+ */
+class EventFeed extends Model
+{
+    /** What an address turned out to be, which decides the reader. */
+    public const KIND_CALENDAR = 'calendar';
+
+    public const KIND_PAGE = 'page';
+
+    public const KIND_ITEMS = 'items';
+
+    public const KIND_JOLIOO = 'jolioo';
+
+    public const KINDS = [self::KIND_CALENDAR, self::KIND_PAGE, self::KIND_ITEMS, self::KIND_JOLIOO];
+
+    /** New events are public at once, or held as drafts to be looked over. */
+    public const PUBLISH = 'publish';
+
+    public const DRAFT = 'draft';
+
+    public const PUBLISH_MODES = [self::PUBLISH, self::DRAFT];
+
+    /** What happens to an event the source no longer lists. */
+    public const LEFT_KEEP = 'keep';
+
+    public const LEFT_CANCEL = 'cancel';
+
+    public const LEFT_DELETE = 'delete';
+
+    public const LEFT_ACTIONS = [self::LEFT_KEEP, self::LEFT_CANCEL, self::LEFT_DELETE];
+
+    /** Why a feed is not being read. Keys: the page says them in the reader's language. */
+    public const PAUSED_BY_OWNER = 'owner';
+
+    public const PAUSED_FAILING = 'failing';
+
+    public const PAUSED_TRANSFER = 'transfer';
+
+    public const PAUSED_MEMBER_LEFT = 'member_left';
+
+    public const PAUSED_UNDO = 'undo';
+
+    /** How many feeds one schedule may have. */
+    public const PER_SCHEDULE = 10;
+
+    protected $guarded = [];
+
+    protected $casts = [
+        // The address is the credential for a private calendar or a provider's feed.
+        'url' => 'encrypted',
+        'add_organizer' => 'boolean',
+        'can_see_leaving' => 'boolean',
+        'paused_at' => 'datetime',
+        'next_check_at' => 'datetime',
+        'last_checked_at' => 'datetime',
+        'last_success_at' => 'datetime',
+        'baseline_done_at' => 'datetime',
+        'held_leaving' => 'array',
+        'stats' => 'array',
+        'failure_count' => 'integer',
+        'waiting_count' => 'integer',
+        'decide_count' => 'integer',
+    ];
+
+    /** Never in an array or JSON form of the model: a log line or an API reply is not the place for it. */
+    protected $hidden = ['url', 'etag', 'last_modified'];
+
+    private static ?bool $tablesReady = null;
+
+    /**
+     * Whether the feed tables exist, for the two callers that run with no person in front of
+     * them (the every-minute read and the subscriber digest) on an install that has the code
+     * and has not yet migrated. Remembered only once they do, so a deploy's migrate is seen by
+     * a process that was already running.
+     */
+    public static function tablesReady(): bool
+    {
+        if (self::$tablesReady) {
+            return true;
+        }
+
+        try {
+            return self::$tablesReady = Schema::hasTable('event_feeds') && Schema::hasTable('event_feed_items');
+        } catch (\Throwable $e) {
+            return false;
+        }
+    }
+
+    /**
+     * The names of a schedule's feeds, for a page that only mentions them (the schedule form's
+     * row). Nothing where the tables are not there yet: a page that is not about feeds does not
+     * fail over them.
+     *
+     * @return list<string>
+     */
+    public static function namesFor(Role $role): array
+    {
+        try {
+            return self::where('role_id', $role->id)->orderBy('id')->pluck('name')->all();
+        } catch (\Illuminate\Database\QueryException $e) {
+            return [];
+        }
+    }
+
+    /**
+     * What waits for somebody, counted now: drafts to look over, and decisions.
+     *
+     * @return array{0: int, 1: int}
+     */
+    public function waitingNow(): array
+    {
+        return [
+            $this->items()
+                ->where('state', EventFeedItem::STATE_IMPORTED)
+                ->whereHas('event', fn ($query) => $query->where('is_draft', true)->where('is_cancelled', false))
+                ->count(),
+            $this->items()->where('state', EventFeedItem::STATE_DECIDE)->count(),
+        ];
+    }
+
+    /**
+     * Bring the stored counts up to date, where they are read without a read having run: a
+     * draft published or deleted from the event's own form changes them, and the tab's number
+     * said "3 waiting" for the hour until the next read. Written by query, so that a feed loaded
+     * with a count beside it (withCount) can be recounted too.
+     */
+    public function recount(): static
+    {
+        [$waiting, $decide] = $this->waitingNow();
+
+        if ($waiting !== (int) $this->waiting_count || $decide !== (int) $this->decide_count) {
+            static::whereKey($this->id)->toBase()->update(['waiting_count' => $waiting, 'decide_count' => $decide]);
+            $this->waiting_count = $waiting;
+            $this->decide_count = $decide;
+            $this->syncOriginalAttributes(['waiting_count', 'decide_count']);
+        }
+
+        return $this;
+    }
+
+    /**
+     * Whether more SOURCES are failing at once than their own troubles would explain: at least
+     * five sites, and half of all the sites being read. Then the fault is likelier ours (the
+     * network, an address of ours that a host blocks), so nobody is mailed that THEIR feed is
+     * broken and no feed is paused for it; the platform's admins are told instead
+     * (AdminAlertService).
+     *
+     * Counted by site, because six feeds on one site that went down are one source's trouble.
+     * And only among feeds that are being read at all: one whose schedule was deleted or whose
+     * plan lapsed is never asked, and would otherwise make "half" harder to reach for ever.
+     */
+    public static function manyFailing(): bool
+    {
+        $beingRead = fn () => self::whereNull('paused_at')->where('last_checked_at', '>', now()->subDays(2));
+        $reading = $beingRead()->distinct()->count('host');
+        $failing = $beingRead()->where('failure_count', '>', 0)->where('last_checked_at', '>', now()->subDay())->distinct()->count('host');
+
+        return $failing >= 5 && $failing * 2 >= $reading;
+    }
+
+    /** What two addresses are compared by: an encrypted column cannot be. */
+    public static function hashOf(string $url): string
+    {
+        return hash('sha256', $url);
+    }
+
+    public function role(): BelongsTo
+    {
+        return $this->belongsTo(Role::class);
+    }
+
+    public function addedBy(): BelongsTo
+    {
+        return $this->belongsTo(User::class, 'added_by');
+    }
+
+    public function group(): BelongsTo
+    {
+        return $this->belongsTo(Group::class);
+    }
+
+    public function items(): HasMany
+    {
+        return $this->hasMany(EventFeedItem::class);
+    }
+
+    /**
+     * Whether a schedule's plan includes feeds: every selfhost install has them, as it has every
+     * Enterprise feature, and on the hosted service they are Enterprise.
+     */
+    public static function allowedFor(Role $role): bool
+    {
+        return ! config('app.hosted') || $role->isEnterprise();
+    }
+
+    /**
+     * Stop reading these feeds until somebody who runs the schedule now says to go on.
+     *
+     * A feed makes events as the schedule's owner, from an address somebody chose. When the
+     * schedule changes hands, or the member who added a feed leaves, nobody who is there now has
+     * chosen it. Paused rather than removed: its events stay, and one press resumes it.
+     *
+     * Whatever was asked to be published is dropped with it: a "Publish all" pressed by someone
+     * who has left must not fire later.
+     */
+    public static function pauseWhere(\Closure $which, string $reason): void
+    {
+        if (! self::tablesReady()) {
+            return;
+        }
+
+        $ids = self::query()->whereNull('paused_at')->where($which)->pluck('id');
+
+        if ($ids->isEmpty()) {
+            return;
+        }
+
+        self::whereIn('id', $ids)->update(['paused_at' => now(), 'pause_reason' => $reason]);
+        EventFeedItem::whereIn('event_feed_id', $ids)->whereNotNull('publish_requested_at')->update(['publish_requested_at' => null]);
+    }
+
+    public function isPaused(): bool
+    {
+        return $this->paused_at !== null;
+    }
+
+    public function publishes(): bool
+    {
+        return $this->publish_mode === self::PUBLISH;
+    }
+}
