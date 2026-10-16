@@ -1,0 +1,20 @@
+html[data-theme] {
+    --brand-blue: #15803d;
+    --brand-blue-light: #16a34a;
+    --brand-blue-dark: #166534;
+
+    --brand-blue-a10: rgba(21, 128, 61, 0.1);
+    --brand-blue-a20: rgba(21, 128, 61, 0.2);
+    --brand-blue-a30: rgba(21, 128, 61, 0.3);
+
+    --brand-button-bg-light: #16a34a;
+    --brand-button-bg: #15803d;
+    --brand-button-bg-hover: #166534;
+
+    --ap-rail: 12 30 22;
+    --ap-rail-deep: 7 20 14;
+    --ap-rail-hover: 22 45 33;
+    --ap-rail-active: 28 55 40;
+
+}
+
