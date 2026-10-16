@@ -2,6 +2,7 @@
 namespace App\Modules\EventWillowPublicApi;
 
 use App\Http\Controllers\Controller as BaseController;
+use App\Http\Controllers\RoleSubscriberController;
 use App\Utils\UrlUtils;
 use Carbon\Carbon;
 use Illuminate\Http\Request;
@@ -78,6 +79,26 @@ class Controller extends BaseController
     public function channel(Request $request, string $identifier)
     {
         return $this->response(Serializer::channel($this->resolveChannel($identifier)));
+    }
+
+    public function follow(Request $request, string $identifier)
+    {
+        $role = $this->resolveChannel($identifier);
+
+        if (! $role->show_subscribe_panel) {
+            return response()->json(['error' => 'Channel sign-up is unavailable'], 403)
+                ->header('Cache-Control', 'no-store');
+        }
+
+        if ($role->language_code && is_valid_language_code($role->language_code)) {
+            app()->setLocale($role->language_code);
+        }
+
+        $request->attributes->set('subscribe_site_api', true);
+        $request->headers->set('Accept', 'application/json');
+        $response = app(RoleSubscriberController::class)->store($request, $role->subdomain);
+
+        return $response->header('Cache-Control', 'no-store');
     }
 
     public function channelEvents(Request $request, string $identifier)

@@ -1,11 +1,14 @@
 <?php
 namespace App\Modules\EventWillowPublicApi\Tests;
 use App\Models\Event;
+use App\Models\NewsletterUnsubscribe;
 use App\Models\Role;
+use App\Models\RoleSubscriber;
 use App\Modules\EventWillowPublicApi\Serializer;
 use App\Utils\UrlUtils;
 use Carbon\Carbon;
 use Illuminate\Foundation\Testing\RefreshDatabase;
+use Illuminate\Support\Facades\Queue;
 use Tests\Feature\Concerns\CreatesScheduleData;
 use Tests\TestCase;
 
@@ -18,11 +21,50 @@ class SiteApiTest extends TestCase {
         $this->getJson($this->prefix.'channels/'.$role->subdomain)
             ->assertOk()->assertJsonPath('data.description','Full channel description')
             ->assertJsonPath('data.summary','Short channel description')->assertJsonPath('data.type','venue')
-            ->assertJsonPath('data.accent_color','#123abc');
+            ->assertJsonPath('data.accent_color','#123abc')
+            ->assertJsonPath('data.show_subscribe_panel',true)
+            ->assertJsonPath('data.account_followers_count',0)
+            ->assertJsonPath('data.confirmed_email_subscribers_count',0);
         $this->getJson($this->prefix.'events/'.UrlUtils::encodeId($event->id))
-            ->assertOk()->assertJsonPath('data.channels.0.accent_color','#123abc');
+            ->assertOk()->assertJsonPath('data.channels.0.accent_color','#123abc')
+            ->assertJsonMissingPath('data.channels.0.account_followers_count');
         $role->accent_color = 'invalid';
         $this->assertSame('#4E81FA', Serializer::channel($role)['accent_color']);
+    }
+    public function test_channel_follow_endpoint_adds_a_pending_named_subscriber_only_when_signup_is_enabled(): void {
+        [$role]=$this->fixture();
+        Queue::fake();
+        $this->withHeaders(['X-EventWillow-Site-Key'=>''])->postJson($this->prefix.'channels/'.$role->subdomain.'/follow', [
+            'name'=>'A Guest','email'=>'guest@example.org',
+        ])->assertUnauthorized();
+        $this->withHeaders(['X-EventWillow-Site-Key'=>'fixture-site-key']);
+        $response=$this->postJson($this->prefix.'channels/'.$role->subdomain.'/follow', [
+            'name'=>'A Guest','email'=>'guest@example.org',
+        ])->assertOk()->assertJsonPath('success',true);
+
+        $this->assertDatabaseHas('role_subscribers', [
+            'role_id'=>$role->id, 'name'=>'A Guest', 'email'=>'guest@example.org', 'confirmed_at'=>null, 'source'=>'embed',
+        ]);
+        $this->getJson($this->prefix.'channels/'.$role->subdomain)->assertOk()
+            ->assertJsonPath('data.confirmed_email_subscribers_count',0);
+
+        $follower=$this->createOwner();
+        $role->followers()->attach($follower->id,['level'=>'follower']);
+        RoleSubscriber::where('role_id',$role->id)->where('email','guest@example.org')->update(['confirmed_at'=>now()]);
+        $this->getJson($this->prefix.'channels/'.$role->subdomain)->assertOk()
+            ->assertJsonPath('data.account_followers_count',1)
+            ->assertJsonPath('data.confirmed_email_subscribers_count',1);
+        NewsletterUnsubscribe::create([
+            'role_id'=>$role->id,'email'=>'guest@example.org','unsubscribed_at'=>now(),
+        ]);
+        $this->getJson($this->prefix.'channels/'.$role->subdomain)->assertOk()
+            ->assertJsonPath('data.confirmed_email_subscribers_count',0);
+
+        $role->forceFill(['show_subscribe_panel'=>false])->save();
+        $this->postJson($this->prefix.'channels/'.$role->subdomain.'/follow', [
+            'name'=>'Another Guest','email'=>'another@example.org',
+        ])->assertForbidden();
+        $this->assertDatabaseMissing('role_subscribers', ['role_id'=>$role->id, 'email'=>'another@example.org']);
     }
     public function test_event_description_exposes_the_sanitized_markdown_html_for_site_rendering(): void {
         [$role, $event, $id] = $this->fixture(['description' => "## Lineup\n\n**The Willow Trio**"]);

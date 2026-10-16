@@ -7,6 +7,7 @@ Route::prefix('api/eventwillow/v1')->middleware(['api', 'throttle:eventwillow-pu
     Route::get('events/{id}', [Controller::class, 'event']);
     Route::get('channels', [Controller::class, 'channels']);
     Route::get('channels/{identifier}', [Controller::class, 'channel']);
+    Route::post('channels/{identifier}/follow', [Controller::class, 'follow']);
     Route::get('channels/{identifier}/events', [Controller::class, 'channelEvents']);
     Route::get('facets', [Controller::class, 'facets']);
 });

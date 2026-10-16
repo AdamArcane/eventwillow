@@ -225,7 +225,7 @@ class RoleSubscriberController extends Controller
                 'locale' => app()->getLocale(),
                 // Keyed on the ROUTE for the embed, not the posted field, so only the embedded
                 // form can produce it and the owner's "Website" chip on the Followers tab is true.
-                'source' => $request->attributes->get('subscribe_embed')
+                'source' => $request->attributes->get('subscribe_embed') || $request->attributes->get('subscribe_site_api')
                     ? 'embed'
                     : ($request->input('source') === 'modal' ? 'guest_modal' : 'guest_panel'),
                 'token' => RoleSubscriber::newToken(),

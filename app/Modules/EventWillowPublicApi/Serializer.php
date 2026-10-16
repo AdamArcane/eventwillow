@@ -10,9 +10,9 @@ require_once __DIR__.'/Location.php';
 
 final class Serializer
 {
-    public static function channel(Role $role): array
+    public static function channel(Role $role, bool $includeAudienceCounts = true): array
     {
-        return [
+        $channel = [
             'id' => UrlUtils::encodeId($role->id), 'identifier' => $role->subdomain,
             'slug' => \Illuminate\Support\Str::slug($role->name), 'name' => $role->name,
             'description' => strip_tags($role->description ?? ''), 'summary' => $role->short_description ?? '',
@@ -26,10 +26,18 @@ final class Serializer
                 $url = self::safeUrl($link->url ?? null);
                 return $url ? ['label' => strip_tags($link->name ?? ''), 'platform' => UrlUtils::detectPlatform($url), 'url' => $url] : null;
             })->filter()->values()->all(),
+            'show_subscribe_panel' => (bool) $role->show_subscribe_panel,
             'canonical_url' => $role->getGuestUrl(true), 'hide_past_events' => (bool) $role->hide_past_events,
             'groups' => $role->groups->map(fn ($g) => ['id' => UrlUtils::encodeId($g->id), 'name' => $g->name])->values()->all(),
             'actions' => [['label' => 'Visit channel', 'url' => $role->getGuestUrl(true), 'type' => 'channel']],
         ];
+
+        if ($includeAudienceCounts) {
+            $channel['account_followers_count'] = (int) ($role->getAttribute('account_followers_count') ?? $role->accountOnlyFollowers()->count());
+            $channel['confirmed_email_subscribers_count'] = (int) ($role->getAttribute('confirmed_email_subscribers_count') ?? $role->subscribers()->confirmed()->count());
+        }
+
+        return $channel;
     }
 
     public static function location(?Role $role): array
@@ -108,7 +116,7 @@ final class Serializer
             'local_starts_at' => $start->copy()->setTimezone($timezone)->toIso8601String(),
             'occurrence_date' => $date, 'timezone' => $timezone, 'recurring' => (bool) $event->days_of_week,
             'recurrence' => $event->recurrenceSummary(), 'location' => $location,
-            'channels' => $roles->map(fn ($r) => self::channel($r))->values()->all(),
+            'channels' => $roles->map(fn ($role) => self::channel($role, false))->values()->all(),
             'groups' => $roles->filter(fn ($r) => $r->pivot?->group_id)->map(function ($r) {
                 $group=$r->groups->firstWhere('id',$r->pivot->group_id);
                 return ['id'=>UrlUtils::encodeId($r->pivot->group_id),'identifier'=>$group ? $r->subdomain.'/'.$group->slug : '', 'name'=>$group?->name ?? ''];

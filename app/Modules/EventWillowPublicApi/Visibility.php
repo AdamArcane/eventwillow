@@ -28,7 +28,16 @@ final class Visibility
 
     public static function channels(): Builder
     {
-        return self::roles(Role::query())->with('groups');
+        return self::roles(Role::query())->with('groups')->withCount([
+            'accountOnlyFollowers as account_followers_count',
+            'subscribers as confirmed_email_subscribers_count' => fn ($query) => $query->confirmed()
+                ->whereNotExists(function ($suppressed) {
+                    $suppressed->selectRaw('1')
+                        ->from('newsletter_unsubscribes')
+                        ->whereColumn('newsletter_unsubscribes.role_id', 'role_subscribers.role_id')
+                        ->whereColumn('newsletter_unsubscribes.email', 'role_subscribers.email');
+                }),
+        ]);
     }
 
     public static function events(): Builder
