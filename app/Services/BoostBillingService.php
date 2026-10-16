@@ -12,6 +12,116 @@ use Illuminate\Support\Facades\Log;
 class BoostBillingService
 {
     /**
+     * Give back a payment made for a campaign that is not going to be created: refunded when the
+     * card was charged, cancelled while it is still on its way. The boost and promotion forms
+     * confirm the card in the browser before the request that creates the campaign, so every
+     * refusal after that comes through here, or the money is kept for nothing. Hosted only and
+     * never in tests (no Stripe); a failure is reported, never thrown, because the refusal it goes
+     * with still has to reach the advertiser.
+     *
+     * The id comes from the request, so it proves nothing about whose payment it is: only an
+     * intent that form ($type) made for that event for this person ($userId, intentIsFor()), and
+     * that no campaign holds, is touched. Anything else on the platform account (another
+     * advertiser's paid boost, a boost partner's monthly fee) would otherwise be refunded by
+     * naming its id in a refused request.
+     *
+     * Under the intent's lock (lockIntent()), as confirmPayment() is: a refused submit racing a
+     * valid one with the same intent would otherwise refund the payment the other was taking.
+     */
+    public function abandonPaymentIntent(?string $intentId, string $reason, string $keyPrefix, ?int $eventId, string $type, ?int $userId): void
+    {
+        if (! $intentId || ! $eventId || ! $userId || ! config('app.hosted') || config('app.is_testing')) {
+            return;
+        }
+
+        try {
+            $this->lockIntent($intentId, function () use ($intentId, $reason, $keyPrefix, $eventId, $type, $userId) {
+                if (BoostCampaign::where('stripe_payment_intent_id', $intentId)->exists()) {
+                    return;
+                }
+
+                $stripe = new \Stripe\StripeClient(config('services.stripe_platform.secret'));
+                $intent = $stripe->paymentIntents->retrieve($intentId);
+
+                if (! self::intentIsFor(self::metadataOf($intent), $type, $eventId, $userId)) {
+                    return;
+                }
+
+                if ($intent->status === 'succeeded') {
+                    $stripe->refunds->create(
+                        ['payment_intent' => $intent->id, 'metadata' => ['reason' => $reason]],
+                        ['idempotency_key' => $keyPrefix.$intent->id],
+                    );
+                } elseif (in_array($intent->status, ['requires_payment_method', 'requires_confirmation', 'requires_action', 'processing'])) {
+                    $stripe->paymentIntents->cancel($intent->id);
+                }
+            });
+        } catch (\Throwable $e) {
+            report($e);
+        }
+    }
+
+    /**
+     * Whether a PaymentIntent's metadata says the boost form ('boost') or the promotion form
+     * ('promo') made it for this event, for this person. Both forms write type, event_id and
+     * user_id; an intent without them was made by something else, or by somebody else, and is
+     * never given back or cancelled from a form's request.
+     *
+     * @param  array<string, mixed>  $metadata
+     */
+    public static function intentIsFor(array $metadata, string $type, int $eventId, int $userId): bool
+    {
+        return ($metadata['type'] ?? null) === $type
+            && isset($metadata['event_id'], $metadata['user_id'])
+            && (string) $metadata['event_id'] === (string) $eventId
+            && (string) $metadata['user_id'] === (string) $userId;
+    }
+
+    /**
+     * Whether a PaymentIntent is this campaign's to take or give back: made by the form that makes
+     * its kind ('promo' for a network promotion, 'boost' for Meta) for its event, and, where the
+     * form recorded who made it, by the person the campaign is for. (An intent made before the
+     * forms recorded the person is taken on the first two.) Both forms claim the posted intent id
+     * when the campaign is inserted, so this is asked before anything is taken, refunded or
+     * cancelled through a campaign.
+     *
+     * @param  array<string, mixed>  $metadata
+     */
+    public static function intentBelongsTo(array $metadata, BoostCampaign $campaign): bool
+    {
+        return ($metadata['type'] ?? null) === ($campaign->isNetwork() ? 'promo' : 'boost')
+            && isset($metadata['event_id'])
+            && (string) $metadata['event_id'] === (string) $campaign->event_id
+            && (! isset($metadata['user_id']) || (string) $metadata['user_id'] === (string) $campaign->user_id);
+    }
+
+    /**
+     * Whether any of an intent's money has been given back. Stripe leaves a refunded intent at
+     * "succeeded"; the refund is on its charge, which the caller expands (latest_charge).
+     */
+    public static function chargeWasRefunded(\Stripe\PaymentIntent $intent): bool
+    {
+        $charge = $intent->latest_charge ?? null;
+
+        return is_object($charge) && ((int) ($charge->amount_refunded ?? 0) > 0 || ! empty($charge->refunded));
+    }
+
+    /** @return array<string, mixed> */
+    private static function metadataOf(\Stripe\PaymentIntent $intent): array
+    {
+        return $intent->metadata ? $intent->metadata->toArray() : [];
+    }
+
+    /**
+     * One intent is taken (confirmPayment()) or given back (abandonPaymentIntent()) at a time.
+     * Throws LockTimeoutException when the other is still at Stripe after the wait.
+     */
+    private function lockIntent(string $intentId, \Closure $callback): mixed
+    {
+        return \Illuminate\Support\Facades\Cache::lock('boost_intent:'.$intentId, 60)->block(15, $callback);
+    }
+
+    /**
      * Issue the right refund when a campaign is cancelled or its event/schedule is deleted.
      *
      * This exists because the choice between a full and a partial refund was written out by
@@ -25,6 +135,12 @@ class BoostBillingService
      */
     public function refundOnCancellation(BoostCampaign $campaign): bool
     {
+        // A partner boost is paid to the partner and billed by Meta to the partner's ad
+        // account; the platform holds none of its money, so there is nothing to refund here.
+        if ($campaign->isPartner()) {
+            return false;
+        }
+
         $this->syncNetworkSpend($campaign);
 
         // Credit-funded campaigns settle locally - refundUnspent()/refundFull() both bail
@@ -71,6 +187,12 @@ class BoostBillingService
      */
     public function refundCreditRemainder(BoostCampaign $campaign): bool
     {
+        // A partner boost is paid to the partner and billed by Meta to the partner's ad
+        // account; the platform holds none of its money, so there is nothing to refund here.
+        if ($campaign->isPartner()) {
+            return false;
+        }
+
         return DB::transaction(function () use ($campaign) {
             $campaign = BoostCampaign::lockForUpdate()->find($campaign->id);
 
@@ -159,28 +281,57 @@ class BoostBillingService
     }
 
     /**
-     * Confirm a payment was successful and update records
+     * Confirm a payment was successful and update records.
+     *
+     * Under the intent's lock, so a refused submit giving the same intent back
+     * (abandonPaymentIntent()) cannot slip between the check and the charge. An intent that is not
+     * this campaign's (intentBelongsTo()), or whose money was given back, confirms nothing and is
+     * let go by the campaign: both forms claim the posted id at insert, and a campaign still
+     * holding somebody else's intent would refund or cancel it on the way out
+     * (cancelPaymentIntent(), refundFull()).
      */
     public function confirmPayment(BoostCampaign $campaign, string $paymentIntentId): bool
     {
+        // A partner boost is paid to the partner and billed by Meta to the partner's ad
+        // account; the platform holds none of its money, so there is nothing to refund here.
+        if ($campaign->isPartner()) {
+            return false;
+        }
+
+        try {
+            return $this->lockIntent($paymentIntentId, fn () => $this->confirmLockedPayment($campaign, $paymentIntentId));
+        } catch (\Illuminate\Contracts\Cache\LockTimeoutException $e) {
+            Log::warning('Boost Billing: payment intent busy, not confirmed', [
+                'campaign_id' => $campaign->id,
+                'payment_intent_id' => $paymentIntentId,
+            ]);
+
+            return false;
+        }
+    }
+
+    private function confirmLockedPayment(BoostCampaign $campaign, string $paymentIntentId): bool
+    {
         try {
             $stripe = new \Stripe\StripeClient(config('services.stripe_platform.secret'));
-            $paymentIntent = $stripe->paymentIntents->retrieve($paymentIntentId);
+            $paymentIntent = $stripe->paymentIntents->retrieve($paymentIntentId, ['expand' => ['latest_charge']]);
 
-            if ($paymentIntent->status === 'succeeded') {
-                // Verify payment intent belongs to this campaign's event
-                $intentEventId = $paymentIntent->metadata->event_id ?? null;
-                if ($intentEventId && (int) $intentEventId !== $campaign->event_id) {
-                    Log::error('Boost Billing: Payment intent event_id mismatch', [
-                        'campaign_id' => $campaign->id,
-                        'campaign_event_id' => $campaign->event_id,
-                        'intent_event_id' => $intentEventId,
-                        'payment_intent_id' => $paymentIntentId,
-                    ]);
+            $refunded = $paymentIntent->status === 'succeeded' && self::chargeWasRefunded($paymentIntent);
+            if (! self::intentBelongsTo(self::metadataOf($paymentIntent), $campaign) || $refunded) {
+                Log::error('Boost Billing: payment intent is not this campaign\'s to take', [
+                    'campaign_id' => $campaign->id,
+                    'payment_intent_id' => $paymentIntentId,
+                    'refunded' => $refunded,
+                ]);
 
-                    return false;
+                if ($campaign->stripe_payment_intent_id === $paymentIntentId) {
+                    $campaign->update(['stripe_payment_intent_id' => null]);
                 }
 
+                return false;
+            }
+
+            if ($paymentIntent->status === 'succeeded') {
                 // Always save the payment intent ID so refunds can be issued if needed
                 $campaign->update(['stripe_payment_intent_id' => $paymentIntentId]);
 
@@ -264,6 +415,12 @@ class BoostBillingService
      */
     public function refundFull(BoostCampaign $campaign): bool
     {
+        // A partner boost is paid to the partner and billed by Meta to the partner's ad
+        // account; the platform holds none of its money, so there is nothing to refund here.
+        if ($campaign->isPartner()) {
+            return false;
+        }
+
         return DB::transaction(function () use ($campaign) {
             $campaign = BoostCampaign::lockForUpdate()->find($campaign->id);
 
@@ -324,6 +481,12 @@ class BoostBillingService
      */
     public function cancelPaymentIntent(BoostCampaign $campaign): bool
     {
+        // A partner boost is paid to the partner and billed by Meta to the partner's ad
+        // account; the platform holds none of its money, so there is nothing to refund here.
+        if ($campaign->isPartner()) {
+            return false;
+        }
+
         if (! $campaign->stripe_payment_intent_id) {
             return false;
         }
@@ -331,6 +494,18 @@ class BoostBillingService
         try {
             $stripe = new \Stripe\StripeClient(config('services.stripe_platform.secret'));
             $paymentIntent = $stripe->paymentIntents->retrieve($campaign->stripe_payment_intent_id);
+
+            // An intent a campaign claimed but that is not its own (somebody else's id, posted
+            // with a submit that was then refused) is let go, never refunded or cancelled.
+            if (! self::intentBelongsTo(self::metadataOf($paymentIntent), $campaign)) {
+                Log::error('Boost Billing: not cancelling a payment intent that is not the campaign\'s', [
+                    'campaign_id' => $campaign->id,
+                    'payment_intent_id' => $campaign->stripe_payment_intent_id,
+                ]);
+                $campaign->update(['stripe_payment_intent_id' => null]);
+
+                return false;
+            }
 
             if ($paymentIntent->status === 'succeeded') {
                 return $this->refundFull($campaign);
@@ -358,6 +533,12 @@ class BoostBillingService
      */
     public function refundUnspent(BoostCampaign $campaign): bool
     {
+        // A partner boost is paid to the partner and billed by Meta to the partner's ad
+        // account; the platform holds none of its money, so there is nothing to refund here.
+        if ($campaign->isPartner()) {
+            return false;
+        }
+
         return DB::transaction(function () use ($campaign) {
             $campaign = BoostCampaign::lockForUpdate()->find($campaign->id);
 

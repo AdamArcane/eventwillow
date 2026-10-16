@@ -232,6 +232,65 @@
           $ticketsSoldOnLoad += array_sum(array_map('intval', (array) json_decode($ticketRow->sold ?: '[]', true)));
       }
   }
+
+  // Ticket presets (issue #130, App\Services\TicketPresets). The schedule whose presets these are is
+  // the event's own, never the one in the address. A team member the owner's switch binds sees only
+  // the presets on the Tickets tab (event/partials/ticket-presets-team) and posts none of its fields.
+  // Every sentence is built here: the owner's name is somebody's text, and the JSON directive splits
+  // its argument on commas.
+  $sellingRole = ($event->exists ? $event->ticketingRole() : null) ?? $role;
+  $presetState = $presetState ?? \App\Services\TicketPresets::formState($sellingRole, $event, $user);
+  $presetLocked = $canSeeTicketData && $presetState['locked'];
+  $presetOwner = $presetState['owner_name'];
+  // A press refused because the event is sold now comes back on what it has, not lit on the
+  // preset that could not be applied.
+  $presetPressRefused = $presetState['frozen'] && $errors->has('ticket_preset_id');
+  $presetLitNow = session()->hasOldInput('ticket_preset_id') && ! $presetPressRefused ? (string) old('ticket_preset_id', '') : (string) ($presetState['current_id'] ?? '');
+  $presetSavedId = (string) ($presetState['current_id'] ?? '');
+  $presetApplyNow = ! $presetPressRefused && (bool) old('ticket_preset_apply', false);
+  $presetLeadText = __('messages.ticket_preset_team_lead', ['owner' => $presetOwner]);
+  if ($event->exists && $presetSavedId === '') {
+      $presetLeadText = __('messages.ticket_preset_custom_lead');
+  }
+  $presetCopyNote = $presetState['copied_from']
+      ? __('messages.ticket_preset_copy_note', ['event' => $presetState['copied_from'], 'preset' => collect($presetState['presets'])->firstWhere('is_default', true)['label'] ?? '', 'owner' => $presetOwner])
+      : '';
+  $presetLiveSales = (int) $presetState['live_sales'];
+  if ($presetLocked) {
+      $presetFrozenText = $presetLiveSales > 0
+          ? __('messages.ticket_preset_frozen_team', ['owner' => $presetOwner])
+          : __('messages.ticket_preset_frozen_seating_team', ['owner' => $presetOwner]);
+  } else {
+      $presetFrozenText = $presetLiveSales > 0
+          ? __('messages.ticket_preset_frozen_owner')
+          : __('messages.ticket_preset_frozen_seating_owner');
+  }
+  // A sentence with a link in it, said in two halves around the link.
+  $presetNeedOther = array_pad(explode('__LINK__', __('messages.ticket_preset_need_other', ['owner' => $presetOwner, 'listing' => '__LINK__']), 2), 2, '');
+  $presetNoneYet = array_pad(explode('__LINK__', __('messages.ticket_preset_none_yet', ['link' => '__LINK__']), 2), 2, '');
+  $presetEventLines = [
+      'tickets' => $presetState['event_tickets_line'],
+      'payment' => $presetState['event_payment_line'],
+      'types' => $presetState['event_types_line'],
+  ];
+  // What the page's script says about presets, with :preset left for it to fill.
+  $presetWords = [
+      'custom' => __('messages.ticket_preset_custom'),
+      'older' => __('messages.ticket_preset_older', ['preset' => ':preset']),
+      'older_help' => __('messages.ticket_preset_older_help', ['event' => ':event', 'preset' => ':preset', 'now' => ':now']),
+      'changed' => __('messages.ticket_preset_changed', ['preset' => $presetState['current_label'] ?? '']),
+      'use_current' => __('messages.ticket_preset_use_current', ['preset' => $presetState['current_label'] ?? '']),
+      'replaces' => __('messages.ticket_preset_bar_replaces', ['preset' => ':preset']),
+      'updates' => __('messages.ticket_preset_bar_updates', ['preset' => ':preset']),
+      'adds' => __('messages.ticket_preset_bar_adds', ['preset' => ':preset']),
+      'replace_confirm' => __('messages.ticket_preset_replace_confirm', ['preset' => ':preset']),
+      'usual' => __('messages.ticket_preset_usual'),
+      'method_fallback' => __('messages.ticket_preset_method_fallback', ['preset' => ':preset', 'method' => ':method']),
+  ];
+  $presetSaveOn = (bool) old('save_ticket_preset');
+  $presetSaveName = (string) old('ticket_preset_name', '');
+  $presetSaveDefault = (bool) old('ticket_preset_default');
+  $presetsForPage = $canSeeTicketData && $presetState['is_member'] ? $presetState['presets'] : [];
 @endphp
 
 {{-- The step band, for the guest-submit flow only. A first event of one's own is walked by the
@@ -1818,15 +1877,38 @@
         @php
             $boostStaticDisabled = null;
             $activeBoost = null;
-            if (!config('services.meta.app_id')) {
+            // An event a boost partner covers is boosted as a request to that partner, which runs
+            // on the partner's own Page whether or not this site's Meta app is set up. Its open
+            // request (or one sent back for changes) is what the button shows and leads to.
+            $boostPartnerRequest = null;
+            $boostCoveredByPartner = \App\Models\BoostPartner::forEvent($event) !== null;
+            if ($boostCoveredByPartner) {
+                $boostPartnerRequest = \App\Models\BoostCampaign::viaPartner()->where('event_id', $event->id)
+                    ->whereIn('status', array_merge(\App\Models\BoostCampaign::PARTNER_OPEN_STATUSES, ['declined', 'rejected']))
+                    ->latest('id')->first();
+            }
+            if ($boostPartnerRequest) {
+                // Shown below as its state.
+            } elseif (! $boostCoveredByPartner && !config('services.meta.app_id')) {
                 $boostStaticDisabled = __('messages.boost_not_configured');
             } elseif (!$role->isPro()) {
                 $boostStaticDisabled = 'upgrade';
-            } else {
+            } elseif (! $boostCoveredByPartner) {
                 $activeBoost = $event->boostCampaigns()->whereIn('status', ['active', 'paused'])->first();
             }
+            $boostPartnerLabel = $boostPartnerRequest
+                ? __('messages.boost_partner_event_button', ['status' => __('messages.boost_partner_status_'.$boostPartnerRequest->status)])
+                : null;
         @endphp
-        @if ($activeBoost)
+        @if ($boostPartnerRequest)
+        <a href="{{ route('boost.show', ['hash' => $boostPartnerRequest->hashedId()]) }}"
+           class="inline-flex items-center justify-center rounded-lg bg-white dark:bg-gray-800 px-4 py-3 text-base font-semibold text-gray-900 dark:text-gray-100 shadow-sm border border-gray-300 dark:border-gray-600 hover:bg-gray-50 dark:hover:bg-gray-700 transition-all duration-200 focus:outline-none focus:ring-2 focus:ring-[var(--brand-blue)] focus:ring-offset-2 dark:focus:ring-offset-gray-800">
+            <svg class="me-2 h-5 w-5 {{ in_array($boostPartnerRequest->status, ['declined', 'rejected'], true) ? 'text-amber-500' : ($boostPartnerRequest->status === 'active' ? 'text-green-500' : 'text-gray-400') }}" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
+                <path d="M13.13 22.19L11.5 18.36C13.07 17.78 14.54 17 15.9 16.09L13.13 22.19M5.64 12.5L1.81 10.87L7.91 8.1C7 9.46 6.22 10.93 5.64 12.5M19.22 4C19.5 4 19.75 4 19.96 4.05C20.13 5.44 19.94 8.3 16.66 11.58C14.96 13.29 12.93 14.6 10.65 15.47L8.5 13.37C9.42 11.06 10.73 9.03 12.42 7.34C14.71 5.05 17.11 4.1 18.78 4.04C18.91 4 19.06 4 19.22 4Z"/>
+            </svg>
+            {{ $boostPartnerLabel }}
+        </a>
+        @elseif ($activeBoost)
         <a href="{{ route('boost.show', ['hash' => $activeBoost->hashedId()]) }}"
            class="inline-flex items-center justify-center rounded-lg bg-white dark:bg-gray-800 px-4 py-3 text-base font-semibold text-gray-900 dark:text-gray-100 shadow-sm border border-gray-300 dark:border-gray-600 hover:bg-gray-50 dark:hover:bg-gray-700 transition-all duration-200 focus:outline-none focus:ring-2 focus:ring-[var(--brand-blue)] focus:ring-offset-2 dark:focus:ring-offset-gray-800">
             <svg class="me-2 h-5 w-5 text-green-500" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
@@ -1945,7 +2027,14 @@
         </button>
         <div id="mobile-header-event-actions-pop-up-menu" class="ap-dropdown pop-up-menu hidden absolute {{ is_rtl() ? 'start-0' : 'end-0' }} z-10 mt-2 w-64 {{ is_rtl() ? 'origin-top-left' : 'origin-top-right' }} divide-y divide-gray-100 dark:divide-white/[0.06] rounded-lg ring-1 ring-black/5 dark:ring-white/[0.06] focus:outline-none" role="menu" aria-orientation="vertical" aria-labelledby="mobile-header-event-actions-menu-button" tabindex="-1">
             <div class="py-2" role="none" id="mobile-header-event-actions-pop-up-menu-items" data-popup-target="mobile-header-event-actions-pop-up-menu">
-                @if ($activeBoost)
+                @if ($boostPartnerRequest)
+                <a href="{{ route('boost.show', ['hash' => $boostPartnerRequest->hashedId()]) }}" class="group flex items-center px-5 py-3 text-sm text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700 focus:bg-gray-100 dark:focus:bg-gray-700 focus:outline-none transition-colors" role="menuitem" tabindex="0">
+                    <svg class="me-3 h-5 w-5 {{ in_array($boostPartnerRequest->status, ['declined', 'rejected'], true) ? 'text-amber-500' : ($boostPartnerRequest->status === 'active' ? 'text-green-500' : 'text-gray-400') }}" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
+                        <path d="M13.13 22.19L11.5 18.36C13.07 17.78 14.54 17 15.9 16.09L13.13 22.19M5.64 12.5L1.81 10.87L7.91 8.1C7 9.46 6.22 10.93 5.64 12.5M19.22 4C19.5 4 19.75 4 19.96 4.05C20.13 5.44 19.94 8.3 16.66 11.58C14.96 13.29 12.93 14.6 10.65 15.47L8.5 13.37C9.42 11.06 10.73 9.03 12.42 7.34C14.71 5.05 17.11 4.1 18.78 4.04C18.91 4 19.06 4 19.22 4Z"/>
+                    </svg>
+                    <div>{{ $boostPartnerLabel }}</div>
+                </a>
+                @elseif ($activeBoost)
                 <a href="{{ route('boost.show', ['hash' => $activeBoost->hashedId()]) }}" class="group flex items-center px-5 py-3 text-sm text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700 focus:bg-gray-100 dark:focus:bg-gray-700 focus:outline-none transition-colors" role="menuitem" tabindex="0">
                     <svg class="me-3 h-5 w-5 text-green-500" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
                         <path d="M13.13 22.19L11.5 18.36C13.07 17.78 14.54 17 15.9 16.09L13.13 22.19M5.64 12.5L1.81 10.87L7.91 8.1C7 9.46 6.22 10.93 5.64 12.5M19.22 4C19.5 4 19.75 4 19.96 4.05C20.13 5.44 19.94 8.3 16.66 11.58C14.96 13.29 12.93 14.6 10.65 15.47L8.5 13.37C9.42 11.06 10.73 9.03 12.42 7.34C14.71 5.05 17.11 4.1 18.78 4.04C18.91 4 19.06 4 19.22 4Z"/>
@@ -2093,6 +2182,11 @@
 
         @if ($event->exists)
         @method('put')
+        @if (! empty($returnMonth))
+        {{-- The calendar month Edit was pressed on: the save comes back to it (EventController::update()).
+             A refused save returns to this page's own address, which still carries it. --}}
+        <input type="hidden" name="return_month" value="{{ $returnMonth }}">
+        @endif
         @endif
 
 
@@ -2915,6 +3009,10 @@
                                 </span>
                             </div>
 
+                            @if ($presetLocked)
+                            @include('event.partials.ticket-presets-team')
+                            @else
+                            @include('event.partials.ticket-presets-chips')
                             <input type="hidden" name="rsvp_enabled" :value="event.rsvp_enabled ? 1 : 0">
                             <input type="hidden" name="tickets_enabled" :value="event.tickets_enabled ? 1 : 0">
                             <fieldset :class="{ 'mb-6': ticketChoice }">
@@ -3840,6 +3938,19 @@
                                 </div>
                                 @endif
 
+                                {{-- Razorpay with Test Mode keys, for the reason above: a plain redirect,
+                                     so the dropdown's "(Test mode)" suffix is all an owner would
+                                     otherwise see. Razorpay has no sandbox switch to forget; the key
+                                     itself decides (rzp_test_), so the way out is entering the live
+                                     keys. --}}
+                                @if (\App\Services\Payments\Razorpay\RazorpayClient::isTestKey($paymentGateways->get('razorpay')?->credentialsFor($user)['razorpay_key_id'] ?? null))
+                                <div class="mb-6 bg-amber-50 dark:bg-amber-900/20 border border-amber-200 dark:border-amber-700 rounded-lg p-3 flex items-start gap-2"
+                                     v-show="event.tickets_enabled && event.payment_method === 'razorpay'">
+                                    <svg class="w-5 h-5 text-amber-600 dark:text-amber-400 flex-shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="1.5" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" d="M12 9v3.75m-9.303 3.376c-.866 1.5.217 3.374 1.948 3.374h14.71c1.73 0 2.813-1.874 1.948-3.374L13.949 3.378c-.866-1.5-3.032-1.5-3.898 0L2.697 16.126ZM12 15.75h.007v.008H12v-.008Z" /></svg>
+                                    <div class="text-sm text-amber-800 dark:text-amber-200">{{ __('messages.razorpay_test_mode_warning') }}</div>
+                                </div>
+                                @endif
+
                                 @if ($connectedGateways || $storedGateway)
                                 <div class="mb-6">
                                     <x-input-label for="payment_method" :value="__('messages.payment_method')"/>
@@ -4525,27 +4636,43 @@
 
                             </div>
 
-                            {{-- Saving this as the default belongs to a choice that has been made. --}}
-                            <div v-cloak v-show="ticketChoice || ticketsTouched">
+                            {{-- Saving these tickets as a preset belongs to a choice that has been made. Whoever may
+                                 change the schedule's presets (TicketPresets::mayEdit()): its owner, and its
+                                 editors while the team does not pick from presets. Off until pressed: on, a
+                                 Publish would quietly rewrite a preset for the whole schedule, so the save bar
+                                 says it too. --}}
+                            @if ($presetState['may_edit'])
+                            <div v-cloak v-show="ticketChoice || ticketsTouched" id="save-ticket-preset">
                             <hr class="my-4 border-gray-200 dark:border-gray-700">
-
-                            @if ($user->isMember($subdomain))
-                            {{-- Saving the ticket set as this schedule's default is not a Pro feature at
-                                 all; it only carried the blanket non-Pro wrapper because it sat next to
-                                 the ticket area. --}}
                             <div class="flex items-center gap-3 mt-3">
                                 <label class="relative w-11 h-6 cursor-pointer flex-shrink-0">
-                                    <input id="save_default_tickets" name="save_default_tickets" type="checkbox"
+                                    <input id="save_ticket_preset" name="save_ticket_preset" type="checkbox" value="1" v-model="savePreset.on"
                                         class="sr-only peer">
                                     <div class="w-11 h-6 bg-gray-300 dark:bg-gray-600 rounded-full peer-checked:bg-[var(--brand-button-bg)] transition-colors"></div>
                                     <div class="absolute top-0.5 ltr:left-0.5 rtl:right-0.5 w-5 h-5 bg-white rounded-full shadow-md transition-transform duration-200 peer-checked:ltr:translate-x-5 peer-checked:rtl:-translate-x-5"></div>
                                 </label>
-                                <label for="save_default_tickets" class="text-sm font-medium text-gray-700 dark:text-gray-300 cursor-pointer">
-                                    {{ __('messages.save_as_default') }}
+                                <label for="save_ticket_preset" class="text-sm font-medium text-gray-700 dark:text-gray-300 cursor-pointer">
+                                    {{ __('messages.ticket_preset_save') }}
                                 </label>
                             </div>
-                            @endif
+                            <div v-show="savePreset.on" class="mt-3 ms-14 max-w-xl">
+                                <x-input-label for="ticket_preset_name" :value="__('messages.ticket_preset_name')" />
+                                <x-text-input id="ticket_preset_name" name="ticket_preset_name" type="text" maxlength="100" class="mt-1 block w-full"
+                                    v-model="savePreset.name" v-bind:disabled="! savePreset.on" />
+                                <p class="mt-1 mb-3 text-xs text-gray-500 dark:text-gray-400">{{ __('messages.ticket_preset_name_help') }}</p>
+                                <div class="flex items-center gap-3">
+                                    <label class="relative w-11 h-6 cursor-pointer flex-shrink-0">
+                                        <input id="ticket_preset_default" name="ticket_preset_default" type="checkbox" value="1" v-model="savePreset.isDefault"
+                                            v-bind:disabled="! savePreset.on" class="sr-only peer">
+                                        <div class="w-11 h-6 bg-gray-300 dark:bg-gray-600 rounded-full peer-checked:bg-[var(--brand-button-bg)] transition-colors"></div>
+                                        <div class="absolute top-0.5 ltr:left-0.5 rtl:right-0.5 w-5 h-5 bg-white rounded-full shadow-md transition-transform duration-200 peer-checked:ltr:translate-x-5 peer-checked:rtl:-translate-x-5"></div>
+                                    </label>
+                                    <label for="ticket_preset_default" class="text-sm font-medium text-gray-700 dark:text-gray-300 cursor-pointer">{{ __('messages.ticket_preset_use_for_new') }}</label>
+                                </div>
                             </div>
+                            </div>
+                            @endif
+                            @endif
 
                         </div>
                     </div>
@@ -6072,6 +6199,10 @@
                             <button type="button" class="event-link" @click="goToTab('section-listing')" v-text="barStatus.visibility"></button>
                         </span>
                         @endif
+                        <span v-if="barStatus.tickets" class="event-save-pair ms-4">
+                            <span v-text="tabLabels.tickets + ':'"></span>
+                            <button type="button" class="event-link" @click="goToTab('section-tickets')"><bdi v-text="barStatus.tickets"></bdi></button>
+                        </span>
                     </span>
                 </div>
 
@@ -6465,6 +6596,29 @@
         agendaImportOpen: false,
         agendaPromptOpen: false,
         ticketsTouched: false,
+        // Ticket presets (App\Services\TicketPresets): the schedule's presets, the one the tab still
+        // matches (presetLit, '' once it is edited by hand), the one the event was saved with, and,
+        // for a team member the owner's switch binds, whether they pressed one (presetApply).
+        presets: @json($presetsForPage),
+        presetLit: @json($presetLitNow),
+        presetSaved: @json($presetSavedId),
+        presetApply: @json($presetApplyNow),
+        presetLocked: @json($presetLocked),
+        presetFrozen: @json((bool) $presetState['frozen']),
+        presetStale: @json((bool) $presetState['stale']),
+        presetEvent: @json($presetEventLines),
+        presetWords: @json($presetWords),
+        presetCurrencyLocked: @json((bool) ($currencyLocked ?? false)),
+        presetApplying: false,
+        // The owner pressed the preset the event has after it changed, which rebuilds its types.
+        presetRebuilt: false,
+        // The name of the last preset pressed, for the bar when its chip could not stay lit.
+        presetPressed: '',
+        presetEditedSince: false,
+        // Set once the page has settled: what it does on load is not a hand edit.
+        presetArmed: false,
+        presetMethodNote: '',
+        savePreset: { on: @json($presetSaveOn), name: @json($presetSaveName), isDefault: @json($presetSaveDefault) },
         // What is SAVED for tickets, for the save bar to compare the choice on screen against.
         savedTicketMode: @json($event->exists && $event->tickets_enabled ? 'tickets' : ($event->exists && $event->rsvp_enabled ? 'rsvp' : 'external')),
         savedTicketTypes: @json($event->exists && $canSeeTicketData ? $event->tickets->count() : 0),
@@ -6978,8 +7132,16 @@
         if (section && section.id) {
           this.sectionDirty[section.id] = true;
           this.clearTabError(section.id);
+          this.notePresetEdit(section.id);
         }
         this.isDirty = true;
+      },
+      // Typed or pressed on the Tickets tab since the last preset was applied: a promo code, an
+      // add-on, a description. Another chip would replace it, so it asks first (applyPreset()).
+      notePresetEdit(sectionId) {
+        if (sectionId === 'section-tickets' && ! this.presetApplying) {
+          this.presetEditedSince = true;
+        }
       },
       markTabDirty(sectionId) {
         if (! this.dirtyArmed) {
@@ -6988,6 +7150,7 @@
         this.sectionDirty[sectionId] = true;
         this.clearTabError(sectionId);
         this.isDirty = true;
+        this.notePresetEdit(sectionId);
       },
       // A tab a refused save pointed at stops being pointed at once something on it is changed.
       // The list was never emptied, so the bar read "Check: ..." for as long as the page was
@@ -7046,6 +7209,168 @@
       // The three tiles at the top of the Tickets tab, and "Not needed" (null). They set the
       // tab's own mode. A tile that is already on does nothing: switching off is "Not needed"
       // and nothing else, because off is not a small thing (below).
+      // A team member's preset tile (event/partials/ticket-presets-team). Pressed, the server lays
+      // the preset's tickets over the event's (EventRepo::saveEvent()); Custom, or the preset the
+      // event already has, keeps what is stored.
+      pickPreset(preset) {
+        if (preset && ! preset.usable) {
+          return;
+        }
+        var id = preset ? preset.id : '';
+        if (this.presetFrozen && id !== this.presetLit) {
+          return;
+        }
+        var apply = !! preset && (! this.eventIsSaved || id !== this.presetSaved);
+        // The tile already pressed: nothing changes, and nothing is marked unsaved.
+        if (id === this.presetLit && apply === this.presetApply) {
+          return;
+        }
+        this.presetLit = id;
+        this.presetApply = apply;
+        this.markTabDirty('section-tickets');
+      },
+      // "Use Regular's current prices": the preset the event has, applied again after the owner
+      // changed it.
+      refreshPreset() {
+        this.presetLit = this.presetSaved;
+        this.presetApply = true;
+        this.markTabDirty('section-tickets');
+      },
+      presetTileTitle(preset) {
+        return this.presetStaleShown && preset.id === this.presetSaved
+          ? this.presetWords.older.split(':preset').join(preset.label)
+          : preset.label;
+      },
+      presetTileHelp(preset) {
+        return this.presetStaleShown && preset.id === this.presetSaved
+          ? this.presetWords.older_help.split(':event').join(this.presetEvent.types).split(':preset').join(preset.label).split(':now').join(preset.tile)
+          : preset.tile;
+      },
+      // The owner's chip (event/partials/ticket-presets-chips): fill the tab from the preset, as
+      // EventRepo::saveEvent() would apply it. Asks first when it would replace what was typed.
+      applyPreset(preset) {
+        var input = preset && preset.input;
+        if (this.presetFrozen || ! input) {
+          return;
+        }
+        // The chip the tab already stands on does nothing: pressed again it would rebuild every
+        // ticket type as new. Unless the preset changed after the event was saved with it, when
+        // pressing it is how the event takes the new prices (and the save bar says so).
+        var refreshing = this.presetStale && preset.id === this.presetSaved;
+        if (preset.id === this.presetLit && ! refreshing) {
+          return;
+        }
+        if (((this.presetLit === '' && this.sectionDirty['section-tickets']) || this.presetEditedSince)
+          && ! window.confirm(this.presetWords.replace_confirm.split(':preset').join(preset.label))) {
+          return;
+        }
+        var self = this;
+        var e = this.event;
+        this.presetApplying = true;
+
+        // The preset copied from the old single default never said how people sign up, and leaves
+        // the tab's choice as it is.
+        if (preset.kind_set !== false) {
+          this.externalChosen = false;
+          this.ticketMode = input.tickets_enabled ? 'tickets' : (input.rsvp_enabled ? 'rsvp' : 'external');
+          e.rsvp_limit = input.rsvp_limit;
+          // A link or a price left behind under "Tickets elsewhere" would still be shown to guests.
+          e.registration_url = '';
+          e.ticket_price = null;
+          e.coupon_code = '';
+          e.coupon_discount = null;
+        }
+        if (! this.presetCurrencyLocked) {
+          e.ticket_currency_code = input.ticket_currency_code;
+        }
+        // A method this person's account does not offer stays as it is, and the tab says so.
+        this.presetMethodNote = '';
+        if (Object.prototype.hasOwnProperty.call(this.paymentLabels, input.payment_method)) {
+          e.payment_method = input.payment_method;
+        } else if (input.tickets_enabled) {
+          this.presetMethodNote = this.presetWords.method_fallback.split(':preset').join(preset.label).split(':method').join(preset.payment_label);
+        }
+        e.payment_instructions = input.payment_instructions || '';
+        e.ticket_notes = input.ticket_notes;
+        // These two are markdown editors (EasyMDE, resources/js/app.js), which keep their own text and
+        // write it back into the field on submit: the model alone would leave the old preset's
+        // instructions on screen and in the save.
+        ['payment_instructions', 'ticket_notes'].forEach(function (id) {
+          var field = document.getElementById(id);
+          if (field && field._easyMDE) {
+            field._easyMDE.value(e[id] || '');
+          }
+        });
+        ['ask_phone', 'require_phone', 'country_code_phone', 'individual_tickets', 'individual_ticket_fields', 'sell_after_start', 'show_unavailable_tickets', 'installments_enabled'].forEach(function (field) {
+          e[field] = !! input[field];
+        });
+        ['installment_count', 'installment_final_days_before', 'installment_min_order_amount', 'terms_url', 'total_tickets_mode'].forEach(function (field) {
+          e[field] = input[field];
+        });
+        e.expire_unpaid_tickets = input.expire_unpaid_tickets || 0;
+        this.showExpireUnpaid = (parseInt(input.expire_unpaid_tickets, 10) || 0) > 0;
+        try {
+          this.eventCustomFields = JSON.parse(input.custom_fields) || {};
+        } catch (err) {
+          this.eventCustomFields = {};
+        }
+        // A seating plan maps the types a preset replaces (a copy of an event that had one), and is
+        // cleared as the server clears it (TicketPreset::toEventInput()).
+        if (Object.prototype.hasOwnProperty.call(input, 'seating_plan_id')) {
+          e.seating_plan_id = input.seating_plan_id || '';
+        }
+        if (input.tickets_enabled) {
+          document.querySelectorAll('#section-tickets textarea[name^="tickets["]').forEach(function (field) {
+            if (field._easyMDE) {
+              field._easyMDE._stopEditorObserver?.();
+              field._easyMDE.toTextArea();
+            }
+          });
+          this.tickets = [];
+          (input.tickets || []).forEach(function (row) {
+            self.addTicket();
+            var ticket = self.tickets[self.tickets.length - 1];
+            ticket.type = row.type || '';
+            ticket.price = row.price === null || row.price === undefined || row.price === '' ? null : parseFloat(row.price);
+            ticket.quantity = row.quantity || null;
+            ticket.description = row.description || '';
+            ticket.max_per_order = row.max_per_order || null;
+            try { ticket.custom_fields = JSON.parse(row.custom_fields || '{}') || {}; } catch (err) { ticket.custom_fields = {}; }
+            try { ticket.volume_discount = row.volume_discount ? JSON.parse(row.volume_discount) : null; } catch (err) { ticket.volume_discount = null; }
+          });
+          this.promoCodes = (input.promo_codes || []).map(function (code) {
+            return {
+              id: null, code: code.code || '', type: code.type || 'percentage',
+              value: code.value ? parseFloat(code.value) : null, max_uses: code.max_uses || null, times_used: 0,
+              expires_at_date: '', expires_at_time: '', is_active: !! code.is_active, ticket_ids: [],
+            };
+          });
+          this.addons = (input.addons || []).map(function (addon, i) {
+            return {
+              id: null, _key: 'preset_' + Date.now() + '_' + i, type: addon.type || '', quantity: addon.quantity ?? null,
+              max_per_order: addon.max_per_order ?? null, price: addon.price ?? null, description: addon.description || '',
+              image_url: null, url: addon.url || '', remove_image: false,
+            };
+          });
+        }
+        // A method the account could not take was left as it was, so the tab is not the preset.
+        this.presetLit = this.presetMethodNote ? '' : preset.id;
+        this.presetRebuilt = this.presetRebuilt || (this.eventIsSaved && this.savedTicketTypes > 0 && !! input.tickets_enabled);
+        this.presetPressed = preset.label;
+        this.ticketsTouched = true;
+        this.markTabDirty('section-tickets');
+        // Pressed again to take the preset as it is now: the tab matches it, and the note goes.
+        this.presetStale = false;
+        this.$nextTick(function () {
+          self.presetApplying = false;
+          self.presetEditedSince = false;
+          // The rebuilt types are new rows: their description boxes want an editor too, which the
+          // tickets.length watcher misses when the count did not change.
+          if (typeof window.initHtmlEditors === 'function') {
+            window.initHtmlEditors();
+          }
+        });
+      },
       chooseTickets(choice) {
         var was = this.ticketChoice;
         if (choice === was) {
@@ -8124,8 +8449,9 @@
         this.dateTimeErrorField = '';
         this.markDateTimeFields();
 
-        // Check custom fields if tickets are enabled
-        if (this.event.tickets_enabled) {
+        // Check custom fields if tickets are enabled. Not for a team member the preset switch binds:
+        // their tab has none of these fields, and the server keeps or replaces the tickets whole.
+        if (this.event.tickets_enabled && ! this.presetLocked) {
           const hasInvalidEventFields = Object.values(this.eventCustomFields || {}).some(field => !field.name);
           const hasInvalidTicketFields = this.tickets.some(ticket =>
             Object.values(ticket.custom_fields || {}).some(field => !field.name)
@@ -9231,6 +9557,69 @@
           add_ons: names(this.addons, 'type') ? { text: names(this.addons, 'type'), empty: false } : { text: this.tabLabels.none, empty: true },
         };
       },
+      // Ticket presets: the one the tab stands on, and what the team's tab says about it.
+      presetChosen() {
+        var self = this;
+        return this.presets.find(function (preset) { return preset.id === self.presetLit; }) || null;
+      },
+      // The tab's way of signing up is the chosen preset's (TicketPreset::effectiveKind()).
+      presetFitsMode() {
+        var chosen = this.presetChosen;
+        return !! chosen && (chosen.kind === 'none' ? null : chosen.kind) === this.ticketChoice;
+      },
+      presetsUnusable() {
+        return this.presets.filter(function (preset) { return ! preset.usable; });
+      },
+      presetShowsCustom() {
+        return this.eventIsSaved && this.presetSaved === '';
+      },
+      presetStaleShown() {
+        return this.presetStale && ! this.presetFrozen && this.presetSaved !== '' && this.presetLit === this.presetSaved && ! this.presetApply;
+      },
+      // What the event will have: its own tickets until a preset is pressed.
+      presetPicked() {
+        var chosen = this.presetChosen;
+        if (chosen && (this.presetApply || ! this.eventIsSaved)) {
+          return { tickets: chosen.tickets_line, payment: chosen.payment_line };
+        }
+        return { tickets: this.presetEvent.tickets, payment: this.presetEvent.payment };
+      },
+      // What a preset decides, as TicketPreset::matches() compares it: a change to any of it by
+      // hand means the tab no longer stands on the preset.
+      presetFingerprint() {
+        var e = this.event;
+        return JSON.stringify([this.ticketMode, e.ticket_currency_code || '', e.payment_method || '', e.payment_instructions || '', e.rsvp_limit || '',
+          this.tickets.map(function (t) { return [t.type || '', t.price === null || t.price === '' || t.price === undefined ? null : Number(t.price), t.quantity || null]; })]);
+      },
+      // "Saving replaces this event's tickets with Special's": a preset pressed on a saved event.
+      presetReplaces() {
+        var chosen = this.presetChosen;
+        if (! this.eventIsSaved) {
+          return '';
+        }
+        if (this.presetLocked) {
+          return chosen && this.presetApply ? this.presetWords.replaces.split(':preset').join(chosen.label) : '';
+        }
+        // Pressed, then switched to free registration or Not needed: Save deletes the types, and the
+        // bar's own lines say so.
+        if (this.ticketMode !== 'tickets') {
+          return '';
+        }
+        var label = chosen && this.presetLit !== this.presetSaved ? chosen.label : (this.presetRebuilt ? this.presetPressed : '');
+        return label && this.savedTicketTypes > 0 ? this.presetWords.replaces.split(':preset').join(label) : '';
+      },
+      // "Also updates the preset Regular" / "Also adds the preset Late night".
+      presetSaveNote() {
+        if (! this.savePreset.on) {
+          return '';
+        }
+        // No name: the preset the tab stands on, which the save links the event to, else the
+        // default (TicketPresets::saveFromEvent()).
+        var name = (this.savePreset.name || '').trim()
+          || (this.presetChosen || this.presets.find(function (p) { return p.is_default; }) || { label: this.presetWords.usual }).label;
+        var exists = this.presets.some(function (preset) { return preset.label.toLowerCase() === name.toLowerCase(); });
+        return (exists ? this.presetWords.updates : this.presetWords.adds).split(':preset').join(name);
+      },
       anyTicketPriced() {
         return this.tickets.some(function (ticket) { return parseFloat(ticket.price) > 0; });
       },
@@ -9243,7 +9632,17 @@
         };
 
         var tickets;
-        if (this.event.tickets_enabled) {
+        if (this.presetLocked) {
+          // A bound team member's tab: the preset pressed, or what the event has.
+          var picked = this.presetChosen;
+          tickets = { text: picked && (this.presetApply || ! this.eventIsSaved) ? picked.chip : (picked ? picked.label + ' \u00b7 ' + this.presetEvent.types : this.presetEvent.types), empty: false };
+        } else if (this.presetFitsMode
+          && (! this.eventIsSaved || this.presetLit !== this.presetSaved || this.presetRebuilt)
+          && ! this.tickets.some(function (t) { return self.soldCount(t) > 0; })) {
+          // A preset just pressed (or a new event's default). A saved event keeps saying what it
+          // has, which may be older prices than the preset's.
+          tickets = { text: this.presetChosen.chip, empty: false };
+        } else if (this.event.tickets_enabled) {
           var sold = this.tickets.reduce(function (n, t) { return n + self.soldCount(t); }, 0);
           // "42/120" only where there is one pool to be out of: a recurring event sells each date
           // on its own.
@@ -9317,11 +9716,20 @@
         }
         // What saving will remove. Said before anything else that is not an error, and all of it.
         var removes = [];
-        if (this.savedTicketMode === 'tickets' && this.savedTicketTypes > 0 && this.ticketMode !== 'tickets') {
-          removes.push(L.saving_removes_tickets);
+        // A preset pressed on a saved event says what it replaces, once, in place of the two lines
+        // about switching tickets off.
+        if (this.presetReplaces) {
+          removes.push(this.presetReplaces);
+        } else {
+          if (this.savedTicketMode === 'tickets' && this.savedTicketTypes > 0 && this.ticketMode !== 'tickets') {
+            removes.push(L.saving_removes_tickets);
+          }
+          if (this.savedTicketMode === 'tickets' && this.savedAddonCount > 0 && this.ticketMode !== 'tickets') {
+            removes.push(L.saving_removes_addons);
+          }
         }
-        if (this.savedTicketMode === 'tickets' && this.savedAddonCount > 0 && this.ticketMode !== 'tickets') {
-          removes.push(L.saving_removes_addons);
+        if (this.presetSaveNote) {
+          removes.push(this.presetSaveNote);
         }
         if (! this.agendaShowTimes && this.eventParts.some(function (part) { return part.start_time || part.end_time; })) {
           removes.push(L.saving_removes_times);
@@ -9336,6 +9744,9 @@
           return {
             kind: 'new',
             visibility: L.visibility[this.visibility],
+            // The tickets a new event will have, named, so a default preset is never taken unseen.
+            // A bound member's tab shows no mode: the tile they pressed is what Save applies.
+            tickets: this.presetChosen && (this.presetLocked || this.presetFitsMode) ? this.presetChosen.chip : '',
           };
         }
         if (this.visibility !== this.savedVisibility && (this.visibility === 'public' || this.savedVisibility === 'public')) {
@@ -9607,6 +10018,13 @@
           }).catch(() => {});
         },
       },
+      // The note that a preset's method could not be used is about that press: a method picked
+      // by hand after it answers it.
+      'event.payment_method'() {
+        if (! this.presetApplying) {
+          this.presetMethodNote = '';
+        }
+      },
       'tickets.length'() {
         this.$nextTick(() => {
           if (typeof window.initHtmlEditors === 'function') {
@@ -9725,6 +10143,11 @@
         },
         deep: true
       },
+      presetFingerprint() {
+        if (! this.presetApplying && ! this.presetLocked && this.presetArmed) {
+          this.presetLit = '';
+        }
+      },
       ticketMode(newValue) {
         this.event.tickets_enabled = (newValue === 'tickets');
         this.event.rsvp_enabled = (newValue === 'rsvp');
@@ -9767,6 +10190,20 @@
     },
     mounted() {
       this.showMemberTypeRadio = this.selectedMembers.length === 0;
+      setTimeout(() => {
+        this.presetArmed = true;
+      }, 800);
+      // The two markdown editors (EasyMDE) keep their own text and write it to their field only on
+      // submit, but announce each edit with a `change` on the field (resources/js/app.js). Heard on
+      // the document, so it does not matter when the editors were made: the model follows, and a
+      // hand edit to the instructions puts the lit preset chip out (presetFingerprint).
+      document.addEventListener('change', (ev) => {
+        var field = ev.target;
+        if (! field || (field.id !== 'payment_instructions' && field.id !== 'ticket_notes') || ! field._easyMDE || this.presetApplying) {
+          return;
+        }
+        this.event[field.id] = field._easyMDE.value();
+      });
       // The add form's phone field, wired once: its element is always on the page.
       this.$nextTick(() => this.initPhoneInput('member_phone_input', (number) => { this.memberPhone = number; }));
       this.$nextTick(() => updateRecurringFieldVisibility());

@@ -117,12 +117,20 @@
             'initial' => $initialSlots,
             'scheduleTz' => $initialSlots['schedule_timezone'] ?? config('app.timezone'),
             'scheduleName' => $role->name,
+            // "with Sam": the team member the booking is made with, by name only. A booking being
+            // moved keeps the host it was made with, so its own stamp wins over the type's.
+            'hostLine' => ($hostName = ($isReschedule && $event) ? $event->appointmentHostName() : $type->hostName())
+                ? __('messages.appointments_with_host', ['name' => $hostName])
+                : '',
             'typeName' => $type->name,
             'typeDescription' => $type->description,
             'duration' => $type->duration_minutes,
             // MoneyUtils, not raw concatenation: "JPY 5000.00" should read "¥5,000".
             'priceLabel' => $type->isFree() ? __('messages.free') : \App\Utils\MoneyUtils::format((float) $type->price, $type->currency_code),
             'isFree' => $type->isFree(),
+            // Whether Confirm leaves this page for a payment page, which the button then says while it
+            // waits (a PayPal order is created on the server first). Cash confirms here.
+            'paysOnline' => ! $type->isFree() && \App\Models\AppointmentType::paysOnline($type->payment_method),
             'requiresApproval' => (bool) $type->requires_approval,
             'askPhone' => (bool) $type->ask_phone,
             'requirePhone' => (bool) $type->require_phone,
@@ -176,6 +184,7 @@
                 'currentSlotTag' => __('messages.appointments_current_slot_tag'),
                 'retry' => __('messages.retry'),
                 'loading' => __('messages.loading'),
+                'redirectingToPayment' => __('messages.redirecting_to_payment'),
                 'prevMonth' => __('messages.previous_month'),
                 'nextMonth' => __('messages.next_month'),
                 'timezone' => __('messages.timezone'),
@@ -269,6 +278,7 @@
                 <a :href="backUrl" class="text-xs text-gray-500 dark:text-gray-400 hover:underline"><span class="inline-block rtl:rotate-180">&larr;</span> @{{ mode === 'reschedule' ? t.rescheduleKeep : t.back }}</a>
                 <h1 class="text-xl font-bold text-gray-900 dark:text-gray-100 mt-2">@{{ typeName }}</h1>
                 <p class="text-sm text-gray-600 dark:text-gray-400">@{{ scheduleName }}</p>
+                <p v-if="hostLine" class="text-sm text-gray-600 dark:text-gray-400">@{{ hostLine }}</p>
                 {{-- One wrapped row of facts rather than four stacked lines. Below md the rail sits
                      above the calendar, so every line here is a line the picker starts further down.
                      Where the appointment happens is part of it: the guest could not see that at all
@@ -606,6 +616,9 @@
                         nextAvailable: null,
                         fieldErrors: {},
                         submitting: false,
+                        // The booking's own page, once one exists (book() answers it beside the
+                        // redirect). See the pageshow listener in mounted().
+                        bookedManageUrl: null,
                         website: '',
                         turnstileToken: '',
                         turnstileWidgetId: null,
@@ -740,7 +753,8 @@
                     },
                     ctaLabel() {
                         // Online payment happens immediately (fanOut routes to checkout before the
-                        // approval check), so payment wording wins for stripe/payment_url types.
+                        // approval check), so payment wording wins for every priced type.
+                        if (this.submitting && this.paysOnline) return this.t.redirectingToPayment;
                         if (!this.isFree) return this.t.confirmAndPay;
                         return this.requiresApproval ? this.t.requestThisTime : this.t.confirmBooking;
                     },
@@ -923,13 +937,25 @@
 
                         return await this.post(fd);
                     },
+                    postTo(url) {
+                        var f = document.createElement('form');
+                        f.method = 'POST'; f.action = url;
+                        var t = document.createElement('input');
+                        t.type = 'hidden'; t.name = '_token'; t.value = this.csrf;
+                        f.appendChild(t); document.body.appendChild(f); f.submit();
+                    },
                     async post(fd) {
                         try {
                             var res = await fetch(this.bookUrl, { method: 'POST', headers: { 'X-CSRF-TOKEN': this.csrf, 'Accept': 'application/json' }, body: fd });
                             if (res.status === 419) { this.error = this.t.sessionExpired; this.submitting = false; return; }
                             var j;
                             try { j = await res.json(); } catch (pe) { this.error = this.t.sessionExpired; this.submitting = false; return; }
+                            if (res.ok && j.manage_url) { this.bookedManageUrl = j.manage_url; }
                             if (res.ok && j.redirect_url) { window.location = j.redirect_url; return; }
+                            // A gateway other than Stripe or the payment URL is started by the pay
+                            // step as a real form post, so its driver may answer with a page of its
+                            // own rather than a redirect a fetch could hand back.
+                            if (res.ok && j.pay_url) { this.postTo(j.pay_url); return; }
                             if (j.error === undefined && j.errors) {
                                 this.fieldErrors = {};
                                 var leftovers = [];
@@ -968,6 +994,16 @@
                     },
                 },
                 mounted() {
+                    // Back from the payment page by the browser's Back button: the browser restores
+                    // this page as it was left, with Confirm still busy, and the slot it offers is
+                    // now held by this very booking. So a guest who has booked goes to the booking's
+                    // own page, where they can pay or cancel; anything else gets its button back.
+                    // The same listener the ticket form has (event/tickets).
+                    window.addEventListener('pageshow', (event) => {
+                        if (!event.persisted) return;
+                        if (this.bookedManageUrl) { window.location.replace(this.bookedManageUrl); return; }
+                        this.submitting = false;
+                    });
                     if (this.turnstileEnabled && this.turnstileSiteKey) {
                         var self = this;
                         var renderWidget = function () {

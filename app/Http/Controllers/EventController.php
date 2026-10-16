@@ -47,6 +47,7 @@ use App\Services\EventLifecycleService;
 use App\Services\LinkImportService;
 use App\Services\OneSignalService;
 use App\Services\RequestNotifier;
+use App\Services\TicketPresets;
 use App\Services\UsageTrackingService;
 use App\Utils\AiImageIssuance;
 use App\Utils\ColorUtils;
@@ -474,7 +475,10 @@ class EventController extends Controller
         // the funnel's saved_event stage (GrowthExportService, createdEvents).
         $isFirstEventRun = ! session('pending_request')
             && ! is_demo_mode()
-            && $user->createdEvents()->doesntExist();
+            && $user->createdEvents()->doesntExist()
+            // A team member the owner's preset switch binds adds events on the owner's account
+            // (EventRepo::saveEvent()), so they would never stop counting as having made none.
+            && ! TicketPresets::lockedFor($user, $role);
 
         $event = new Event;
         $event->user_id = $user->id;
@@ -536,57 +540,42 @@ class EventController extends Controller
             $clonedFlyerImage = $clonedData['flyer_image_filename'] ?? null;
             $clonedFlyerImageUrl = $clonedFlyerImage ? $event->getFlyerImageUrlAttribute($clonedFlyerImage) : null;
 
+            // The source's preset, only if it is this schedule's own (a copy can be made through
+            // another schedule, and a template can outlive its preset). A team member the preset
+            // switch binds starts from that preset, or from the default with a word about why.
+            $clonedPreset = TicketPresets::find($role, $clonedData['event']['ticket_preset_id'] ?? null);
+            $event->ticket_preset_id = $clonedPreset?->id;
+            if (TicketPresets::lockedFor($user, $role)) {
+                if (! $clonedPreset) {
+                    $presetCopiedFrom = $clonedData['event']['name'] ?? null;
+                    $clonedPreset = TicketPresets::defaultFor($role);
+                }
+                if ($clonedPreset) {
+                    $defaultPromoCodes = TicketPresets::applyToModel($event, $clonedPreset);
+                }
+                // A preset's ticket types carry no seating bands.
+                $event->seating_plan_id = null;
+            } elseif ($clonedPreset && ! $clonedPreset->matches($event)) {
+                // The copy has the source's tickets, which are not the preset's any more (it changed
+                // since, or the source was edited by hand): its chip lit over them would name prices
+                // the copy does not have.
+                $event->ticket_preset_id = null;
+            }
+
             // Clear cloned data from session
             session()->forget('cloned_event');
         } else {
-            // Default behavior for new event
-            if ($role->default_tickets) {
-                $defaultTickets = json_decode($role->default_tickets, true);
-                $event->ticket_currency_code = $defaultTickets['currency_code'] ?? MoneyUtils::getCurrencyForCountry($role->country_code);
-                // The schedule's saved ticket defaults win: that is the owner's own explicit choice.
-                // DEFAULT_PAYMENT_METHOD only fills the gap where they have not made one.
-                $event->payment_method = $defaultTickets['payment_method']
-                    ?? payment_gateways()->defaultMethodFor($user, $event->ticket_currency_code);
-                $event->payment_instructions = $defaultTickets['payment_instructions'] ?? null;
-                $event->expire_unpaid_tickets = $defaultTickets['expire_unpaid_tickets'] ?? false;
-                $event->installments_enabled = $defaultTickets['installments_enabled'] ?? false;
-                $event->installment_count = $defaultTickets['installment_count'] ?? null;
-                $event->installment_final_days_before = $defaultTickets['installment_final_days_before'] ?? 14;
-                $event->installment_min_order_amount = $defaultTickets['installment_min_order_amount'] ?? null;
-                $event->ticket_notes = $defaultTickets['ticket_notes'] ?? null;
-                $event->terms_url = $defaultTickets['terms_url'] ?? null;
-                $event->total_tickets_mode = $defaultTickets['total_tickets_mode'] ?? 'individual';
-                $event->ask_phone = $defaultTickets['ask_phone'] ?? false;
-                $event->require_phone = $defaultTickets['require_phone'] ?? false;
-                $event->country_code_phone = $defaultTickets['country_code_phone'] ?? false;
-                $event->individual_tickets = $defaultTickets['individual_tickets'] ?? false;
-                $event->individual_ticket_fields = $defaultTickets['individual_ticket_fields'] ?? false;
-                $event->sell_after_start = $defaultTickets['sell_after_start'] ?? false;
-                $event->show_unavailable_tickets = $defaultTickets['show_unavailable_tickets'] ?? false;
-                $event->custom_fields = $defaultTickets['custom_fields'] ?? null;
-                $tickets = array_map(function ($ticketData) {
-                    $ticket = new Ticket;
-                    foreach ($ticketData as $key => $value) {
-                        $ticket->$key = $value;
-                    }
+            // Default behavior for new event: the schedule's default ticket preset, if it has one
+            // (Settings > Ticket presets, which took over from roles.default_tickets).
+            $event->ticket_currency_code = MoneyUtils::getCurrencyForCountry($role->country_code);
+            $event->payment_method = payment_gateways()->defaultMethodFor($user, $event->ticket_currency_code);
+            $event->tickets = collect([new Ticket]);
 
-                    return $ticket;
-                }, $defaultTickets['tickets'] ?? []);
-                $event->tickets = collect($tickets ?: [new Ticket]);
-                $event->addons = array_map(function ($addonData) {
-                    $addon = new Ticket;
-                    foreach ($addonData as $key => $value) {
-                        $addon->$key = $value;
-                    }
-                    $addon->is_addon = true;
-
-                    return $addon;
-                }, $defaultTickets['addons'] ?? []);
-                $defaultPromoCodes = $defaultTickets['promo_codes'] ?? [];
-            } else {
-                $event->ticket_currency_code = MoneyUtils::getCurrencyForCountry($role->country_code);
-                $event->payment_method = payment_gateways()->defaultMethodFor($user, $event->ticket_currency_code);
-                $event->tickets = collect([new Ticket]);
+            $defaultPreset = TicketPresets::defaultFor($role);
+            if ($defaultPreset) {
+                // The preset's own payment method wins: that is the owner's explicit choice.
+                // DEFAULT_PAYMENT_METHOD only fills the gap where it does not name one.
+                $defaultPromoCodes = TicketPresets::applyToModel($event, $defaultPreset);
             }
 
             // Set default category: prefer role's default (only if still enabled),
@@ -618,7 +607,9 @@ class EventController extends Controller
                 ->orderBy('id', 'desc')
                 ->first(['id', 'tickets_enabled', 'rsvp_enabled']);
 
-            if ($lastMode) {
+            // A default preset that says how people sign up decides it instead; the one copied
+            // from the old single default never said, and keeps this rule.
+            if ($lastMode && ! $defaultPreset?->kind) {
                 $event->tickets_enabled = (bool) $lastMode->tickets_enabled;
                 $event->rsvp_enabled = (bool) $lastMode->rsvp_enabled;
             }
@@ -702,6 +693,7 @@ class EventController extends Controller
             'subdomain' => $subdomain,
             'title' => $isFirstEventRun ? __('messages.next_step_add_first_event') : __('messages.add_event'),
             'isFirstEventRun' => $isFirstEventRun,
+            'presetState' => TicketPresets::formState($role, $event, $user, $presetCopiedFrom ?? null),
             'selectedVenue' => $venue,
             'venues' => $venues,
             'recentVenueIds' => $this->recentVenueIds($role, $venues),
@@ -730,7 +722,38 @@ class EventController extends Controller
             abort(403);
         }
 
-        return redirect(route('event.edit', ['subdomain' => $subdomain, 'hash' => $hash]));
+        return redirect(route('event.edit', ['subdomain' => $subdomain, 'hash' => $hash] + $this->monthOnScreen($request)));
+    }
+
+    /**
+     * The calendar month an Edit link was pressed on, as the link carries it (the calendar's
+     * editUrl()), for passing on through a redirect. Empty for anything that is not a month.
+     */
+    private function monthOnScreen(Request $request): array
+    {
+        $year = filter_var($request->query('year'), FILTER_VALIDATE_INT, ['options' => ['min_range' => 1900, 'max_range' => 2199]]);
+        $month = filter_var($request->query('month'), FILTER_VALIDATE_INT, ['options' => ['min_range' => 1, 'max_range' => 12]]);
+
+        return $year !== false && $month !== false ? ['year' => $year, 'month' => $month] : [];
+    }
+
+    /**
+     * The month the calendar showed when Edit was pressed, while the event as saved still falls
+     * in it. A series is edited from whichever of its months the owner was looking at, and the
+     * save used to send them to the month it began in. An event moved out of that month is
+     * followed to its own, as before.
+     */
+    private function monthEditedFrom(Request $request, Event $event): ?Carbon
+    {
+        $value = $request->input('return_month');
+
+        if (! is_string($value) || ! preg_match('/^(19|2[01])\d{2}-(0[1-9]|1[0-2])$/', $value)) {
+            return null;
+        }
+
+        $first = Carbon::createFromFormat('Y-m-d', $value.'-01')->startOfDay();
+
+        return $event->nextOccurrenceFrom($first->format('Y-m-d'), $first->daysInMonth - 1) ? $first : null;
     }
 
     /**
@@ -788,7 +811,7 @@ class EventController extends Controller
             $event = Event::findOrFail(UrlUtils::decodeId($hash));
 
             if ($editableSubdomain = $this->resolveEditableSubdomain($user, $event)) {
-                return redirect(route('event.edit', ['subdomain' => $editableSubdomain, 'hash' => $hash]));
+                return redirect(route('event.edit', ['subdomain' => $editableSubdomain, 'hash' => $hash] + $this->monthOnScreen($request)));
             }
 
             return redirect()->back()->with('error', __('messages.not_authorized'));
@@ -869,9 +892,14 @@ class EventController extends Controller
         // keeps the stored value.
         $currencyLocked = $event->exists && $event->hasSettledMoney();
 
+        $onScreen = $this->monthOnScreen($request);
+
         return view('event/edit', [
+            'presetState' => TicketPresets::formState($event->ticketingRole() ?? $role, $event, $user),
             'interestCount' => $interestCount,
             'currencyLocked' => $currencyLocked,
+            // Posted back as return_month, for update() to come back to (monthEditedFrom()).
+            'returnMonth' => $onScreen ? sprintf('%04d-%02d', $onScreen['year'], $onScreen['month']) : null,
             'role' => $role,
             'effectiveRole' => $effectiveRole,
             'user' => $user,
@@ -964,6 +992,8 @@ class EventController extends Controller
             }
         }
 
+        $this->refuseUnsavablePreset($request, $event->ticketingRole() ?? $role);
+
         $this->eventRepo->saveEvent($role, $request, $event, true, $role->captureTimezone());
 
         $gallery = $this->syncGallery($request, $role, $event);
@@ -1011,51 +1041,19 @@ class EventController extends Controller
             }
         }
 
-        if ($request->has('save_default_tickets')) {
-            $role = Role::subdomain($subdomain)->firstOrFail();
-            $event->load(['promoCodes', 'addons']);
-            $defaultTickets = [
-                'currency_code' => $event->ticket_currency_code,
-                'payment_method' => $event->payment_method,
-                'payment_instructions' => $event->payment_instructions,
-                'expire_unpaid_tickets' => $event->expire_unpaid_tickets,
-                'installments_enabled' => $event->installments_enabled,
-                'installment_count' => $event->installment_count,
-                'installment_final_days_before' => $event->installment_final_days_before,
-                'installment_min_order_amount' => $event->installment_min_order_amount,
-                'ticket_notes' => $event->ticket_notes,
-                'terms_url' => $event->terms_url,
-                'total_tickets_mode' => $event->total_tickets_mode,
-                'ask_phone' => $event->ask_phone,
-                'require_phone' => $event->require_phone,
-                'country_code_phone' => $event->country_code_phone,
-                'individual_tickets' => $event->individual_tickets,
-                'individual_ticket_fields' => $event->individual_ticket_fields,
-                'sell_after_start' => $event->sell_after_start,
-                'show_unavailable_tickets' => $event->show_unavailable_tickets,
-                'custom_fields' => $event->custom_fields,
-                'tickets' => $event->tickets->map(fn ($ticket) => $ticket->toClonePayload())->toArray(),
-                'addons' => $event->addons->map(function ($addon) {
-                    return [
-                        'type' => $addon->type,
-                        'quantity' => $addon->quantity,
-                        'price' => $addon->price,
-                        'description' => $addon->description,
-                    ];
-                })->toArray(),
-                'promo_codes' => $event->promoCodes->map(function ($pc) {
-                    return [
-                        'code' => $pc->code,
-                        'type' => $pc->type,
-                        'value' => $pc->value,
-                        'max_uses' => $pc->max_uses,
-                        'is_active' => $pc->is_active,
-                        'ticket_ids' => $pc->ticket_ids,
-                    ];
-                })->toArray(),
-            ];
-            $role->default_tickets = json_encode($defaultTickets);
-            $role->save();
+        // "Save these tickets as a preset" (Tickets tab, bottom). Written to the event's OWN schedule,
+        // not the one in the address, and only by whoever may change that schedule's presets: its
+        // owner, or an editor while the team does not pick from presets (TicketPresets::mayEdit()).
+        if ($request->boolean('save_ticket_preset')) {
+            $presetSchedule = $event->ticketingRole() ?? Role::subdomain($subdomain)->first();
+            if ($presetSchedule && TicketPresets::mayEdit($request->user(), $presetSchedule)) {
+                TicketPresets::saveFromEvent(
+                    $presetSchedule,
+                    $event->fresh(['tickets', 'addons', 'promoCodes']),
+                    (string) $request->input('ticket_preset_name', ''),
+                    $request->boolean('ticket_preset_default'),
+                );
+            }
         }
 
         if ($request->has('agenda_ai_prompt')) {
@@ -1069,7 +1067,9 @@ class EventController extends Controller
             $role->save();
         }
 
-        if ($event->starts_at) {
+        if ($from = $this->monthEditedFrom($request, $event)) {
+            $date = $from;
+        } elseif ($event->starts_at) {
             // Schedule-local date so the redirect opens the calendar month the event appears in.
             $date = Carbon::parse($event->saleEventDateFromStartsAt());
         } else {
@@ -1202,13 +1202,13 @@ class EventController extends Controller
         }
 
         // Appointment bookings confirm on acceptance: calendar sync + guest AppointmentConfirmed.
-        // Unpaid online payments (stripe/payment_url) defer confirmation to the payment webhook so
+        // Unpaid online payments (AppointmentType::paysOnline()) defer confirmation to the payment so
         // the guest never gets "Confirmed" for a booking that can still expire unpaid.
         if ($event->appointment_type_id) {
             $sale = Sale::where('event_id', $event->id)
                 ->whereNotIn('status', ['cancelled', 'refunded', 'expired'])
                 ->first();
-            if ($sale && ($sale->status === 'paid' || ! in_array($sale->payment_method, ['stripe', 'payment_url'], true))) {
+            if ($sale && ($sale->status === 'paid' || ! \App\Models\AppointmentType::paysOnline($sale->payment_method))) {
                 app(\App\Services\AppointmentService::class)->confirm($sale);
             }
         }
@@ -1507,7 +1507,7 @@ class EventController extends Controller
                         ->where('is_deleted', false)
                         ->whereNotIn('status', ['cancelled', 'refunded', 'expired'])
                         ->first();
-                    if ($sale && ($sale->status === 'paid' || ! in_array($sale->payment_method, ['stripe', 'payment_url'], true))) {
+                    if ($sale && ($sale->status === 'paid' || ! \App\Models\AppointmentType::paysOnline($sale->payment_method))) {
                         app(\App\Services\AppointmentService::class)->confirm($sale);
                     }
 
@@ -1568,6 +1568,17 @@ class EventController extends Controller
         return redirect()->route('home')->with('error', __('messages.set_default_schedule'));
     }
 
+    /**
+     * "Save these tickets as a preset" that Settings > Ticket presets could not hold is refused
+     * before the event is saved, so nothing is half done (TicketPresets::assertSavable()).
+     */
+    private function refuseUnsavablePreset(Request $request, Role $presetSchedule): void
+    {
+        if ($request->boolean('save_ticket_preset') && TicketPresets::mayEdit($request->user(), $presetSchedule)) {
+            TicketPresets::assertSavable($presetSchedule, $request);
+        }
+    }
+
     public function store(EventCreateRequest $request, $subdomain)
     {
         if (! auth()->user()->isEditor($subdomain)) {
@@ -1578,7 +1589,12 @@ class EventController extends Controller
 
         // Asked before the save, which is what makes it "first". Not the owner count: saveEvent()
         // can attach a new venue to this user as its owner.
-        $isFirstEvent = $request->user()->createdEvents()->doesntExist();
+        // A member the ticket preset switch binds adds events on the owner's account, so they never
+        // stop counting as having made none (create() leaves them out of the first-event form too).
+        $isFirstEvent = $request->user()->createdEvents()->doesntExist()
+            && ! TicketPresets::lockedFor($request->user(), $role);
+
+        $this->refuseUnsavablePreset($request, $role);
 
         $event = $this->eventRepo->saveEvent($role, $request, null, true, $role->captureTimezone());
 
@@ -1604,51 +1620,19 @@ class EventController extends Controller
             }
         }
 
-        if ($request->has('save_default_tickets')) {
-            $role = Role::subdomain($subdomain)->firstOrFail();
-            $event->load(['promoCodes', 'addons']);
-            $defaultTickets = [
-                'currency_code' => $event->ticket_currency_code,
-                'payment_method' => $event->payment_method,
-                'payment_instructions' => $event->payment_instructions,
-                'expire_unpaid_tickets' => $event->expire_unpaid_tickets,
-                'installments_enabled' => $event->installments_enabled,
-                'installment_count' => $event->installment_count,
-                'installment_final_days_before' => $event->installment_final_days_before,
-                'installment_min_order_amount' => $event->installment_min_order_amount,
-                'ticket_notes' => $event->ticket_notes,
-                'terms_url' => $event->terms_url,
-                'total_tickets_mode' => $event->total_tickets_mode,
-                'ask_phone' => $event->ask_phone,
-                'require_phone' => $event->require_phone,
-                'country_code_phone' => $event->country_code_phone,
-                'individual_tickets' => $event->individual_tickets,
-                'individual_ticket_fields' => $event->individual_ticket_fields,
-                'sell_after_start' => $event->sell_after_start,
-                'show_unavailable_tickets' => $event->show_unavailable_tickets,
-                'custom_fields' => $event->custom_fields,
-                'tickets' => $event->tickets->map(fn ($ticket) => $ticket->toClonePayload())->toArray(),
-                'addons' => $event->addons->map(function ($addon) {
-                    return [
-                        'type' => $addon->type,
-                        'quantity' => $addon->quantity,
-                        'price' => $addon->price,
-                        'description' => $addon->description,
-                    ];
-                })->toArray(),
-                'promo_codes' => $event->promoCodes->map(function ($pc) {
-                    return [
-                        'code' => $pc->code,
-                        'type' => $pc->type,
-                        'value' => $pc->value,
-                        'max_uses' => $pc->max_uses,
-                        'is_active' => $pc->is_active,
-                        'ticket_ids' => $pc->ticket_ids,
-                    ];
-                })->toArray(),
-            ];
-            $role->default_tickets = json_encode($defaultTickets);
-            $role->save();
+        // "Save these tickets as a preset" (Tickets tab, bottom). Written to the event's OWN schedule,
+        // not the one in the address, and only by whoever may change that schedule's presets: its
+        // owner, or an editor while the team does not pick from presets (TicketPresets::mayEdit()).
+        if ($request->boolean('save_ticket_preset')) {
+            $presetSchedule = $event->ticketingRole() ?? Role::subdomain($subdomain)->first();
+            if ($presetSchedule && TicketPresets::mayEdit($request->user(), $presetSchedule)) {
+                TicketPresets::saveFromEvent(
+                    $presetSchedule,
+                    $event->fresh(['tickets', 'addons', 'promoCodes']),
+                    (string) $request->input('ticket_preset_name', ''),
+                    $request->boolean('ticket_preset_default'),
+                );
+            }
         }
 
         if ($request->input('agenda_ai_prompt')) {

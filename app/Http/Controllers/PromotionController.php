@@ -47,6 +47,11 @@ class PromotionController extends Controller
             abort(403);
         }
 
+        // An event a boost partner covers is boosted through the partner, never bought here.
+        if ($partner = \App\Models\BoostPartner::forEvent($event)) {
+            return redirect()->back()->with('error', __('messages.boost_partner_promotion_refused', ['page' => $partner->displayName()]));
+        }
+
         // Promoting an event nobody can open would just burn the advertiser's money.
         if ($event->is_draft || $event->is_private) {
             return redirect()->route('boost.index')->with('error', __('messages.promotion_event_not_public'));
@@ -115,6 +120,10 @@ class PromotionController extends Controller
             abort(403);
         }
 
+        if ($partner = \App\Models\BoostPartner::forEvent($event)) {
+            return response()->json(['error' => __('messages.boost_partner_promotion_refused', ['page' => $partner->displayName()])], 422);
+        }
+
         $role = $this->resolveAdvertiserRole($request, $event);
 
         if (! $role) {
@@ -144,6 +153,9 @@ class PromotionController extends Controller
                 'metadata' => [
                     'type' => 'promo',
                     'event_id' => (string) $event->id,
+                    // Who made it: only they can have it given back from a refused submit
+                    // (BoostBillingService::intentIsFor()), and only their campaign can take it.
+                    'user_id' => (string) auth()->id(),
                     'user_budget' => (string) $budget,
                     'markup_rate' => '0',
                 ],
@@ -216,6 +228,12 @@ class PromotionController extends Controller
         if (! auth()->user()->canEditEvent($event)) {
             $this->abandonIntent($request);
             abort(403);
+        }
+
+        if ($partner = \App\Models\BoostPartner::forEvent($event)) {
+            $this->abandonIntent($request);
+
+            return back()->with('error', __('messages.boost_partner_promotion_refused', ['page' => $partner->displayName()]));
         }
 
         if ($event->is_draft || $event->is_private) {
@@ -472,25 +490,14 @@ class PromotionController extends Controller
      */
     protected function abandonIntent(Request $request): void
     {
-        if (! $request->payment_intent_id || ! config('app.hosted') || config('app.is_testing')) {
-            return;
-        }
-
-        try {
-            $stripe = new \Stripe\StripeClient(config('services.stripe_platform.secret'));
-            $intent = $stripe->paymentIntents->retrieve($request->payment_intent_id);
-
-            if ($intent->status === 'succeeded') {
-                $stripe->refunds->create(
-                    ['payment_intent' => $intent->id, 'metadata' => ['reason' => 'promotion_not_created']],
-                    ['idempotency_key' => 'promo_abandon_'.$intent->id],
-                );
-            } elseif (in_array($intent->status, ['requires_payment_method', 'requires_confirmation', 'requires_action', 'processing'])) {
-                $stripe->paymentIntents->cancel($intent->id);
-            }
-        } catch (\Throwable $e) {
-            report($e);
-        }
+        app(\App\Services\BoostBillingService::class)->abandonPaymentIntent(
+            $request->payment_intent_id,
+            'promotion_not_created',
+            'promo_abandon_',
+            ($eventId = UrlUtils::decodeId($request->event_id)) ? (int) $eventId : null,
+            'promo',
+            auth()->id() ? (int) auth()->id() : null,
+        );
     }
 
     /**

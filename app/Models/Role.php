@@ -783,6 +783,14 @@ class Role extends Model implements MustVerifyEmail
                 ->get();
 
             foreach ($activeCampaigns as $campaign) {
+                // A partner boost is stopped, never deleted at Meta and never refunded: the platform
+                // holds none of its money, and its spend must stay readable for the statement.
+                if ($campaign->isPartner()) {
+                    \App\Services\BoostPartnerService::stopInCascade($campaign);
+
+                    continue;
+                }
+
                 try {
                     if ($campaign->meta_campaign_id && \App\Services\MetaAdsService::isBoostConfigured()) {
                         $metaService = app()->make(\App\Services\MetaAdsService::class);
@@ -5181,6 +5189,21 @@ class Role extends Model implements MustVerifyEmail
     public function eventTemplates()
     {
         return $this->hasMany(\App\Models\EventTemplate::class)->orderByDesc('created_at');
+    }
+
+    /** Ticket presets (Settings > Ticket presets), in the owner's order. Read through App\Services\TicketPresets. */
+    public function ticketPresets()
+    {
+        return $this->hasMany(\App\Models\TicketPreset::class)->orderBy('sort_order')->orderBy('id');
+    }
+
+    /**
+     * The owner's "Team members pick from these presets" switch. Not a column here because this
+     * table is at MySQL's row-size limit; no row reads as off.
+     */
+    public function ticketPresetSetting()
+    {
+        return $this->hasOne(\App\Models\TicketPresetSetting::class)->withDefault(['team_uses_presets' => false]);
     }
 
     /**

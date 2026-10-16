@@ -17,6 +17,12 @@ class HelpUtils
         // Without this the template editor (newsletter-templates/{hash}/edit) fell through to
         // {subdomain}/edit below and Help opened the Creating Schedules guide.
         'newsletter-templates*' => '/docs/newsletters#saved-templates',
+        // A boost partner's pages, ahead of {subdomain}/requests and {subdomain}/edit below: on a
+        // flat route {subdomain} is *, which matched boost/requests and boost/{hash}/edit.
+        'boost/requests*' => '/docs/boost#partners-requests',
+        'boost/campaigns*' => '/docs/boost#partners-campaigns',
+        'boost/statements*' => '/docs/boost#partners-campaigns',
+        'boost/*/edit' => '/docs/boost#partners-requests',
 
         // Pages with section-level anchor mapping
         '{subdomain}/edit' => [
@@ -60,6 +66,7 @@ class HelpUtils
                 'section-integrations' => '/docs/creating-schedules#integrations',
                 'integration-tab-email' => '/docs/creating-schedules#integrations-email',
                 'settings-tab-general' => '/docs/creating-schedules#settings-general',
+                'settings-tab-tickets' => '/docs/creating-schedules#ticket-presets',
                 'settings-tab-notifications' => '/docs/creating-schedules#settings-notifications',
                 'settings-tab-advanced' => '/docs/creating-schedules#settings-advanced',
                 'integration-tab-google' => '/docs/creating-schedules#integrations-google',
@@ -92,6 +99,8 @@ class HelpUtils
                 'ticket-tab-options' => '/docs/tickets#options',
                 'ticket-tab-promo_codes' => '/docs/tickets#promo-codes',
                 'ticket-tab-add_ons' => '/docs/tickets#add-ons',
+                // A preset chip or tile pressed (event/partials/ticket-presets-*).
+                'ticket-presets' => '/docs/tickets#ticket-presets',
                 'section-event-settings' => '/docs/creating-events#sponsors',
                 'settings-tab-sponsors' => '/docs/creating-events#sponsors',
                 'section-engagement' => '/docs/creating-events#engagement',
@@ -128,6 +137,8 @@ class HelpUtils
                 'ticket-tab-options' => '/docs/tickets#options',
                 'ticket-tab-promo_codes' => '/docs/tickets#promo-codes',
                 'ticket-tab-add_ons' => '/docs/tickets#add-ons',
+                // A preset chip or tile pressed (event/partials/ticket-presets-*).
+                'ticket-presets' => '/docs/tickets#ticket-presets',
                 'section-event-settings' => '/docs/creating-events#sponsors',
                 'settings-tab-sponsors' => '/docs/creating-events#sponsors',
                 'section-engagement' => '/docs/creating-events#engagement',
@@ -156,6 +167,7 @@ class HelpUtils
                 'payment-tab-payment-url' => '/docs/account-settings#payment-url',
                 'payment-tab-payfast' => '/docs/account-settings#payfast',
                 'payment-tab-paypal' => '/docs/account-settings#paypal',
+                'payment-tab-razorpay' => '/docs/account-settings#razorpay',
                 // A tab that holds several sections opens the guide at the first of them; pressing
                 // inside one of its sections moves Help to that section (layouts/navigation).
                 'section-security' => '/docs/account-settings#password',
@@ -167,6 +179,11 @@ class HelpUtils
                 'section-google-calendar' => '/docs/account-settings#google',
                 'section-microsoft-calendar' => '/docs/account-settings#microsoft',
                 'section-facebook' => '/docs/account-settings#facebook',
+                // A boost partner's tab and its two sections, on the page of a partner account
+                // only (BoostPartnerPagesTest).
+                'section-boost' => '/docs/account-settings#boosts',
+                'section-boost-account' => '/docs/account-settings#boosts-account',
+                'section-boost-card' => '/docs/account-settings#boosts-card',
                 'section-backup' => '/docs/account-settings#backup',
                 // Its two rows are the backup tool's own (a Vue app), reached by address.
                 'backup-tab-export' => '/docs/account-settings#backup-export',
@@ -311,8 +328,27 @@ class HelpUtils
         'new/*' => '/docs/getting-started#create-schedule',
     ];
 
+    /**
+     * The Help page of a boost request to a boost partner: its form (/boost/create on an event a
+     * partner covers, which the address alone cannot tell from any other boost) and its own page.
+     */
+    public const BOOST_PARTNER_REQUESTS = '/docs/boost#partners-requests';
+
+    /**
+     * A page that knows better than its address which part of the guide it is: it names it here,
+     * while it renders, and the layout's Help link (drawn after the page's body) follows it.
+     */
+    public static function useDoc(string $docPath): void
+    {
+        request()->attributes->set('helpDocPath', $docPath);
+    }
+
     public static function getDocUrl(): string
     {
+        if ($chosen = request()->attributes->get('helpDocPath')) {
+            return marketing_url($chosen);
+        }
+
         foreach (self::$mappings as $pattern => $value) {
             $requestPattern = self::resolvePattern($pattern);
             if (request()->is($requestPattern)) {
@@ -327,6 +363,10 @@ class HelpUtils
 
     public static function getAnchorMap(): array
     {
+        if (request()->attributes->get('helpDocPath')) {
+            return [];
+        }
+
         foreach (self::$mappings as $pattern => $value) {
             $requestPattern = self::resolvePattern($pattern);
             if (request()->is($requestPattern)) {

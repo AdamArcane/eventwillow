@@ -209,7 +209,7 @@ return [
             'shot' => 'creating-schedules--section-details',
             'shot_alt' => 'The schedule form, open on its Details tab',
             'published' => '2024-01-01',
-            'modified' => '2026-10-09',
+            'modified' => '2026-10-16',
         ],
 
         'schedule-styling' => [
@@ -283,7 +283,7 @@ return [
             'shot' => 'tickets--sales',
             'shot_alt' => 'The Sales page, listing orders',
             'published' => '2024-01-01',
-            'modified' => '2026-10-07',
+            'modified' => '2026-10-16',
         ],
 
         'subscriptions' => [
@@ -344,7 +344,7 @@ return [
             'shot' => 'appointments--types',
             'shot_alt' => 'The Appointments tab, listing appointment types',
             'published' => '2026-07-26',
-            'modified' => '2026-10-07',
+            'modified' => '2026-10-15',
         ],
 
         'sharing' => [
@@ -405,7 +405,7 @@ return [
             'shot' => 'boost--page',
             'shot_alt' => 'The Boost Event page',
             'published' => '2024-01-01',
-            'modified' => '2026-10-07',
+            'modified' => '2026-10-15',
         ],
 
         'managing-schedules' => [
@@ -420,7 +420,7 @@ return [
             'shot' => 'managing-schedules--requests-tab',
             'shot_alt' => 'The Requests tab, with an event waiting for an answer',
             'published' => '2024-01-01',
-            'modified' => '2026-10-08',
+            'modified' => '2026-10-16',
         ],
 
         'analytics' => [
@@ -435,7 +435,7 @@ return [
             'shot' => 'analytics--dashboard',
             'shot_alt' => 'The Analytics page',
             'published' => '2024-01-01',
-            'modified' => '2026-10-07',
+            'modified' => '2026-10-16',
         ],
 
         'account-settings' => [
@@ -449,7 +449,7 @@ return [
             'shot' => 'account-settings--settings',
             'shot_alt' => 'The Settings page',
             'published' => '2024-01-01',
-            'modified' => '2026-10-07',
+            'modified' => '2026-10-15',
         ],
 
         'referral-program' => [
@@ -501,10 +501,10 @@ return [
             'feature' => 'marketing.stripe',
             'title' => 'Stripe Integration',
             'nav_title' => 'Stripe',
-            'blurb' => 'Stripe, PayPal, Payfast and Invoice Ninja on a selfhost or SaaS install, and how refunds work.',
+            'blurb' => 'Stripe, PayPal, Payfast, Razorpay and Invoice Ninja on a selfhost or SaaS install, and how refunds work.',
             'icon' => 'credit-card',
             'published' => '2024-01-01',
-            'modified' => '2026-10-07',
+            'modified' => '2026-10-16',
         ],
 
         'selfhost/google-calendar' => [
@@ -706,7 +706,7 @@ return [
             'blurb' => 'Programmatically manage schedules and events over REST.',
             'icon' => 'code',
             'published' => '2024-01-01',
-            'modified' => '2026-10-08',
+            'modified' => '2026-10-16',
         ],
 
         'developer/webhooks' => [

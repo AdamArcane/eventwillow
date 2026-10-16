@@ -33,7 +33,7 @@ class GrowthExportService
      * pulls knows whether they compare. Every bump is described in docs/GROWTH_DATA.md's changelog,
      * which GrowthDataDictionaryTest holds to this number.
      */
-    public const SCHEMA_VERSION = 18;
+    public const SCHEMA_VERSION = 20;
 
     /** The month the schedule.claim audit action shipped; nothing before it can be counted. */
     private const CLAIMS_TRACKED_FROM = '2026-09';
@@ -1535,10 +1535,10 @@ class GrowthExportService
         // columns (gateways are per account); only Stripe Connect records when it completed.
         $owners = DB::table('users')
             ->where(fn ($q) => $q->whereNotNull('stripe_completed_at')->orWhereNotNull('paypal_client_id')
-                ->orWhereNotNull('payfast_merchant_id')->orWhereNotNull('invoiceninja_api_key')
+                ->orWhereNotNull('payfast_merchant_id')->orWhereNotNull('razorpay_key_id')->orWhereNotNull('invoiceninja_api_key')
                 ->orWhereNotNull('api_key_hash'))
             ->get(['id', 'stripe_account_id', 'stripe_completed_at', 'paypal_client_id',
-                'payfast_merchant_id', 'invoiceninja_api_key', 'api_key_hash'])
+                'payfast_merchant_id', 'razorpay_key_id', 'invoiceninja_api_key', 'api_key_hash'])
             ->keyBy('id');
         $webhookOwners = DB::table('webhooks')->where('is_active', true)->distinct()->pluck('user_id')->flip();
 
@@ -1938,6 +1938,7 @@ class GrowthExportService
             'stripe' => $owner->stripe_account_id && $owner->stripe_completed_at,
             'paypal' => (bool) $owner->paypal_client_id,
             'payfast' => (bool) $owner->payfast_merchant_id,
+            'razorpay' => (bool) $owner->razorpay_key_id,
             'invoiceninja' => (bool) $owner->invoiceninja_api_key,
         ]));
     }
@@ -3286,7 +3287,15 @@ class GrowthExportService
             ->map(fn ($r) => ['month' => $r->ym, 'campaigns' => (int) $r->campaigns, 'schedules' => (int) $r->schedules])
             ->all();
 
-        return ['net_markup' => $markup, 'campaigns' => $campaigns];
+        // The fee boost partners pay on their own ad accounts' actual spend, by the month it is
+        // FOR (a statement's period), counted once paid.
+        $partnerFees = DB::table('boost_statements')->where('status', 'paid')->where('period', '>=', $from->format('Y-m'))
+            ->selectRaw('period as ym, currency, SUM(charged_amount) as fee')
+            ->groupBy('period', 'currency')->orderBy('period')->get()
+            ->map(fn ($r) => ['month' => $r->ym, 'currency' => $r->currency, 'fee' => round((float) $r->fee, 2)])
+            ->all();
+
+        return ['net_markup' => $markup, 'campaigns' => $campaigns, 'partner_fees' => $partnerFees];
     }
 
     /** The referral programme: where referrals stand, and how many start each month. */

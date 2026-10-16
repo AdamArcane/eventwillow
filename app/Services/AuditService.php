@@ -232,6 +232,11 @@ class AuditService
 
     const ADMIN_BLOCKLIST_REMOVE = 'admin.blocklist_remove';
 
+    // An account a watched word turned up for, marked not spam and flagged again (SpamWatch).
+    const ADMIN_SPAM_CLEAR = 'admin.spam_clear';
+
+    const ADMIN_SPAM_UNCLEAR = 'admin.spam_unclear';
+
     const ADMIN_GRANT = 'admin.grant';
 
     const ADMIN_REVOKE = 'admin.revoke';
@@ -259,6 +264,31 @@ class AuditService
     const BOOST_RESUME = 'boost.resume';
 
     const BOOST_CANCEL = 'boost.cancel';
+
+    // Boost partner actions (a partner's own Page and ad account; BoostPartnerService)
+    const BOOST_PARTNER_SUBMIT = 'boost.partner.submit';
+
+    const BOOST_PARTNER_EDIT = 'boost.partner.edit';
+
+    const BOOST_PARTNER_APPROVE = 'boost.partner.approve';
+
+    const BOOST_PARTNER_DECLINE = 'boost.partner.decline';
+
+    const BOOST_PARTNER_PAYMENT = 'boost.partner.payment';
+
+    const BOOST_PARTNER_PAYMENT_WITHDRAWN = 'boost.partner.payment_withdrawn';
+
+    const BOOST_PARTNER_STOP = 'boost.partner.stop';
+
+    const BOOST_PARTNER_LAUNCH = 'boost.partner.launch';
+
+    const BOOST_PARTNER_ENABLE = 'boost.partner.enable';
+
+    const BOOST_PARTNER_CONNECT = 'boost.partner.connect';
+
+    const BOOST_PARTNER_CONFIRM = 'boost.partner.confirm';
+
+    const BOOST_PARTNER_DISCONNECT = 'boost.partner.disconnect';
 
     // On-network promotion actions
     const PROMO_CREATE = 'promo.create';
@@ -317,6 +347,8 @@ class AuditService
         'payfast_passphrase',
         // The client id and the webhook id are identifiers, not secrets, so they stay readable.
         'paypal_client_secret',
+        'razorpay_key_secret',
+        'razorpay_webhook_secret',
         'two_factor_secret',
         'two_factor_recovery_codes',
     ];

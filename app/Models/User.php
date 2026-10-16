@@ -126,6 +126,9 @@ class User extends Authenticatable implements MustVerifyEmail
         'paypal_client_id',
         'paypal_client_secret',
         'paypal_webhook_id',
+        'razorpay_key_id',
+        'razorpay_key_secret',
+        'razorpay_webhook_secret',
         'google_token',
         'google_refresh_token',
         'google_token_expires_at',
@@ -256,6 +259,8 @@ class User extends Authenticatable implements MustVerifyEmail
             'payfast_sandbox' => 'boolean',
             'paypal_client_secret' => EncryptedString::class,
             'paypal_sandbox' => 'boolean',
+            'razorpay_key_secret' => EncryptedString::class,
+            'razorpay_webhook_secret' => EncryptedString::class,
             'api_key_expires_at' => 'datetime',
             'two_factor_secret' => EncryptedString::class,
             'two_factor_recovery_codes' => EncryptedString::class,
@@ -724,6 +729,22 @@ class User extends Authenticatable implements MustVerifyEmail
                     }
                 }
                 $phoneUser->roles()->detach();
+
+                // A type the stub hosted, and the bookings made with it, are this person's where
+                // they can host it (an owner or admin there now). Anywhere else the stub has left
+                // as a host leaving a team does: the type is switched off and the owner told
+                // (releaseHost()). Left on the stub, it dropped off its booking page while it read
+                // Active, and nobody was told.
+                $hostedOn = AppointmentType::where('host_user_id', $phoneUser->id)->distinct()->pluck('role_id');
+                foreach ($hostedOn as $hostedRoleId) {
+                    if (\App\Services\AppointmentHostService::isEligible((int) $hostedRoleId, (int) $this->id)) {
+                        AppointmentType::where('role_id', $hostedRoleId)->where('host_user_id', $phoneUser->id)->update(['host_user_id' => $this->id]);
+                        Event::where('creator_role_id', $hostedRoleId)->where('appointment_host_user_id', $phoneUser->id)->update(['appointment_host_user_id' => $this->id]);
+                    } elseif ($hostedRole = Role::find($hostedRoleId)) {
+                        app(\App\Services\AppointmentHostService::class)->releaseHost($hostedRole, (int) $phoneUser->id);
+                    }
+                }
+
                 $phoneUser->default_role_id = null;
                 $phoneUser->password = null;
                 $phoneUser->phone = null;

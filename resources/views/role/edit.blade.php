@@ -34,6 +34,24 @@
     <x-slot name="head">
 
         <style {!! nonce_attr() !!}>
+        /* "Event list wording" (Settings, Advanced): the schedule's next events as the list's phone
+           cards would say them, small, in the portal's own tokens. */
+        .lw-preview { margin-top: 0.875rem; }
+        .lw-preview-label { margin: 0 0 0.375rem; font-size: 0.8125rem; font-weight: 600; color: rgb(var(--ap-ink-3)); }
+        .lw-cards { display: grid; gap: 0.5rem; max-width: 26rem; margin: 0; padding: 0; list-style: none; }
+        .lw-card { display: grid; grid-template-columns: minmax(0, 1fr) 6.5rem; overflow: hidden; min-height: 6rem; border: 1px solid rgb(var(--ap-border)); border-radius: 0.75rem; background: rgb(var(--ap-surface)); }
+        .lw-card.is-bare { grid-template-columns: minmax(0, 1fr); }
+        .lw-text { display: flex; flex-direction: column; gap: 0.125rem; min-width: 0; padding: 0.625rem 0.75rem; }
+        .lw-time { font-size: 0.75rem; font-weight: 700; color: rgb(var(--ap-ink-3)); }
+        .lw-name { display: -webkit-box; overflow: hidden; -webkit-box-orient: vertical; -webkit-line-clamp: 3; font-size: 0.9375rem; line-height: 1.25; color: rgb(var(--ap-ink)); overflow-wrap: anywhere; text-wrap: balance; }
+        .lw-line { display: -webkit-box; overflow: hidden; -webkit-box-orient: vertical; -webkit-line-clamp: 2; font-size: 0.8125rem; line-height: 1.3; color: rgb(var(--ap-ink-2)); text-wrap: pretty; }
+        .lw-where { color: rgb(var(--ap-ink-3)); }
+        .lw-img { width: 100%; height: 100%; object-fit: cover; }
+        .lw-cards .gk-w-b { font-weight: 700; }
+        .lw-cards .gk-w-i { font-style: italic; }
+        .lw-cards .gk-w-s { text-decoration: line-through; }
+        .lw-preview-note { margin: 0.5rem 0 0; font-size: 0.8125rem; color: rgb(var(--ap-ink-3)); }
+
         /* Hide all sections except the first one by default */
         .section-content {
             display: none;
@@ -750,7 +768,9 @@
             'email' => __('messages.email'),
             'not_connected' => __('messages.settings_not_connected'),
             'gallery_prompt' => __('messages.gallery_add_first'),
-            'settings_holds' => implode(', ', [__('messages.schedule_url'), __('messages.notifications'), __('messages.advanced')]),
+            'settings_holds' => implode(', ', array_filter([__('messages.schedule_url'), $role->exists ? __('messages.ticket_presets') : null, __('messages.notifications'), __('messages.advanced')])),
+            'preset_default' => __('messages.ticket_preset_default'),
+            'preset_team' => __('messages.ticket_presets_team_summary'),
             'gallery_count' => count($galleryState['images'] ?? []),
             'email_failing' => $role->isEmailSettingsFailureActive() ? __('messages.email_settings_failed_warning_title') : '',
             // "Connected" is said of a schedule that syncs, not of an account that could.
@@ -3301,6 +3321,54 @@
                         <!-- End Tab Content: General -->
 
                         <div class="event-subrows">
+                        @if ($role->exists)
+                        {{-- Ticket presets (issue #130): the ticket setups an event's Tickets tab starts from,
+                             one the default for new events, and the owner's switch that has the rest of
+                             the team pick one instead of typing prices. The list is a Vue island mounted
+                             ON #ticket-preset-items (resources/js/components/TicketPresetsEditor.vue), so
+                             its rows are direct children of the element the list watcher below observes;
+                             every value reaches it through the JSON blob, never as markup. A schedule not
+                             yet saved has no events to start, so the row waits for one. --}}
+                        @php
+                            $presetEditor = \App\Services\TicketPresets::scheduleEditorState($role, auth()->user());
+                            $presetEditorJson = json_encode($presetEditor, JSON_HEX_TAG | JSON_HEX_AMP | JSON_HEX_APOS | JSON_HEX_QUOT | JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE);
+                            $presetTeamOn = \App\Services\TicketPresets::teamUsesPresets($role);
+                            $presetSummary = collect($presetEditor['presets'])->map(fn ($p) => ($p['name'] !== '' ? $p['name'] : ($p['label'] ?? '')).(! empty($p['is_default']) ? ' ('.__('messages.ticket_preset_default').')' : ''))->implode(', ');
+                            if ($presetSummary !== '' && $presetTeamOn) {
+                                $presetSummary .= ' · '.__('messages.ticket_presets_team_summary');
+                            }
+                        @endphp
+                        <x-form-row group="settings" tab="tickets" :title="__('messages.ticket_presets')" :summary="$presetSummary !== '' ? $presetSummary : __('messages.none')" :muted="$presetSummary === ''" class="settings-tab" />
+                        <div id="settings-tab-tickets" class="event-subrow-body settings-tab-content" hidden>
+                            <p class="mb-4 text-sm text-gray-500 dark:text-gray-400">{{ __('messages.ticket_presets_help') }}</p>
+                            {{-- ticket_presets_submitted is drawn by the island itself (see TicketPresetsEditor.vue). --}}
+                            <p id="ticket-presets-empty" class="py-3 text-sm text-gray-500 dark:text-gray-400" @if ($presetEditor['presets']) hidden @endif>{{ __('messages.ticket_presets_empty') }}</p>
+                            <div id="ticket-preset-items" class="event-list" data-island data-summary="{{ $presetSummary }}" data-team-on="{{ $presetTeamOn ? 1 : 0 }}"></div>
+                            <script type="application/json" id="ticket-preset-items-json" {!! nonce_attr() !!}>{!! $presetEditorJson !!}</script>
+                            <x-input-error class="mt-2" :messages="$errors->get('ticket_presets.*')" />
+                            @if ($presetEditor['canEdit'])
+                            <button type="button" data-action="add-ticket-preset" class="event-link mt-3" disabled>+ {{ __('messages.ticket_preset_add') }}</button>
+                            @endif
+
+                            @if ($presetEditor['switchOffered'])
+                            <div class="preset-switch">
+                                <x-toggle name="ticket_presets_team" id="ticket_presets_team"
+                                    :checked="(bool) old('ticket_presets_team', $presetTeamOn)"
+                                    label="{{ __('messages.ticket_presets_team') }}"
+                                    help="{{ __('messages.ticket_presets_team_help') }}" />
+                                <p id="ticket-presets-team-blocker" class="text-xs text-gray-500 dark:text-gray-400 mt-1 ms-14" hidden></p>
+                                <x-input-error class="mt-2 ms-14" :messages="$errors->get('ticket_presets_team')" />
+                            </div>
+                            @elseif ($presetTeamOn)
+                            <div class="mt-4 mb-4 preset-note">
+                                <svg class="w-4 h-4 flex-shrink-0 mt-0.5" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" d="M16.5 10.5V6.75a4.5 4.5 0 10-9 0v3.75m-.75 11.25h10.5a2.25 2.25 0 002.25-2.25v-6.75a2.25 2.25 0 00-2.25-2.25H6.75a2.25 2.25 0 00-2.25 2.25v6.75a2.25 2.25 0 002.25 2.25z" /></svg>
+                                <span v-pre>{{ __('messages.ticket_presets_locked_note', ['owner' => \App\Services\TicketPresets::ownerName($role)]) }}</span>
+                            </div>
+                            @endif
+                        </div>
+                        <!-- End Tab Content: Ticket presets -->
+                        @endif
+
                         <!-- Tab Content: Notifications -->
                         <x-form-row group="settings" tab="notifications" :title="__('messages.notifications')" class="settings-tab" />
                         <div id="settings-tab-notifications" class="event-subrow-body settings-tab-content" hidden>
@@ -3786,6 +3854,166 @@
                                 </select>
                                 <x-input-error class="mt-2" :messages="$errors->get('first_day_of_week')" />
                             </div>
+
+                            {{-- How each event on the schedule's list is worded (App\Utils\ListWording): the
+                                 list's own cards, the wording of the Events graphic caption (what the owner
+                                 posts to WhatsApp), or a wording of the list's own with the same {variables}.
+                                 Stored in graphic_settings, because roles is at its row limit, and written only
+                                 from a save that carries list_wording_submitted. The preview under it is the
+                                 schedule's next three events as the list would draw them; nothing of it is
+                                 public until Save. --}}
+                            @php
+                                $listWordingMode = old('list_wording', \App\Utils\ListWording::mode($role));
+                                $listWordingTemplate = old('list_template', ($role->graphic_settings ?? [])['list_template'] ?? '');
+                                // A schedule read in two languages: the owner's words cannot be translated, so
+                                // a visitor reading the other one keeps the usual cards.
+                                $listWordingTwoLanguages = ($role->language_code ?: 'en') !== ($role->translation_language_code ?: 'en');
+                            @endphp
+                            <div class="mb-6" id="list-wording" data-preview="{{ $role->exists ? route('event.graphic_list_preview', ['subdomain' => $role->subdomain]) : '' }}" data-caption="{{ (($role->graphic_settings ?? [])['text_template'] ?? '') ?: \App\Utils\EventTextGenerator::getDefaultTemplate() }}">
+                                <input type="hidden" name="list_wording_submitted" value="1">
+                                <x-input-label for="list_wording" :value="__('messages.list_wording_label')" />
+                                <select name="list_wording" id="list_wording"
+                                    class="mt-1 block w-full border-gray-300 dark:border-gray-700 dark:bg-gray-900 dark:text-gray-300 focus:border-[var(--brand-blue)] focus:ring-[var(--brand-blue)] rounded-lg shadow-sm">
+                                    @foreach (\App\Utils\ListWording::MODES as $mode)
+                                    <option value="{{ $mode }}" {{ $listWordingMode === $mode ? 'selected' : '' }}>{{ __('messages.list_wording_'.$mode) }}</option>
+                                    @endforeach
+                                </select>
+                                <p class="mt-1 text-sm text-gray-500 dark:text-gray-400">{{ __('messages.list_wording_help') }}</p>
+                                <p class="mt-1 text-sm text-gray-500 dark:text-gray-400" data-list-wording-when="caption" @if ($listWordingMode !== 'caption') hidden @endif>
+                                    {{ __('messages.list_wording_caption_help') }}
+                                    @if ($role->exists)
+                                    <x-link href="{{ route('event.generate_graphic', ['subdomain' => $role->subdomain]) }}#graphic-pane-caption">{{ __('messages.list_wording_edit_caption') }}</x-link>
+                                    @endif
+                                </p>
+                                <div class="mt-3" data-list-wording-when="custom" @if ($listWordingMode !== 'custom') hidden @endif>
+                                    <x-input-label for="list_template" :value="__('messages.list_wording_template')" />
+                                    <textarea id="list_template" name="list_template" rows="5" maxlength="2000" dir="ltr" spellcheck="false"
+                                        class="mt-1 block w-full font-mono text-sm border-gray-300 dark:border-gray-700 dark:bg-gray-900 dark:text-gray-300 focus:border-[var(--brand-blue)] focus:ring-[var(--brand-blue)] rounded-lg shadow-sm"
+                                        placeholder="*{event_name}*&#10;{short_description}&#10;📍 {venue}">{{ $listWordingTemplate }}</textarea>
+                                    <p class="mt-1 text-sm text-gray-500 dark:text-gray-400">{{ __('messages.list_wording_template_help') }} <x-link href="{{ marketing_url('/docs/event-graphics#variables') }}" target="_blank">{{ __('messages.graphic_all_variables') }}</x-link></p>
+                                    <x-input-error class="mt-2" :messages="$errors->get('list_template')" />
+                                </div>
+                                <x-input-error class="mt-2" :messages="$errors->get('list_wording')" />
+                                @if ($listWordingTwoLanguages)
+                                <p class="mt-2 text-sm text-gray-500 dark:text-gray-400" data-list-wording-when="caption custom" @if ($listWordingMode === 'standard') hidden @endif>{{ __('messages.list_wording_language', ['language' => __('messages.'.(config('app.supported_languages')[\App\Utils\ListWording::language($role)] ?? 'english'))]) }}</p>
+                                @endif
+                                <div class="lw-preview" data-list-wording-preview hidden>
+                                    <p class="lw-preview-label">{{ __('messages.list_wording_preview') }}</p>
+                                    <ul class="lw-cards"></ul>
+                                    <p class="lw-preview-note" data-note-no-name hidden>{{ __('messages.list_wording_no_name') }}</p>
+                                </div>
+                            </div>
+                            <script {!! nonce_attr() !!}>
+                            {{-- Plain DOM, as the rest of this form is: the choice shows its own fields, and the
+                                 preview asks the server for the next three cards in the wording being chosen
+                                 (GraphicController::listWordingPreview()). Everything it draws is text. --}}
+                            (function () {
+                                var root = document.getElementById('list-wording');
+                                if (! root) { return; }
+                                var select = document.getElementById('list_wording');
+                                var text = document.getElementById('list_template');
+                                var box = root.querySelector('[data-list-wording-preview]');
+                                var cards = box.querySelector('.lw-cards');
+                                var noName = box.querySelector('[data-note-no-name]');
+                                var url = root.dataset.preview;
+                                var timer = null;
+                                var turn = 0;
+                                var make = function (tag, cls, words) {
+                                    var node = document.createElement(tag);
+                                    if (cls) { node.className = cls; }
+                                    if (words != null) { node.textContent = words; }
+                                    return node;
+                                };
+                                var parts = function (target, list) {
+                                    list.forEach(function (part) {
+                                        var node = make(part.k === 'lit' ? 'span' : 'bdi', part.c || '', part.v);
+                                        if (part.l) { node.dir = 'ltr'; }
+                                        if (part.d) { node.setAttribute('aria-hidden', 'true'); }
+                                        target.appendChild(node);
+                                    });
+                                };
+                                var draw = function (list) {
+                                    var missing = false;
+                                    cards.textContent = '';
+                                    list.forEach(function (card) {
+                                        var item = make('li', 'lw-card');
+                                        var body = make('div', 'lw-text');
+                                        var time = make('span', 'lw-time');
+                                        var clock = make('bdi', null, card.time);
+                                        clock.dir = 'ltr';
+                                        time.appendChild(clock);
+                                        body.appendChild(time);
+                                        if (card.wording) {
+                                            var name = make('strong', 'lw-name');
+                                            name.dir = card.wording.dir;
+                                            parts(name, card.wording.name);
+                                            body.appendChild(name);
+                                            card.wording.body.forEach(function (line) {
+                                                var row = make('span', 'lw-line');
+                                                row.dir = card.wording.dir;
+                                                parts(row, line.p);
+                                                body.appendChild(row);
+                                            });
+                                        } else {
+                                            missing = true;
+                                            var plain = make('strong', 'lw-name', card.name);
+                                            plain.dir = card.dir;
+                                            body.appendChild(plain);
+                                            if (card.about) { body.appendChild(make('span', 'lw-line', card.about)); }
+                                            if (card.where) { body.appendChild(make('span', 'lw-line lw-where', card.where)); }
+                                        }
+                                        item.appendChild(body);
+                                        if (card.image) {
+                                            var img = make('img', 'lw-img');
+                                            img.src = card.image;
+                                            img.alt = '';
+                                            img.loading = 'lazy';
+                                            item.appendChild(img);
+                                        } else {
+                                            item.classList.add('is-bare');
+                                        }
+                                        cards.appendChild(item);
+                                    });
+                                    noName.hidden = ! missing;
+                                };
+                                var load = function () {
+                                    var mode = select.value;
+                                    var mine = ++turn;
+                                    var query = new URLSearchParams({ mode: mode, template: mode === 'custom' ? text.value : '' });
+                                    fetch(url + '?' + query.toString(), { headers: { 'Accept': 'application/json' }, credentials: 'same-origin' })
+                                        .then(function (response) { return response.ok ? response.json() : null; })
+                                        .then(function (body) {
+                                            if (mine !== turn) { return; }
+                                            if (! body || ! body.cards || ! body.cards.length) { box.hidden = true; return; }
+                                            draw(body.cards);
+                                            box.hidden = false;
+                                        })
+                                        .catch(function () { if (mine === turn) { box.hidden = true; } });
+                                };
+                                var show = function () {
+                                    var mode = select.value;
+                                    root.querySelectorAll('[data-list-wording-when]').forEach(function (node) {
+                                        node.hidden = node.getAttribute('data-list-wording-when').split(' ').indexOf(mode) === -1;
+                                    });
+                                    // A wording of the list's own starts from the caption's, not from nothing.
+                                    if (mode === 'custom' && ! text.value.trim()) {
+                                        text.value = root.dataset.caption || '';
+                                        text.dispatchEvent(new Event('input', { bubbles: true }));
+                                    }
+                                    clearTimeout(timer);
+                                    turn++;
+                                    if (mode === 'standard' || ! url) { box.hidden = true; return; }
+                                    timer = setTimeout(load, 300);
+                                };
+                                select.addEventListener('change', show);
+                                text.addEventListener('input', function () {
+                                    if (select.value !== 'custom') { return; }
+                                    clearTimeout(timer);
+                                    timer = setTimeout(load, 450);
+                                });
+                                if (select.value !== 'standard') { show(); }
+                            })();
+                            </script>
 
                             <div class="mb-6">
                                 <x-toggle name="show_accessibility_widget"
@@ -7398,6 +7626,29 @@ document.addEventListener('DOMContentLoaded', function() {
     kit.summary('settings:advanced', function() {
         return labelsIn(byId('settings-tab-advanced'));
     });
+    // The presets by name, the default marked, as the island draws them; the server's words until
+    // it has (TicketPresetsEditor.vue mounts on the list).
+    kit.summary('settings:tickets', function() {
+        var host = byId('ticket-preset-items');
+        if (! host) {
+            return '';
+        }
+        if (! host.dataset.mounted) {
+            return host.dataset.summary ? host.dataset.summary : { text: words.none, empty: true };
+        }
+        var names = Array.prototype.map.call(host.querySelectorAll(':scope > [data-list-row]'), function(row) {
+            var named = row.querySelector('[data-row-name]');
+            var name = named ? named.textContent.replace(/\s+/g, ' ').trim() : '';
+            return name && row.querySelector('.event-chip') ? name + ' (' + words.preset_default + ')' : name;
+        }).filter(Boolean);
+        if (! names.length) {
+            return { text: words.none, empty: true };
+        }
+        // The owner's toggle as it stands; anyone else has no toggle, and reads what is saved.
+        var team = byId('ticket_presets_team');
+        var teamOn = team ? team.checked : host.dataset.teamOn === '1';
+        return names.join(', ') + (teamOn ? ' · ' + words.preset_team : '');
+    });
     kit.summary('integration:advanced', function() {
         return labelsIn(byId('integration-tab-advanced'));
     });
@@ -7667,6 +7918,7 @@ document.addEventListener('DOMContentLoaded', function() {
         ['section-engagement', '#approved-subdomains-items'],
         ['section-sources', '#source-schedule-items'],
         ['section-gift-cards', '#gift-card-amounts-items'],
+        ['section-settings', '#ticket-preset-items'],
         ['section-auto-import', '#import-url-items'],
         ['section-auto-import', '#import-city-items'],
         ['section-links', '#links-tab-youtube_videos'],
@@ -7705,16 +7957,26 @@ document.addEventListener('DOMContentLoaded', function() {
         // After the page's own setup (pickers mounting, lists being drawn), which is not a change.
         setTimeout(function() {
             lists.forEach(function(entry) {
-                // The two link lists are redrawn whole on every change, so a redraw is not a removal.
-                entry.saved = entry.section === 'section-links' ? [] : Array.prototype.slice.call(entry.element.children).map(function(row) {
-                    return { row: row, name: rowName(row) };
-                });
-                new MutationObserver(function() {
-                    kit.markDirty(entry.section);
-                    if (window._markFormDirty) { window._markFormDirty(); }
-                    kit.refresh();
-                    removals();
-                }).observe(entry.element, { childList: true, subtree: entry.section === 'section-links' });
+                var watch = function() {
+                    // The two link lists are redrawn whole on every change, so a redraw is not a removal.
+                    entry.saved = entry.section === 'section-links' ? [] : Array.prototype.slice.call(entry.element.children).map(function(row) {
+                        return { row: row, name: rowName(row) };
+                    });
+                    new MutationObserver(function() {
+                        kit.markDirty(entry.section);
+                        if (window._markFormDirty) { window._markFormDirty(); }
+                        kit.refresh();
+                        removals();
+                    }).observe(entry.element, { childList: true, subtree: entry.section === 'section-links' });
+                };
+                // A list a Vue island draws (data-island, Settings > Ticket presets) is counted once
+                // it has drawn its rows: drawn late, they read as a change nobody made, and a row
+                // removed later was never in the snapshot to be announced.
+                if (entry.element.hasAttribute('data-island') && ! entry.element.dataset.mounted) {
+                    entry.element.addEventListener('island:mounted', watch, { once: true });
+                } else {
+                    watch();
+                }
             });
             kit.arm();
         }, 600);

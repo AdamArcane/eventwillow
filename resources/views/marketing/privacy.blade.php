@@ -782,7 +782,7 @@
 
         // The date of the last change to what this policy says. A fact about the document: move it
         // only in a commit that changes a clause.
-        $lastUpdated = 'October 8, 2026';
+        $lastUpdated = 'October 15, 2026';
 
         // The AI providers this install actually calls (GeminiUtils, OpenAIUtils).
         $aiProviders = array_values(array_filter([
@@ -821,6 +821,7 @@
             ['Stripe', 'Payment processing: paid plans and Boost, and ticket sales on schedules whose owner has connected Stripe, where Stripe receives the buyer\'s name and email address. Card details are entered with Stripe and never reach us.'],
             ['PayPal', 'Payment processing, on schedules whose owner has connected a PayPal account'],
             ['Payfast', 'Payment processing, on schedules whose owner has connected a Payfast account'],
+            ['Razorpay', 'Payment processing, on schedules whose owner has connected a Razorpay account, where Razorpay receives the buyer\'s name and email address and the event\'s name.'],
             ['Invoice Ninja', 'Invoicing, on schedules whose owner has connected Invoice Ninja: the buyer\'s name, email address and what they bought.'],
             google_analytics_enabled() ? ['Google Analytics', 'Site statistics, and only if you allow analytics cookies (clause 12).'] : null,
             config('services.google.backend') || config('services.google.maps') ? ['Google Maps', 'Placing venues on a map from their address. The interactive map on an event page loads only if you allow marketing cookies or ask to see it.'] : null,
@@ -844,7 +845,7 @@
                 ? ['Meta (Facebook Login)', 'Sign-in, and only when you choose Continue with Facebook. Facebook tells us your name, email address and Facebook account ID; we keep the name and email on your account and store the ID to recognize you next time. We never receive your password and never store a Facebook access token. You can disconnect Facebook in Settings at any time, and deleting your account removes all of it']
                 : null,
             config('services.meta.access_token') || config('services.meta.pixel_id')
-                ? ['Meta (Boost)', 'Advertising for events whose organizer buys a Boost. On those event pages, the Meta Pixel; and when someone buys a ticket to one, the purchase with a one-way hash of the buyer\'s email address, which Meta matches to a Meta account if there is one, so the organizer can see what the campaign sold. Both only for visitors and buyers who allowed marketing cookies.']
+                ? ['Meta (Boost)', 'Advertising for events whose organizer buys a Boost. On those event pages, the Meta Pixel; and when someone buys a ticket to one, the purchase with a one-way hash of the buyer\'s email address, which Meta matches to a Meta account if there is one, so the organizer can see what the campaign sold. Both only for visitors and buyers who allowed marketing cookies. And for a network that runs boosts under its own Facebook Page and ad account, the access Facebook grants us to them, stored encrypted and removed when the network disconnects or deletes its account.']
                 : null,
             config('ads.enabled') && config('ads.adsense_enabled')
                 ? ['Google AdSense', 'Ads on the pages of free schedules, loaded only if you allow marketing cookies.']
@@ -1222,7 +1223,9 @@
                                                      the visitor for its route template) from every row this browser still has on its
                                                      network, plus the account's when the withdrawing page is signed in. Rows are
                                                      pruned about an hour after last activity (realtime:prune on both cron rails, plus
-                                                     a request-time backstop). Keep this paragraph in step with that code.
+                                                     a request-time backstop), each counted first into realtime_hourly, which holds per
+                                                     hour and part of the site only page views and visits and is kept KEEP_DAYS
+                                                     (RealtimeRollup). Keep this paragraph in step with that code.
 
                                                      Who sees it follows RealtimeTracker::ownerViewEnabled(), the predicate behind a
                                                      schedule owner's own Realtime tab (/analytics, App\Services\ScheduleRealtime):
@@ -1237,7 +1240,7 @@
                                                     @else
                                                     We also keep a short-lived record for a live view of the site that only our administrators can see, never schedule owners.
                                                     @endif
-                                                    What it holds depends on your analytics choice. If you allow analytics, each page you view is recorded with the page, the referring site and campaign tag, your country (looked up from your IP address, which itself is not stored), your device type, browser and operating system, and how long the page stays open, under a one-way hash of your IP address, browser and language settings that changes every day; while you are signed in it is linked to your account, including the pages you viewed in this browser just before signing in. If you decline, do not answer, or your browser sends Global Privacy Control, each page view is still counted, but with no identifier and nothing that links it to you or to your other page views: only the page (for pages behind sign-in, just which kind of page), your country, your device type and, when you arrive from another site or a tagged link, that site and campaign tag. Either way, records are deleted about an hour after your last activity, and if you withdraw your consent, the identifiers are removed from what this browser still has on its current network and, if you are signed in when you withdraw, from your account's records.
+                                                    What it holds depends on your analytics choice. If you allow analytics, each page you view is recorded with the page, the referring site and campaign tag, your country (looked up from your IP address, which itself is not stored), your device type, browser and operating system, and how long the page stays open, under a one-way hash of your IP address, browser and language settings that changes every day; while you are signed in it is linked to your account, including the pages you viewed in this browser just before signing in. If you decline, do not answer, or your browser sends Global Privacy Control, each page view is still counted, but with no identifier and nothing that links it to you or to your other page views: only the page (for pages behind sign-in, just which kind of page), your country, your device type and, when you arrive from another site or a tagged link, that site and campaign tag. Either way, records are deleted about an hour after your last activity. Before they go, each page view is added to an hourly total for its part of the site (how many pages were viewed and how many visits began that hour, with nothing about who viewed them or which page), and those totals are kept for about two months. If you withdraw your consent, the identifiers are removed from what this browser still has on its current network and, if you are signed in when you withdraw, from your account's records.
                                                 </p>
                                                 <p>
                                                     We honor the <a href="https://globalprivacycontrol.org/" target="_blank" rel="noopener" class="es-fine-link">Global Privacy Control<svg class="es-fine-ext" aria-hidden="true" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4"><path stroke-linecap="round" stroke-linejoin="round" d="M13 5h6v6M19 5L9 15M15 19H5V9" /></svg></a> signal: if your browser sends GPC, we treat it as declining both categories, and the banner does not appear.

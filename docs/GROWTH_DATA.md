@@ -335,7 +335,10 @@ credits, legacy `plan_expires` rows and trials, which is most paid-tier schedule
 - `boost`:
   - `net_markup[]` (`{month, currency, net_markup}`) is our revenue from paid promotions, net of
     refunds;
-  - `campaigns[]` is `{month, campaigns, schedules}`.
+  - `campaigns[]` is `{month, campaigns, schedules}`, every channel, partner boosts included;
+  - `partner_fees[]` (`{month, currency, fee}`) is the 20% fee boost partners paid on the actual
+    spend of their own ad accounts, by the month the spend was in (a statement's period), paid
+    statements only.
 - `referrals`: `by_status`, `created_by_month`.
 - `federation`: the selfhost installs that registered for federation, which is only a floor on
   selfhost installs. Fields: `by_status`, `active_30d`, `by_version`, `registered_by_month`.
@@ -458,7 +461,7 @@ Both are columnar: read `columns[]`, then `rows[][]`. They are newest first and 
 | `features` | Settings switched on: `gcal` (a Google sync direction is set; before schema 12 it read a column nothing wrote), `mscal`, `caldav`, `custom_domain` (working, not failed or pending), `custom_css`, `custom_fields`, `banner`, `feedback`, `carpool`, `gift_cards` (enabled), `accept_requests` (on for nearly everyone by default), `sponsors`, `own_smtp`, `event_interest`, `no_subscribe_panel`, `stay22`, `federation`, `announce_events`, `fan_content`; on the owner's account: `api_key`, `webhooks`; and features actually used: `passes`, `seating`, `promo_codes`, `waitlist`, `sub_schedules`, `newsletter_sent`, `gift_cards_sold`, `gallery`, `boost`, `ai_import`, `team` (anyone but the owner has access) |
 | `days_to_upgrade` | Creation to first real subscription, days; null = never |
 | `country` | ISO country code, or `(other)` when fewer than 5 schedules share it |
-| `gateways` | Payment gateways on the owner's account: `stripe` (Connect onboarding completed), `paypal`, `payfast`, `invoiceninja` |
+| `gateways` | Payment gateways on the owner's account: `stripe` (Connect onboarding completed), `paypal`, `payfast`, `razorpay`, `invoiceninja` |
 | `stripe_connected_month` | Month the owner completed Stripe Connect (the only gateway that records when) |
 | `dismissed_steps` | Dashboard next steps dismissed for this schedule (`tickets`, `payments`, ...) |
 | `events_by_source` | Of its listed events: `created` by it, from `other_schedules`, `guest` submissions, linked to a `google` entry by the owner's sync (in either direction), synced from `caldav`, `auto_sourced` (curator rules). These overlap; they do not sum to `events_total`. From schema 12 also `imported` and one `imported_{source}` per import source. See below |
@@ -564,6 +567,13 @@ created over the API or WhatsApp cannot carry a price.
 
 ## Changelog (`meta.schema_version`)
 
+- **20** (2026-10-15)
+  - **`boost.partner_fees`**: the monthly fee boost partners pay on actual spend in their own
+    ad accounts. Their campaigns are also counted in `boost.campaigns`, and never in
+    `net_markup` (they carry no markup). Nothing else changed shape.
+- **19** (2026-10-15)
+  - **`gateways` can hold `razorpay`**, for an owner who has connected Razorpay keys. Nothing else
+    changed shape.
 - **18** (2026-10-08)
   - **New section `blog`**: a row a published post, with its `path`, `section`, `source`,
     `published` month, `words`, `views` and `noindex`. Until now the blog reached this file only

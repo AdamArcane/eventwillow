@@ -177,7 +177,7 @@
             </div>
             <div class="doc-field">
                 <h4>Recent schedules and Recent events</h4>
-                <p>The twenty newest of each, eight shown until you choose <strong>Show more</strong>, with the schedule's photo or the event's flyer. Unlisted events and appointment bookings are left out. A draft, a guest submission and an imported event carry a flag, and a burst of events from one schedule is a single row. Rows added since your last visit in this browser are marked.</p>
+                <p>The twenty newest of each, eight shown until you choose <strong>Show more</strong>, with the schedule's photo or the event's flyer. Unlisted events and appointment bookings are left out. A draft, a guest submission and an imported event carry a flag, and a burst of events from one schedule is a single row. Rows added since your last visit in this browser are marked. A name with an arrow beside it opens the public page in a new tab; a draft, or an event no schedule shows yet, opens its edit page instead.</p>
             </div>
             <div class="doc-field">
                 <h4>Sign-ups</h4>
@@ -193,7 +193,7 @@
             </div>
             <div class="doc-field">
                 <h4>Latest sign-ups</h4>
-                <p>The eight newest organizers of the last 30 days, where each came from, and how far each has got: a schedule, an event, a ticket type.</p>
+                <p>The eight newest organizers of the last 30 days, where each came from, and how far each has got: a schedule, an event, a ticket type. The schedule's name opens it in the admin panel, and the arrow beside it opens its public page.</p>
             </div>
             <div class="doc-field">
                 <h4>Revenue</h4>
@@ -295,7 +295,7 @@
                     </tr>
                     <tr>
                         <td>Refunds awaiting confirmation</td>
-                        <td>A refund sent to Stripe or PayPal whose outcome the provider still has not confirmed after 15 minutes. The money may already have moved, so nothing retries it: you settle it in the provider's own dashboard. Links to a list on the Revenue page.</td>
+                        <td>A refund sent to Stripe, PayPal or Razorpay whose outcome the provider still has not confirmed after 15 minutes. The money may already have moved, so nothing retries it: you settle it in the provider's own dashboard. Links to a list on the Revenue page.</td>
                         <td>Every install</td>
                     </tr>
                     <tr>
@@ -307,6 +307,11 @@
                         <td>Promotions awaiting review</td>
                         <td>A paid on-network promotion waiting for approval before it can serve. Links to the queue on the Boost page.</td>
                         <td>When the promotions network is enabled</td>
+                    </tr>
+                    <tr>
+                        <td>Accounts may be spam</td>
+                        <td>An account with one of your watched words, such as <code class="doc-inline-code">paypal</code> or <code class="doc-inline-code">bitcoin</code>, in a schedule it owns or an event it made, or in its own name or email address once it owns a schedule. It clears as you block each one or mark it not spam. Links to <a href="#blocked-spam" class="doc-link">Blocked</a>.</td>
+                        <td>Every install</td>
                     </tr>
                     <tr>
                         <td>Approved instances changed their address</td>
@@ -380,20 +385,24 @@
         <div class="doc-fields doc-fields--grouped">
             <div class="doc-field">
                 <h4>Visitors right now</h4>
-                <p>People with a page open and visible in the last couple of minutes, split into signed in and anonymous. The buttons beside the number say where those people are: on the marketing site, on schedule pages or in the app (and on the sign-up and log-in pages while someone is there). Each area has its own colour and icon wherever a person or a page appears on this page, and clicking a button filters the whole page to that area.</p>
-                <p>Beneath it, the last 30 minutes: the total number of page views, then how many came from visitors who accepted cookies (and how many visitors that was) and how many from visitors who have not.</p>
+                <p>People with a page open and visible in the last couple of minutes, split into signed in and anonymous, and where each of them is. There is a column for each area: the marketing site, schedule pages and the app (and the sign-up and log-in pages while someone is there). Each area has its own colour and icon wherever a person or a page appears on this page. Under its name, a column lists the pages people are on, busiest first, with how many are on each and who: a signed-in person's initials, or the flag of an anonymous visitor's country. Click an area's name to filter the whole page to it, a page's name to filter to that page, a face to open that person's row under Visitors, and the arrow to open the page itself.</p>
             </div>
             <div class="doc-field">
-                <h4>Page views per minute</h4>
-                <p>The last 30 minutes, in the same two colours. A green dot above a minute marks a sign-up; point at that minute to see who.</p>
+                <h4>Trends</h4>
+                <p>The last 24 hours by the hour, or the last 7 or 30 days by the day, each figure against the same span just before it, cut at the same time of day. Page views and visits are drawn by area. Sign-ups, new schedules, new events and orders are counted as Activity counts them, from the audit log. Click a figure to draw it in the chart. The bar for the hour or day still under way is drawn lighter.</p>
+                <p>Page views and visits are hourly totals, kept for about two months, that start counting on the day this version is installed. Until a range is covered the card says when counting began, and it shows a comparison only where it has the span before. Visitors are not added up across hours: telling one person seen in two hours from two people would mean keeping who they were. Admins are never counted in Trends, and neither is an embedded calendar.</p>
+            </div>
+            <div class="doc-field">
+                <h4>Last 30 minutes</h4>
+                <p>The total number of page views, then how many came from visitors who accepted cookies (and how many visitors that was) and how many from visitors who have not. Beside it, page views per minute in the same two colours. A green dot above a minute marks a sign-up; point at that minute to see who.</p>
             </div>
             <div class="doc-field">
                 <h4>Activity</h4>
-                <p>The last 24 hours of sign-ups, new schedules and events, orders, plan changes and support chats, read from the <a href="#system-audit-log" class="doc-link">audit log</a>. The counts at the top (sign-ups, schedules, events, orders, and upgrades on a day that has one) are buttons: click one to list only that kind.</p>
+                <p>The last 24 hours of sign-ups, new schedules and events, orders, plan changes and support chats, read from the <a href="#system-audit-log" class="doc-link">audit log</a>. The counts at the top (sign-ups, schedules, events, orders, and upgrades on a day that has one) are buttons: click one to list only that kind. The arrow at the end of an item opens the public page of the event or schedule it is about.</p>
             </div>
             <div class="doc-field">
                 <h4>Sign-ups</h4>
-                <p>Everyone who signed up in the last 24 hours, newest first: where they came from when that was recorded, when they signed up, and how far they have got since (saved a schedule, saved an event, added a ticket type), with a link to their schedule. The strip above the list counts how many of the day's sign-ups reached each step, and the small bars show which hours they arrived in. Someone who signed up to follow a schedule or to join a team is labelled that way. Activity and Sign-ups cover the whole install and ignore the filters below.</p>
+                <p>Everyone who signed up in the last 24 hours, newest first: where they came from when that was recorded, when they signed up, and how far they have got since (saved a schedule, saved an event, added a ticket type), with a link to their schedule in the admin panel and an arrow that opens its public page. The strip above the list counts how many of the day's sign-ups reached each step, and the small bars show which hours they arrived in. Someone who signed up to follow a schedule or to join a team is labelled that way. Activity and Sign-ups cover the whole install and ignore the filters below.</p>
             </div>
             <div class="doc-field">
                 <h4>Visitors</h4>
@@ -401,7 +410,7 @@
             </div>
             <div class="doc-field">
                 <h4>Top pages, Sources, Countries, Surfaces</h4>
-                <p>Click any row to filter the whole page to it. The filters in force are listed as chips at the top, and they stay in the address, so a filtered view can be bookmarked.</p>
+                <p>Click any row to filter the whole page to it. The filters in force are listed as chips at the top, and they stay in the address, so a filtered view can be bookmarked. The arrow beside a top page opens that page in a new tab.</p>
             </div>
         </div>
 
@@ -410,7 +419,7 @@
         <p class="text-gray-600 dark:text-gray-300 mb-6">Records are deleted about an hour after a visitor's last activity. Realtime stores no IP address or user-agent string and sets no cookie of its own. Site administrators see all of its records. Schedule owners see none of them unless you also switch on <a href="#realtime-owner-view" class="doc-link">their own view</a>, and then only the part about their own pages and never who anyone is.</p>
 
         <h3 id="realtime-not-counted" class="doc-subheading">Who is never counted</h3>
-        <p class="text-gray-600 dark:text-gray-300 mb-6">REST API clients, including apps and AI agents using an API key; calendar feeds; email opens; visitors with JavaScript turned off; and embedded calendars on other websites, which appear only as a count under Surfaces. A schedule owner signed in on their own custom domain appears anonymous there, because their session belongs to the main domain. Identical phones with the same language setting on one network can count as one visitor.</p>
+        <p class="text-gray-600 dark:text-gray-300 mb-6">REST API clients, including apps and AI agents using an API key; calendar feeds; email opens; visitors with JavaScript turned off; and embedded calendars on other websites, which appear only as a count under Surfaces. A schedule owner signed in on their own custom domain appears anonymous there, because their session belongs to the main domain. Identical phones with the same language setting on one network can count as one visitor. A <a href="#blocked-account" class="doc-link">blocked account</a> is left out too, with every view of its schedules' and events' pages and what happened on them in the last day. What it browsed while not signed in, before or after, shows as an anonymous visitor and is never joined to anyone else.</p>
 
         <h3 id="realtime-owner-view" class="doc-subheading">What schedule owners see</h3>
         <p class="text-gray-600 dark:text-gray-300 mb-6">A second switch at <a href="#settings-realtime" class="doc-link">Settings</a>, <strong>Show schedule owners live traffic to their own pages</strong>, gives everyone who manages a schedule a Realtime tab on their Analytics page, and a Realtime number on their dashboard, described in the <a href="{{ route('marketing.docs.analytics') }}#realtime" class="doc-link">Analytics guide</a>. It is on for eventschedule.com and off on every other install until you turn it on, and it works only while Realtime itself is on.</p>
@@ -537,7 +546,7 @@
         <p class="text-gray-600 dark:text-gray-300 mb-4">When the amount a payment provider reports does not match the amount the sale expected, the sale is parked as a mismatch rather than being treated as paid. Those sales, and any boost campaign in the same state, are listed in an amber panel, with two actions each:</p>
         <ul class="doc-list mb-6">
             <li><strong class="text-gray-900 dark:text-white">Approve</strong> - accept it and mark it paid. For a ticket sale, the buyer is then sent their tickets</li>
-            <li><strong class="text-gray-900 dark:text-white">Refund</strong> - for a ticket sale, send the whole payment back through the provider that took it, Stripe or PayPal, which the confirmation names. The button only appears when that provider can refund, so a mismatch paid through Invoice Ninja or Payfast offers Approve alone. A boost campaign's charge is refunded through Stripe</li>
+            <li><strong class="text-gray-900 dark:text-white">Refund</strong> - for a ticket sale, send the whole payment back through the provider that took it, Stripe, PayPal or Razorpay, which the confirmation names. The button only appears when that provider can refund, so a mismatch paid through Invoice Ninja or Payfast offers Approve alone. A boost campaign's charge is refunded through Stripe</li>
         </ul>
         <p class="text-gray-600 dark:text-gray-300 mb-6">Both ask you to confirm, both are recorded in the audit log, and the row disappears from Needs attention once the queue is empty. Schedule owners refund their own sales, in full or in part, from their Sales page; see <a href="{{ route('marketing.docs.tickets') }}#managing-sales" class="doc-link">Managing sales</a>.</p>
 
@@ -548,7 +557,7 @@
         <p class="text-gray-600 dark:text-gray-300 mb-6">A red <strong class="text-gray-900 dark:text-white">Subscriptions on an Unrecognized Price</strong> panel lists live Stripe subscriptions whose price is none of the plan prices this install sells. The app cannot tell which plan such a customer is paying for, so the plan is withdrawn and the subscription counts as zero revenue while Stripe keeps charging. There is no button: either add that price ID to the <code class="doc-inline-code">STRIPE_PRICE_*</code> configuration, or move the subscription onto a current price in Stripe.</p>
 
         <h3 id="revenue-unconfirmed-refunds" class="doc-subheading">Refunds awaiting confirmation</h3>
-        <p class="text-gray-600 dark:text-gray-300">A refund that was sent to Stripe or PayPal and still has no confirmed outcome after 15 minutes is listed in a red <strong class="text-gray-900 dark:text-white">Refunds Awaiting Confirmation</strong> panel, with its date, event, amount, status, reference and last error. The money may or may not have moved, and nothing in the app retries it, because a retry after the provider's idempotency key has expired is how one refund becomes two. Look the reference up in the provider's own dashboard and settle it there. Until then the refund holds its amount against the sale, so the schedule owner cannot refund that money again.</p>
+        <p class="text-gray-600 dark:text-gray-300">A refund that was sent to Stripe, PayPal or Razorpay and still has no confirmed outcome after 15 minutes is listed in a red <strong class="text-gray-900 dark:text-white">Refunds Awaiting Confirmation</strong> panel, with its date, event, amount, status, reference and last error. The money may or may not have moved, and nothing in the app retries it, because a retry after the provider's idempotency key has expired is how one refund becomes two. Look the reference up in the provider's own dashboard and settle it there. Until then the refund holds its amount against the sale, so the schedule owner cannot refund that money again.</p>
     </section>
 
     <!-- Insights: Analytics -->
@@ -826,11 +835,21 @@
         </h2>
         <p class="text-gray-600 dark:text-gray-300 mb-6">The Blocked page, at <code class="doc-inline-code">/admin/blocked</code>, is where you shut out an account that abuses the service, and where you keep the list of what new accounts are refused for. It is there on every install. Deleting a spam schedule on the <a href="#manage-plans" class="doc-link">Schedules</a> page leaves its owner free to make another one; blocking the account does not.</p>
         <ul class="doc-list mb-6">
-            <li><strong class="text-gray-900 dark:text-white">Three totals</strong> - blocked accounts, entries on the list, and how many sign-ups the list has refused</li>
+            <li><strong class="text-gray-900 dark:text-white">Four totals</strong> - accounts that may be spam, blocked accounts, entries on the list, and how many sign-ups the list has refused</li>
+            <li><strong class="text-gray-900 dark:text-white">May be spam</strong> - accounts a watched word turned up for, waiting for you to look at them. See <a href="#blocked-spam" class="doc-link">Accounts that may be spam</a></li>
             <li><strong class="text-gray-900 dark:text-white">Find an account</strong> - by name, email address or a schedule it owns. The owner card on a schedule's admin page and the names under Recent sign-ups on the <a href="#insights-users" class="doc-link">Users</a> page lead to the same place</li>
             <li><strong class="text-gray-900 dark:text-white">Blocked accounts</strong> - who is blocked, how many schedules the block took down, when and by whom, and your note</li>
             <li><strong class="text-gray-900 dark:text-white">Refused at sign-up</strong> - the list itself, with how often each entry has refused someone</li>
         </ul>
+
+        <h3 id="blocked-spam" class="doc-subheading">Accounts that may be spam</h3>
+        <p class="text-gray-600 dark:text-gray-300 mb-4">An account is listed under <strong class="text-gray-900 dark:text-white">May be spam</strong> when one of your watched words is in the name or subdomain of a live schedule it owns, or in the name of an event it made. Its own name and email address count too once it owns a live schedule, so a ticket buyer or a follower is never listed for theirs. Nothing is done to it: the list is a reason to look, and each row says where the word was found. The same accounts are counted in <a href="#needs-attention" class="doc-link">Needs attention</a> and on the Manage tab, so you see them without opening the page. A new match usually appears within ten minutes; when the admin pages have not been opened for a while, it appears one page load later.</p>
+        <ul class="doc-list mb-4">
+            <li><strong class="text-gray-900 dark:text-white">Review</strong> opens the account's own page, where the words found are listed first and you can block it</li>
+            <li><strong class="text-gray-900 dark:text-white">Not spam</strong> takes it off the list for good, for example an account that runs a bitcoin meetup. Its page then says who marked it and when, with <strong class="text-gray-900 dark:text-white">Flag again</strong> to undo that. Unblocking an account marks it not spam as well</li>
+            <li>A blocked account and an administrator are never listed</li>
+        </ul>
+        <p class="text-gray-600 dark:text-gray-300 mb-6"><strong class="text-gray-900 dark:text-white">Words to watch for</strong>, under the list, holds the words, separated by commas. A word is found anywhere in the text, in capitals or not, so a word that sits inside ordinary names will find those too. In a subdomain a space is read as a hyphen, so <code class="doc-inline-code">cash app</code> also finds <code class="doc-inline-code">cash-app-help</code>. Each word needs 3 to 50 characters, and the list holds up to 50. Out of the box it holds common payment, crypto and support-line words: paypal, bitcoin, crypto, coinbase, binance, metamask, cash app, cashapp, venmo, quickbooks, customer service, customer care, helpline and toll free. Leave the field empty to stop watching. Marking an account not spam and changing the words are recorded in the <a href="#system-audit-log" class="doc-link">Audit Log</a>.</p>
 
         <h3 id="blocked-account" class="doc-subheading">Blocking an account</h3>
         <p class="text-gray-600 dark:text-gray-300 mb-4">A block is decided on the account's own page, which shows what you need first: the schedules it owns, how it signs in, the network address it signed up from, and the other accounts that were made from that same address, each one press away. Press <strong class="text-gray-900 dark:text-white">Block account</strong> and:</p>
@@ -838,12 +857,13 @@
             <li>The account can no longer sign in, by password, Google or Facebook, or use its API key. Anyone signed in to it is signed out on their next page</li>
             <li>Every schedule it owns goes offline and its subdomain is released, exactly as <strong class="text-gray-900 dark:text-white">Delete</strong> on the Schedules page does. A paid plan on one of them is cancelled, and a newsletter waiting to be sent goes back to a draft</li>
             <li>Its email address goes on the list, so it cannot sign up again</li>
+            <li>It leaves the lists and counts on the <a href="#dashboard" class="doc-link">Dashboard</a> and the <a href="#realtime" class="doc-link">Realtime</a> page: its sign-up, its schedules and every event it made or they own, even one it put on somebody else's venue. On Realtime its signed-in visits, anyone's views of its pages and what happened on its schedules go too. A few figures still include it, because they are history or work for you: Active users, revenue, the Federation card (an event of its on another schedule is still shared), custom domains, Needs attention and the Insights pages</li>
         </ul>
         <p class="text-gray-600 dark:text-gray-300 mb-4">Two switches add more to the list, and both are off until you turn them on. <strong class="text-gray-900 dark:text-white">Also refuse new accounts from the address</strong> adds the network address the account signed up from (for an IPv6 address, the /64 it sits in). <strong class="text-gray-900 dark:text-white">Also refuse new accounts at the domain</strong> adds its email domain. Beside each is the number of other accounts that share it: a large number means an office, a mobile network or a mail provider that ordinary people use, and it should stay off.</p>
         <p class="text-gray-600 dark:text-gray-300 mb-6">An administrator cannot be blocked, and you cannot block yourself. Schedules the account is only a member of are not touched.</p>
 
         <h3 id="blocked-unblock" class="doc-subheading">Unblocking</h3>
-        <p class="text-gray-600 dark:text-gray-300 mb-6"><strong class="text-gray-900 dark:text-white">Unblock account</strong>, on the same page, undoes what the block did and nothing else. The account can sign in again, the schedules this block took down come back, and the entries it added leave the list. A schedule that was already deleted before the block stays deleted, a cancelled plan stays cancelled, and a subdomain somebody has taken in the meantime stays theirs: the schedule then comes back under its released name.</p>
+        <p class="text-gray-600 dark:text-gray-300 mb-6"><strong class="text-gray-900 dark:text-white">Unblock account</strong>, on the same page, undoes what the block did and nothing else. The account can sign in again, the schedules this block took down come back, and the entries it added leave the list. A schedule that was already deleted before the block stays deleted, a cancelled plan stays cancelled, and a subdomain somebody has taken in the meantime stays theirs: the schedule then comes back under its released name. If a watched word turns up for the account, Unblock also marks it <a href="#blocked-spam" class="doc-link">not spam</a>, so it does not go straight back on that list.</p>
 
         <h3 id="blocked-list" class="doc-subheading">The list</h3>
         <p class="text-gray-600 dark:text-gray-300 mb-4">A new account is refused when it matches an entry, whichever way it is being made: the sign-up form, Google or Facebook, the API, or the account a guest form offers. Accounts that already exist are never affected by the list, so adding a domain does not lock anyone out. An entry is one of:</p>

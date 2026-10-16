@@ -48,6 +48,7 @@ use App\Services\OneSignalService;
 use App\Services\ScheduleDeletionService;
 use App\Services\ScheduleTransferService;
 use App\Services\SmsService;
+use App\Services\TicketPresets;
 use App\Services\UsageTrackingService;
 use App\Utils\AiImageIssuance;
 use App\Utils\ColorUtils;
@@ -58,6 +59,7 @@ use App\Utils\GeminiUtils;
 use App\Utils\GuestFunnel;
 use App\Utils\HoneypotUtils;
 use App\Utils\ImageUtils;
+use App\Utils\ListWording;
 use App\Utils\OpenAIUtils;
 use App\Utils\PhoneUtils;
 use App\Utils\QrCodeUtils;
@@ -313,6 +315,14 @@ class RoleController extends Controller
             ->get();
 
         foreach ($activeCampaigns as $campaign) {
+            // A partner boost is stopped, never deleted at Meta and never refunded: the platform
+            // holds none of its money, and its spend must stay readable for the statement.
+            if ($campaign->isPartner()) {
+                \App\Services\BoostPartnerService::stopInCascade($campaign);
+
+                continue;
+            }
+
             try {
                 $cancelled = \DB::transaction(function () use ($campaign) {
                     $campaign = BoostCampaign::lockForUpdate()->find($campaign->id);
@@ -3300,10 +3310,13 @@ class RoleController extends Controller
             'occurrenceDate' => $event->starts_at ? $event->getStartDateTime(null, true)->format('Y-m-d') : null,
             'uniqueKey' => UrlUtils::encodeId($event->id),
             'is_password_protected' => $event->isPasswordProtected(),
+            // As the month payload says it (CalendarDataTrait::calendarEventToVueArray()).
+            'wording' => $role ? ListWording::card($event, $role, $displayLang) : null,
         ];
 
         if ($event->isPasswordProtected()) {
             $data = array_merge($data, array_fill_keys(array_keys($imageFields), null));
+            $data['wording'] = null;
             $data['venue_name'] = null;
             $data['venue_dir'] = null;
             $data['talent'] = [];
@@ -3658,6 +3671,7 @@ class RoleController extends Controller
         $appointmentEditing = null;
         $appointmentBookings = collect();
         $appointmentBookingCounts = [];
+        $appointmentHosts = null;
         $currencies = [];
 
         // sales + appointmentType are read by the appointment branch of show-admin-requests;
@@ -3850,6 +3864,7 @@ class RoleController extends Controller
                 $appointmentBookings,
                 $appointmentBookingCounts,
                 $currencies,
+                $appointmentHosts,
             ] = $this->appointmentsTabData($role);
         }
 
@@ -3956,6 +3971,7 @@ class RoleController extends Controller
             'appointmentEditing',
             'appointmentBookings',
             'appointmentBookingCounts',
+            'appointmentHosts',
             'pendingBookingCount',
             'currencies',
             'openTransfer',
@@ -3966,7 +3982,7 @@ class RoleController extends Controller
      * Data for the Appointments tab. Lifted out of show-admin-appointments.blade.php, which was
      * building a paginated query inside a @php block.
      *
-     * @return array{0: \Illuminate\Support\Collection, 1: ?\App\Models\AppointmentType, 2: mixed, 3: array<int,int>, 4: array}
+     * @return array{0: \Illuminate\Support\Collection, 1: ?\App\Models\AppointmentType, 2: mixed, 3: array<int,int>, 4: array, 5: array{offered: bool, candidates: \Illuminate\Support\Collection, names: array<int,string>, filter: ?int}}
      */
     protected function appointmentsTabData(Role $role): array
     {
@@ -4027,7 +4043,14 @@ class RoleController extends Controller
         // hide older bookings once a schedule passes the cap - Past and Cancelled grow forever.
         $filter = request('filter', 'upcoming');
         // The join means an unqualified select would collide `events.id` onto `sales.id`.
-        $bookingQuery = $base()->select('sales.*')->with(['event.appointmentType', 'event.roles']);
+        $bookingQuery = $base()->select('sales.*')->with(['event.appointmentType', 'event.roles', 'event.appointmentHost']);
+
+        // One host's bookings (AppointmentHostService): what the owner is sent to when somebody who
+        // hosted here leaves the team, to move or cancel what is still booked with them.
+        $hostFilter = request('host') ? (int) UrlUtils::decodeId((string) request('host')) : null;
+        if ($hostFilter) {
+            $bookingQuery->where('events.appointment_host_user_id', $hostFilter);
+        }
 
         // Name/email search, mirroring the Sales page's own filter param.
         if ($search = trim((string) request('search'))) {
@@ -4073,7 +4096,26 @@ class RoleController extends Controller
             ->pluck(DB::raw('count(*)'), 'events.appointment_type_id')
             ->all();
 
-        return [$types, $editing, $bookings, $counts, $currencies];
+        // Who may host a type here, and the name of everybody who does or did (a host who has left
+        // is still named on their bookings and on the type they left).
+        $types->load('host');
+        $hostIds = $types->pluck('host_user_id')->filter()
+            ->merge(Event::where('creator_role_id', $role->id)
+                ->whereNotNull('appointment_type_id')
+                ->whereNotNull('appointment_host_user_id')
+                ->distinct()
+                ->pluck('appointment_host_user_id'))
+            ->map(fn ($id) => (int) $id)
+            ->unique()
+            ->values();
+        $hosts = [
+            'offered' => \App\Services\AppointmentHostService::offered($role),
+            'candidates' => app(\App\Services\AppointmentHostService::class)->candidates($role),
+            'names' => $hostIds->isEmpty() ? [] : User::whereIn('id', $hostIds)->pluck('name', 'id')->all(),
+            'filter' => $hostFilter,
+        ];
+
+        return [$types, $editing, $bookings, $counts, $currencies, $hosts];
     }
 
     public function createMember(Request $request, $subdomain)
@@ -4294,6 +4336,9 @@ class RoleController extends Controller
         // The events they made here pass to the owner (not one that has taken money).
         app(\App\Services\ScheduleTransferService::class)->handOverEventsOf((int) $userId, $role);
 
+        // Appointment types they hosted here are switched off and the owner is told.
+        app(\App\Services\AppointmentHostService::class)->releaseHost($role, (int) $userId);
+
         // A feed this member added goes on reading an address only they chose. It waits until
         // somebody still on the team looks at it.
         \App\Models\EventFeed::pauseWhere(
@@ -4342,6 +4387,10 @@ class RoleController extends Controller
         // A viewer runs nothing here any more: as for somebody who leaves.
         if ($roleUser->level === 'viewer') {
             app(\App\Services\ScheduleTransferService::class)->handOverEventsOf((int) $userId, $role);
+
+            // Nor hosts appointments, whose bookings a viewer could not see. Its own call, not
+            // part of handOverEventsOf(), which other paths run for other reasons.
+            app(\App\Services\AppointmentHostService::class)->releaseHost($role, (int) $userId);
         }
 
         return redirect(route('role.view_admin', ['subdomain' => $role->subdomain, 'tab' => 'team']))
@@ -4817,6 +4866,7 @@ class RoleController extends Controller
         // held, below, to the ones the picker offered the person making the schedule.
         // A custom domain is set on the schedule's own form, where the plan and the address are checked.
         $role->fill($request->except([...self::SERVER_OWNED_FIELDS, 'sponsor_logos', 'default_curator_ids', 'custom_domain', 'custom_domain_mode']));
+        $this->applyListWording($role, $request);
         // sync_direction is fillable: hold it to what the person's Google connection may do.
         $role->sync_direction = self::googleDirectionFor($request->user(), $request->input('sync_direction'));
 
@@ -5357,6 +5407,26 @@ class RoleController extends Controller
         'graphic_settings',
     ];
 
+    /**
+     * "Event list wording" (Settings, Advanced; App\Utils\ListWording): how the schedule's list
+     * words each event. Kept in graphic_settings, which no fill reaches (SERVER_OWNED_FIELDS), so it
+     * is written here, by key, and only from a save whose form carried the field: absent is not
+     * "standard". A wording of the list's own is kept when another choice is made, so choosing it
+     * again brings it back.
+     */
+    private function applyListWording(Role $role, Request $request): void
+    {
+        if (! $request->boolean('list_wording_submitted')) {
+            return;
+        }
+
+        $mode = $request->input('list_wording');
+        $settings = $role->graphic_settings ?? [];
+        $settings['list_wording'] = in_array($mode, ListWording::MODES, true) ? $mode : 'standard';
+        $settings['list_template'] = mb_substr(str_replace("\r\n", "\n", (string) $request->input('list_template', '')), 0, 2000);
+        $role->graphic_settings = $settings;
+    }
+
     public function update(RoleUpdateRequest $request, $subdomain): RedirectResponse
     {
         if (! auth()->user()->isEditor($subdomain)) {
@@ -5584,6 +5654,7 @@ class RoleController extends Controller
         // Not the columns only the server writes (SERVER_OWNED_FIELDS), and not the type: what kind
         // of schedule this is was decided when it was made.
         $role->fill($request->except([...self::SERVER_OWNED_FIELDS, 'type']));
+        $this->applyListWording($role, $request);
 
         // sync_direction is fillable, so undo it when the Google controls were not submitted,
         // and hold it to what the connection may do when they were.
@@ -6075,6 +6146,29 @@ class RoleController extends Controller
         }
 
         $role->save();
+
+        // Settings > Ticket presets, right after the schedule's own save and before the image
+        // checks below can return early. Only from a page that showed the list, and only by whoever
+        // may change it (the owner, or an editor while the team does not pick from presets); the
+        // switch is the owner's alone and is offered where a schedule can have a team.
+        if ($request->has('ticket_presets_submitted') && TicketPresets::mayEdit(auth()->user(), $role)) {
+            TicketPresets::saveFromSchedule(
+                $role,
+                (array) $request->input('ticket_presets', []),
+                // What the page showed. None posted (a page opened with no presets, or one from before
+                // the list was sent) removes nothing.
+                (array) $request->input('ticket_presets_seen', []),
+                $request->input('ticket_presets_default_seen'),
+            );
+
+            if ($isOwner && TicketPresets::teamSwitchOffered($role)) {
+                TicketPresets::setTeamUsesPresets($role, $request->boolean('ticket_presets_team') && TicketPresets::for($role)->isNotEmpty());
+            } elseif ($isOwner && ! $request->boolean('ticket_presets_team') && TicketPresets::teamUsesPresets($role)) {
+                // A plan that no longer offers the switch (a hosted downgrade) still lets the owner
+                // turn it off; never on.
+                TicketPresets::setTeamUsesPresets($role, false);
+            }
+        }
 
         // A new shared notification address gets its confirmation straight after the save that
         // stored it, before the image checks below can return early: an address saved with no

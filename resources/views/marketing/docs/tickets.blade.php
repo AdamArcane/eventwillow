@@ -7,6 +7,7 @@
 >
     <x-slot:toc>
         <x-doc-nav-group label="General" href="#general" expanded>
+            <x-doc-nav-link href="#ticket-presets">Ticket Presets</x-doc-nav-link>
             <x-doc-nav-link href="#registration">Free Registration</x-doc-nav-link>
             <x-doc-nav-link href="#ticketing">Sell Tickets</x-doc-nav-link>
             <x-doc-nav-link href="#ticket-types">Ticket Types</x-doc-nav-link>
@@ -20,6 +21,7 @@
             <x-doc-nav-link href="#invoiceninja-modes">Invoice Ninja Modes</x-doc-nav-link>
             <x-doc-nav-link href="#payfast">Payfast</x-doc-nav-link>
             <x-doc-nav-link href="#paypal">PayPal</x-doc-nav-link>
+            <x-doc-nav-link href="#razorpay">Razorpay</x-doc-nav-link>
         </x-doc-nav-group>
         <x-doc-nav-link href="#installments">Installment Payments</x-doc-nav-link>
         <x-doc-nav-link href="#options">Options</x-doc-nav-link>
@@ -220,6 +222,16 @@
         </div>
     </section>
 
+    <!-- Ticket presets -->
+    <section id="ticket-presets" class="doc-section">
+        <h3 class="doc-subheading">Ticket presets</h3>
+        <p class="text-gray-600 dark:text-gray-300 mb-4">A preset is a ticket setup with a name, kept on the schedule: <em>Free event</em>, <em>Regular</em> at 5, <em>Special</em> at 20. They are set up under <a href="{{ route('marketing.docs.creating_schedules') }}#ticket-presets" class="doc-link">Edit schedule &rarr; Settings &rarr; Ticket presets</a>, and one of them is the default every new event starts on.</p>
+        <p class="text-gray-600 dark:text-gray-300 mb-4">On the Tickets tab the presets are a row of chips above the three tiles, with <strong class="text-gray-900 dark:text-white">Manage presets</strong> beside them. Pressing one fills the tab: how people sign up, the ticket types and prices, payment, options, promo codes and add-ons. The chip stays lit while the tab still matches it, and goes out when you change how people sign up, a ticket type, a price or a quantity, the currency, the payment method or its instructions, or the limit. If the preset itself changed after the event was saved, the chip stays lit and a note above the tiles offers the preset as it is now; the event keeps its own tickets until you press it. Once somebody has a ticket, or the event has a seating plan, the chips rest: a preset can no longer replace ticket types people hold.</p>
+        <p class="text-gray-600 dark:text-gray-300 mb-4">To keep a setup as a preset, turn on <strong class="text-gray-900 dark:text-white">Save these tickets as a preset</strong> at the bottom of the tab and give it a name. The same name replaces that preset, a new name adds one, and <strong class="text-gray-900 dark:text-white">Use for new events</strong> makes it the default. The save bar says which it will do.</p>
+        <h4 id="ticket-presets-team" class="font-semibold text-gray-900 dark:text-white mt-6 mb-2">When the team picks from presets</h4>
+        <p class="text-gray-600 dark:text-gray-300 mb-4">With the owner's <a href="{{ route('marketing.docs.creating_schedules') }}#ticket-presets-team" class="doc-link">Team members pick from these presets</a> on, a team member's Tickets tab holds the presets and nothing else: they choose one and see what the event will have, and cannot type a price. A new event starts on the default, and is on the owner's account, so its online payments go to the owner. An event set up by hand shows as <strong class="text-gray-900 dark:text-white">Custom</strong> and keeps its tickets unless another preset is chosen. When the owner changes a preset after an event was saved with it, the event keeps its tickets and its tile says the preset changed since, with <strong class="text-gray-900 dark:text-white">Use Regular as it is now</strong> (in that preset's name) to take it. Once somebody holds a ticket or a reservation (an unpaid or a refunded order counts), the event's tickets stay as they are until the owner changes them. The same rule holds for events added through the <a href="{{ route('marketing.docs.developer.api') }}" class="doc-link">API</a> and the imports; an event that comes in through calendar sync arrives with tickets off.</p>
+    </section>
+
     <!-- Registration -->
     <section id="registration" class="doc-section">
         <h3 class="doc-subheading">Free registration</h3>
@@ -331,7 +343,7 @@
 
         <div class="doc-callout doc-callout-tip">
             <div class="doc-callout-title">Reuse a setup on the next event</div>
-            <p>At the bottom of the Tickets tab, turn on <strong class="text-gray-900 dark:text-white">Save as default</strong> before saving. New events on this schedule then start with the same ticket types, payment method, currency, options, promo codes and add-ons.</p>
+            <p>At the bottom of the Tickets tab, turn on <strong class="text-gray-900 dark:text-white">Save these tickets as a preset</strong> before saving, and name it. Your next events can start from it with one press. See <a href="#ticket-presets" class="doc-link">Ticket presets</a>.</p>
         </div>
     </section>
 
@@ -518,7 +530,7 @@
         <h4 id="cart-rules" class="text-base font-semibold text-gray-900 dark:text-white mb-4">What can share a cart</h4>
         <ul class="doc-list mb-6">
             <li><strong class="text-gray-900 dark:text-white">Events that agree on three things:</strong> the same owner, the same ticket currency and the same payment method. A single payment cannot be split across payment accounts, currencies or payment rails, and the cart says so when an event cannot join.</li>
-            <li><strong class="text-gray-900 dark:text-white">Stripe, PayPal and cash.</strong> Invoice Ninja, Payfast and a payment link are not supported, since each sends the buyer to a page built for one event.</li>
+            <li><strong class="text-gray-900 dark:text-white">Stripe, PayPal, Razorpay and cash.</strong> Invoice Ninja, Payfast and a payment link are not supported, since each sends the buyer to a page built for one event.</li>
             <li><strong class="text-gray-900 dark:text-white">Not events using individual tickets.</strong> They keep their own checkout: the cart collects one name and email for the whole purchase and has nowhere to put a guest list.</li>
             <li><strong class="text-gray-900 dark:text-white">Two dates of one recurring event</strong> count as two entries, so a visitor can take Friday and Saturday in one order.</li>
         </ul>
@@ -534,7 +546,7 @@
             </svg>
             Payment
         </h2>
-        <p class="text-gray-600 dark:text-gray-300 mb-6">Before you can take money online you need to connect a payment method. Payment methods belong to your account, not to a single event: you connect them once under <strong class="text-gray-900 dark:text-white">Admin Panel &rarr; Settings &rarr; Payment Methods</strong>, where each has a row that says whether it is connected, and you pick one per event in the event's <strong class="text-gray-900 dark:text-white">Payment</strong> row. Six methods are offered, listed here in the order the event form shows them:</p>
+        <p class="text-gray-600 dark:text-gray-300 mb-6">Before you can take money online you need to connect a payment method. Payment methods belong to your account, not to a single event: you connect them once under <strong class="text-gray-900 dark:text-white">Admin Panel &rarr; Settings &rarr; Payment Methods</strong>, where each has a row that says whether it is connected, and you pick one per event in the event's <strong class="text-gray-900 dark:text-white">Payment</strong> row. Seven methods are offered, listed here in the order the event form shows them:</p>
 
         <div class="doc-table-wrap" id="payment-setup">
             <table class="doc-table">
@@ -580,6 +592,12 @@
                     <tr>
                         <td><a href="#paypal" class="doc-link">PayPal</a></td>
                         <td>From a PayPal balance or by card. The ticket is issued as soon as the buyer returns. Offered on events priced in a currency PayPal settles.</td>
+                        <td>Refund Ticket, in full or in part</td>
+                        <td>Yes</td>
+                    </tr>
+                    <tr>
+                        <td><a href="#razorpay" class="doc-link">Razorpay</a></td>
+                        <td>By UPI, card, netbanking or wallet on a Razorpay payment page. The ticket is issued as soon as the buyer returns. Offered on events priced in Indian rupees (INR) only.</td>
                         <td>Refund Ticket, in full or in part</td>
                         <td>Yes</td>
                     </tr>
@@ -729,7 +747,7 @@
         <p class="text-gray-600 dark:text-gray-300 mb-6">Two orders never reach Payfast, because it would reject them on its own page after the seats were already held: an order under <strong class="text-gray-900 dark:text-white">R5.00</strong>, Payfast's minimum, and any event whose currency is not ZAR. In both cases the buyer is returned to the ticket page with a message, and the seats go straight back on sale. If you see that on your own event, check the event's <strong class="text-gray-900 dark:text-white">Currency</strong> in the Payment row: an event can keep Payfast selected after its currency is changed, and it then shows in the dropdown marked <em>no longer available</em> until you pick something else.</p>
 
         <h4 class="font-semibold text-gray-900 dark:text-white mb-2">Refunds</h4>
-        <p class="text-gray-600 dark:text-gray-300 mb-6">Refunds are issued from your own Payfast dashboard. On a Payfast sale the Sales page offers <strong class="text-gray-900 dark:text-white">Mark as Refunded</strong>, which records the refund without moving money. Stripe and PayPal are the exceptions: those sales are refunded from the Sales page and the money goes back automatically. See <a href="#refunds" class="doc-link">Refunds</a>.</p>
+        <p class="text-gray-600 dark:text-gray-300 mb-6">Refunds are issued from your own Payfast dashboard. On a Payfast sale the Sales page offers <strong class="text-gray-900 dark:text-white">Mark as Refunded</strong>, which records the refund without moving money. Stripe, PayPal and Razorpay are the exceptions: those sales are refunded from the Sales page and the money goes back automatically. See <a href="#refunds" class="doc-link">Refunds</a>.</p>
 
         <h4 class="font-semibold text-gray-900 dark:text-white mb-2">What Payfast does not do</h4>
         <p class="text-gray-600 dark:text-gray-300 mb-6">A Payfast event cannot be combined with others in the <a href="#cart" class="doc-link">multi-event cart</a>, since a Payfast payment covers one event, and it cannot offer <a href="#installments" class="doc-link">monthly installments</a>, which need a card the gateway can charge again later. <a href="{{ route('marketing.docs.gift_cards') }}" class="doc-link">Gift cards</a> cannot be sold through Payfast either. Everything else works normally: promo codes, add-ons, volume discounts, per-attendee tickets.</p>
@@ -767,10 +785,50 @@
         <p class="text-gray-600 dark:text-gray-300 mb-6">Two more outcomes are worth recognising. A buyer who approves the payment, closes the tab and comes back much later may find the reservation has already expired; nothing is charged in that case. And if PayPal reports a total that does not match the order, the sale is held as an <strong class="text-gray-900 dark:text-white">amount mismatch</strong> for you to look at rather than being completed: the money is with PayPal and the ticket is not issued, so it needs a person.</p>
 
         <h4 class="font-semibold text-gray-900 dark:text-white mb-2">Refunds</h4>
-        <p class="text-gray-600 dark:text-gray-300 mb-6">PayPal is one of only two methods (Stripe is the other) where <strong class="text-gray-900 dark:text-white">Refund Ticket</strong> on the Sales page sends the money back for you. You can return the whole amount or part of it, and the sale's PayPal reference is shown there as a link into your PayPal activity. Refund from the Sales page rather than from PayPal itself: a refund made in your PayPal account is not reported back, so the sale stays paid and its ticket keeps scanning. See <a href="#refunds" class="doc-link">Refunds</a> for partial refunds and for what happens when a refund cannot be confirmed.</p>
+        <p class="text-gray-600 dark:text-gray-300 mb-6">PayPal is one of three methods (Stripe and Razorpay are the others) where <strong class="text-gray-900 dark:text-white">Refund Ticket</strong> on the Sales page sends the money back for you. You can return the whole amount or part of it, and the sale's PayPal reference is shown there as a link into your PayPal activity. Refund from the Sales page rather than from PayPal itself: a refund made in your PayPal account is not reported back, so the sale stays paid and its ticket keeps scanning. See <a href="#refunds" class="doc-link">Refunds</a> for partial refunds and for what happens when a refund cannot be confirmed.</p>
 
         <h4 class="font-semibold text-gray-900 dark:text-white mb-2">What PayPal does not do</h4>
-        <p class="text-gray-600 dark:text-gray-300 mb-6">PayPal cannot offer monthly installments, which need a card the gateway can charge again later, and gift cards cannot be sold through it. It is also not offered on events priced in Hungarian forints, Japanese yen or New Taiwan dollars, or on appointment bookings. Everything else works normally (promo codes, add-ons, volume discounts, per-attendee tickets), and unlike Payfast a PayPal event <em>can</em> be combined with others in the <a href="#cart" class="doc-link">multi-event cart</a>, because the whole basket is taken as one payment.</p>
+        <p class="text-gray-600 dark:text-gray-300 mb-6">PayPal cannot offer monthly installments, which need a card the gateway can charge again later, and gift cards cannot be sold through it. It is also not offered on events priced in Hungarian forints, Japanese yen or New Taiwan dollars. Everything else works normally (promo codes, add-ons, volume discounts, per-attendee tickets), and unlike Payfast a PayPal event <em>can</em> be combined with others in the <a href="#cart" class="doc-link">multi-event cart</a>, because the whole basket is taken as one payment.</p>
+
+        <h3 id="razorpay" class="doc-subheading">Connecting Razorpay</h3>
+        <p class="text-gray-600 dark:text-gray-300 mb-4"><x-link href="https://razorpay.com" target="_blank">Razorpay</x-link> is the gateway to connect for events in India. Buyers pay on a Razorpay payment page by UPI, card, netbanking or wallet, and come straight back to their ticket. Like Stripe and PayPal, it confirms the payment and issues the ticket with no manual step: when the buyer returns we check the payment with Razorpay itself before marking the sale paid. It settles in Indian rupees (INR) only, so Razorpay appears in the <strong class="text-gray-900 dark:text-white">Payment</strong> row of an INR event and nowhere else.</p>
+        <ol class="doc-list doc-list-numbered mb-6">
+            <li>Sign in to the <x-link href="https://dashboard.razorpay.com" target="_blank">Razorpay Dashboard</x-link> and open <strong class="text-gray-900 dark:text-white">Account &amp; Settings &gt; API Keys</strong></li>
+            <li>Generate a key in <strong class="text-gray-900 dark:text-white">Live Mode</strong> (switch to Test Mode for a pair you can try things with). Live keys only exist once Razorpay has activated your account</li>
+            <li>Copy the <strong class="text-gray-900 dark:text-white">Key ID</strong> and the <strong class="text-gray-900 dark:text-white">Key Secret</strong>. Razorpay shows the secret only once, and regenerating it replaces the pair</li>
+            <li>Go to <strong class="text-gray-900 dark:text-white">Admin Panel &rarr; Settings &rarr; Payment Methods</strong> and open the <strong class="text-gray-900 dark:text-white">Razorpay</strong> row</li>
+            <li>Paste both and press <strong class="text-gray-900 dark:text-white">Connect</strong>. We check them with Razorpay before storing them, so a typo is caught here rather than by a buyer. If Razorpay cannot be reached, the keys are saved and you are told they could not be checked</li>
+            <li>Razorpay now appears in the <strong class="text-gray-900 dark:text-white">Payment</strong> row of any event priced in INR</li>
+        </ol>
+
+        <h4 id="razorpay-webhook" class="font-semibold text-gray-900 dark:text-white mb-2">Add the webhook</h4>
+        <p class="text-gray-600 dark:text-gray-300 mb-4">The webhook is optional, but it is worth the two minutes. Without it we only hear about a payment when the buyer comes back from Razorpay, and on a phone a buyer who pays in their UPI app often never does. To add it:</p>
+        <ol class="doc-list doc-list-numbered mb-6">
+            <li>Copy the <strong class="text-gray-900 dark:text-white">Webhook URL</strong> shown on the Razorpay row (it ends in <code class="doc-inline-code">/payments/razorpay/webhook</code>)</li>
+            <li>In the Razorpay Dashboard, open <strong class="text-gray-900 dark:text-white">Account &amp; Settings &gt; Webhooks</strong> and add a webhook with that URL</li>
+            <li>Tick the <code class="doc-inline-code">payment_link.paid</code> and <code class="doc-inline-code">payment_link.expired</code> events</li>
+            <li>Choose a secret, save, and enter the same secret in the row's <strong class="text-gray-900 dark:text-white">Webhook Secret</strong> field</li>
+        </ol>
+        <p class="text-gray-600 dark:text-gray-300 mb-4">Test Mode and Live Mode each need their own webhook, so add it again in the mode you sell in. Changing the Key ID from test to live, or back, clears a saved webhook secret, because the webhook belongs to the other mode. While no secret is saved, the row reads <strong class="text-gray-900 dark:text-white">No webhook</strong>.</p>
+        <p class="text-gray-600 dark:text-gray-300 mb-6">With the webhook, a buyer who pays but never comes back still gets their ticket, and a checkout nobody finishes gives its seats back when its payment page expires, about half an hour later. Without it, those seats stay held, so turn on <a href="#options" class="doc-link">Expire unpaid tickets</a> on the event. A buyer who paid and did not come back shows as unpaid on the Sales page: find the payment in Razorpay under <strong class="text-gray-900 dark:text-white">Payment Links</strong> by the buyer's email and press <strong class="text-gray-900 dark:text-white">Mark Paid</strong>, or, if the sale has already expired, refund the payment in Razorpay.</p>
+
+        <div class="doc-callout doc-callout-tip mb-6">
+            <div class="doc-callout-title">Your site may already have an account</div>
+            <p>On a selfhosted site, the administrator can configure one Razorpay account for everyone, exactly as with Payfast and PayPal. If the Razorpay row says <strong class="text-gray-900 dark:text-white">Provided by this installation</strong>, skip the steps above. Entering your own keys still takes precedence, so you are paid into your own account instead; disconnect them to go back. Selfhost administrators: see the <a href="{{ route('marketing.docs.selfhost.stripe') }}#razorpay" class="doc-link">Payments guide</a>.</p>
+        </div>
+
+        <h4 class="font-semibold text-gray-900 dark:text-white mb-2">Testing with Test Mode keys</h4>
+        <p class="text-gray-600 dark:text-gray-300 mb-6">Connect your Test Mode pair (its Key ID starts with <code class="doc-inline-code">rzp_test_</code>) to try a purchase without taking real money, using the test cards and UPI IDs Razorpay lists. While a test key is connected, the payment method reads <strong class="text-gray-900 dark:text-white">Razorpay (Test mode)</strong> on the event form, the Payment Methods row reads <strong class="text-gray-900 dark:text-white">Test mode</strong> and the event's Payment row shows a warning, because a test ticket otherwise looks exactly like a real one. Replace it with your live pair (<code class="doc-inline-code">rzp_live_</code>) before you sell. A purchase completes on <code class="doc-inline-code">localhost</code> too, since the buyer's return is confirmed by a call we make out to Razorpay.</p>
+
+        <h4 id="razorpay-refused" class="font-semibold text-gray-900 dark:text-white mb-2">When a Razorpay checkout is refused</h4>
+        <p class="text-gray-600 dark:text-gray-300 mb-4">Some orders never reach Razorpay's payment page: an order under ₹1.00, which Razorpay will not take, and an order for which Razorpay could not create a payment page, where the buyer is asked to try again in a moment. In both cases the buyer is returned to the ticket page with a message and the seats go straight back on sale, so nothing is lost. An event can also keep Razorpay selected after its currency is changed away from INR; it then shows in the dropdown marked <em>no longer available</em> until you pick something else.</p>
+        <p class="text-gray-600 dark:text-gray-300 mb-6">If Razorpay reports a total that does not match the order, the sale is held as an <strong class="text-gray-900 dark:text-white">amount mismatch</strong> for you to look at rather than being completed: the money is with Razorpay and the ticket is not issued, so it needs a person.</p>
+
+        <h4 class="font-semibold text-gray-900 dark:text-white mb-2">Refunds</h4>
+        <p class="text-gray-600 dark:text-gray-300 mb-6"><strong class="text-gray-900 dark:text-white">Refund Ticket</strong> on the Sales page sends the money back through Razorpay, in full or in part, and the sale's Razorpay reference is shown there as a link into your Razorpay dashboard. Refund from the Sales page rather than from Razorpay itself: a refund made in your Razorpay account is not reported back, so the sale stays paid and its ticket keeps scanning. A sale you marked paid by hand has no Razorpay payment behind it, so it shows <strong class="text-gray-900 dark:text-white">Mark as Refunded</strong> instead.</p>
+
+        <h4 class="font-semibold text-gray-900 dark:text-white mb-2">What Razorpay does not do</h4>
+        <p class="text-gray-600 dark:text-gray-300 mb-6">Razorpay cannot offer monthly installments, which need a card the gateway can charge again later, and gift cards cannot be sold through it. Everything else works normally (promo codes, add-ons, volume discounts, per-attendee tickets), and like PayPal a Razorpay event <em>can</em> be combined with others in the <a href="#cart" class="doc-link">multi-event cart</a>, because the whole basket is taken as one payment.</p>
     </section>
 
     <!-- Installments -->
@@ -1190,8 +1248,8 @@
                     </tr>
                     <tr>
                         <td>Refund Ticket</td>
-                        <td>Sends money back on a Stripe or PayPal sale, all of it or part. See <a href="#refunds" class="doc-link">Refunds</a>. On an appointment booking it reads <strong class="text-gray-900 dark:text-white">Refund</strong>.</td>
-                        <td>Paid Stripe and PayPal sales</td>
+                        <td>Sends money back on a Stripe, PayPal or Razorpay sale, all of it or part. See <a href="#refunds" class="doc-link">Refunds</a>. On an appointment booking it reads <strong class="text-gray-900 dark:text-white">Refund</strong>.</td>
+                        <td>Paid Stripe, PayPal and Razorpay sales</td>
                     </tr>
                     <tr>
                         <td>Mark as Refunded</td>
@@ -1217,15 +1275,15 @@
         <h3 id="refunds" class="doc-subheading">Refunds</h3>
         <p class="text-gray-600 dark:text-gray-300 mb-4">Refunds come with paid ticketing on the Pro plan, and a schedule that has since dropped back to Free can still return the money for sales it took. What the action does depends on how the sale was paid:</p>
         <ul class="doc-list mb-6">
-            <li><strong class="text-gray-900 dark:text-white">Stripe and PayPal:</strong> <strong class="text-gray-900 dark:text-white">Refund Ticket</strong> sends the money back through the provider, and the status here changes only once it has gone. A dialog shows <strong class="text-gray-900 dark:text-white">Available to refund</strong> and asks for a <strong class="text-gray-900 dark:text-white">Refund Amount</strong>, so you can return all of it or part.</li>
+            <li><strong class="text-gray-900 dark:text-white">Stripe, PayPal and Razorpay:</strong> <strong class="text-gray-900 dark:text-white">Refund Ticket</strong> sends the money back through the provider, and the status here changes only once it has gone. A dialog shows <strong class="text-gray-900 dark:text-white">Available to refund</strong> and asks for a <strong class="text-gray-900 dark:text-white">Refund Amount</strong>, so you can return all of it or part.</li>
             <li><strong class="text-gray-900 dark:text-white">Every other method</strong> (Invoice Ninja, Payfast, a payment link, cash, or any sale you marked paid by hand) shows <strong class="text-gray-900 dark:text-white">Mark as Refunded</strong> instead. It records the refund and adjusts your revenue figures, and you return the money in your provider's own dashboard.</li>
         </ul>
         <p class="text-gray-600 dark:text-gray-300 mb-4">A partial refund leaves the sale paid and its tickets valid, and the row shows <strong class="text-gray-900 dark:text-white">Refunded so far</strong>. Refund the rest later and the sale becomes refunded, with its tickets and seats back on sale. Until then your <a href="{{ route('marketing.docs.analytics') }}" class="doc-link">Analytics</a> revenue still counts the sale in full.</p>
         <p class="text-gray-600 dark:text-gray-300 mb-6">A payment plan on <a href="#installments" class="doc-link">installments</a> can only be refunded in full: Refund Ticket returns each payment already collected, one at a time, and stops the rest.</p>
 
         <div class="doc-callout doc-callout-warning mb-6">
-            <div class="doc-callout-title">Refund here, not in your Stripe or PayPal dashboard</div>
-            <p>A refund you make in Stripe or PayPal directly is not reported back to Event Schedule. The sale stays paid, its revenue stays counted and its ticket keeps scanning at the door. Refund Stripe and PayPal sales from this page instead.</p>
+            <div class="doc-callout-title">Refund here, not in your Stripe, PayPal or Razorpay dashboard</div>
+            <p>A refund you make in Stripe, PayPal or Razorpay directly is not reported back to Event Schedule. The sale stays paid, its revenue stays counted and its ticket keeps scanning at the door. Refund Stripe, PayPal and Razorpay sales from this page instead.</p>
         </div>
 
         <p class="text-gray-600 dark:text-gray-300 mb-4">Four more things to know before you refund:</p>
@@ -1610,7 +1668,7 @@
         <div class="doc-fields">
             <div class="doc-field">
                 <h4 class="font-semibold text-gray-900 dark:text-white mb-2">Refunds</h4>
-                <p class="text-sm text-gray-500 dark:text-gray-400">Refunding a Stripe or PayPal sale on the Sales page sends the money back through the provider, in full or in part, and then updates the sale here. Every other method (Invoice Ninja, Payfast, a payment link or cash) is recorded here with Mark as Refunded, and you process the money in that provider's own dashboard. A Payfast reference is shown as plain text rather than a link, so you will need to search for it in your Payfast dashboard. Stripe refunds appear on customer statements within 5-10 business days. See <a href="#refunds" class="doc-link">Refunds</a>.</p>
+                <p class="text-sm text-gray-500 dark:text-gray-400">Refunding a Stripe, PayPal or Razorpay sale on the Sales page sends the money back through the provider, in full or in part, and then updates the sale here. Every other method (Invoice Ninja, Payfast, a payment link or cash) is recorded here with Mark as Refunded, and you process the money in that provider's own dashboard. A Payfast reference is shown as plain text rather than a link, so you will need to search for it in your Payfast dashboard. Stripe refunds appear on customer statements within 5-10 business days. See <a href="#refunds" class="doc-link">Refunds</a>.</p>
             </div>
             <div class="doc-field">
                 <h4 class="font-semibold text-gray-900 dark:text-white mb-2">Taxes</h4>
@@ -1698,7 +1756,7 @@
 
         <h3 class="doc-subheading">What to Expect</h3>
         <ul class="doc-list">
-            <li><strong class="text-gray-900 dark:text-white">Payment leaves the frame.</strong> Every payment method except cash sends the buyer out of the iframe to pay: Stripe, PayPal, Payfast, Invoice Ninja and a payment link all open in the full browser window, since payment pages generally refuse to load inside another site's frame. Stripe, PayPal and Payfast bring the buyer back to their ticket page afterwards. Cash and free ticket checkouts complete inside the embed.</li>
+            <li><strong class="text-gray-900 dark:text-white">Payment leaves the frame.</strong> Every payment method except cash sends the buyer out of the iframe to pay: Stripe, PayPal, Payfast, Razorpay, Invoice Ninja and a payment link all open in the full browser window, since payment pages generally refuse to load inside another site's frame. Stripe, PayPal, Payfast and Razorpay bring the buyer back to their ticket page afterwards. Cash and free ticket checkouts complete inside the embed.</li>
             <li><strong class="text-gray-900 dark:text-white">Hidden events do not embed.</strong> The Tickets tab does not offer the embed link on an <strong class="text-gray-900 dark:text-white">Unlisted</strong> event, and Draft and Internal events are open to schedule members only. A password-protected event only embeds for someone who has already entered the password.</li>
             <li><strong class="text-gray-900 dark:text-white">One event per widget.</strong> The <a href="#cart" class="doc-link">multi-event cart</a> is not offered inside an embed.</li>
         </ul>

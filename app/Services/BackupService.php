@@ -120,6 +120,9 @@ class BackupService
         // event was not imported by anyone, and a batch id from elsewhere must never line up with
         // a live one here (it is what "Undo this import" deletes by).
         'import_source', 'import_batch',
+        // The ticket preset an event's tickets came from: a ticket_presets row on THIS install.
+        // Non-fillable, so the round-trip already skips it; listed so that stays a decision.
+        'ticket_preset_id',
         // Points at a seating_plans row on THIS install. It is fillable so event cloning
         // carries it, and both the exporter and importEvent() walk getFillable() - so a raw id
         // would either abort the WHOLE restore on the foreign key, or (restoring onto the same
@@ -131,6 +134,11 @@ class BackupService
         // creator_role_id - the importing schedule - which is why exportEvent() only carries values
         // that were keyed by the exporting schedule's own fields.
         'custom_field_values_role_id',
+        // The team member an appointment was booked with: a user id from THIS install, which on
+        // the install a backup is restored to is nobody, or somebody else. Non-fillable, so both
+        // halves already skip it; listed so that stays a decision. A restored type is unhosted
+        // too: exportAppointmentTypes() names its fields and leaves the host out.
+        'appointment_host_user_id',
     ];
 
     private const MAX_SCHEDULES = 50;

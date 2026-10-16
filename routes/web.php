@@ -17,6 +17,9 @@ use App\Http\Controllers\Auth\RegisteredUserController;
 use App\Http\Controllers\BackupController;
 use App\Http\Controllers\BlogController;
 use App\Http\Controllers\BoostController;
+use App\Http\Controllers\BoostPartnerAdminController;
+use App\Http\Controllers\BoostPartnerController;
+use App\Http\Controllers\BoostPartnerSettingsController;
 use App\Http\Controllers\BoxOfficeController;
 use App\Http\Controllers\CalDAVController;
 use App\Http\Controllers\CarpoolController;
@@ -497,6 +500,10 @@ Route::post('/microsoft-calendar/webhook', [MicrosoftCalendarWebhookController::
 // Meta Ads webhook routes (no auth required)
 Route::get('/webhooks/meta', [MetaAdsWebhookController::class, 'verify'])->name('meta.webhook.verify')->middleware('throttle:10,1');
 Route::post('/webhooks/meta', [MetaAdsWebhookController::class, 'handle'])->name('meta.webhook.handle')->middleware('throttle:60,1');
+// Facebook Login for Business (boost partners): Meta calls these when a person removes the app or
+// asks for their data to be deleted. Both clear that person's stored token.
+Route::post('/webhooks/meta/deauthorize', [BoostPartnerSettingsController::class, 'deauthorize'])->name('meta.webhook.deauthorize')->middleware('throttle:60,1');
+Route::post('/webhooks/meta/data-deletion', [BoostPartnerSettingsController::class, 'dataDeletion'])->name('meta.webhook.data_deletion')->middleware('throttle:60,1');
 
 // WhatsApp webhook route (no auth required)
 Route::post('/api/whatsapp/webhook', [WhatsAppWebhookController::class, 'handle'])->name('whatsapp.webhook')->middleware('throttle:60,1');
@@ -697,6 +704,33 @@ Route::middleware(['auth', 'verified', 'app_subdomain', 'active_day'])->group(fu
     Route::get('/promotions/create', [PromotionController::class, 'create'])->name('promotions.create');
     Route::post('/promotions/payment-intent', [PromotionController::class, 'createPaymentIntent'])->name('promotions.payment_intent');
     Route::post('/promotions', [PromotionController::class, 'store'])->name('promotions.store');
+    // Boost partners: an account whose schedules boost under its own Page and ad account, with
+    // every boost approved and marked paid by it first. Static paths come before /boost/{hash}.
+    Route::get('/boost/requests', [BoostPartnerController::class, 'requests'])->name('boost.partner.requests');
+    Route::get('/boost/campaigns', [BoostPartnerController::class, 'campaigns'])->name('boost.partner.campaigns');
+    Route::get('/boost/campaigns/export', [BoostPartnerController::class, 'export'])->name('boost.partner.export');
+    Route::get('/boost/statements', [BoostPartnerController::class, 'statements'])->name('boost.partner.statements');
+    Route::get('/boost/statements/{period}', [BoostPartnerController::class, 'statement'])->name('boost.partner.statement')->where('period', '\d{4}-\d{2}');
+    Route::post('/boost/statements/{period}/pay', [BoostPartnerController::class, 'payStatement'])->name('boost.partner.statement_pay')->where('period', '\d{4}-\d{2}');
+    // Stripe sends the partner back here from its bank's confirmation page; it reads Stripe's answer
+    // and records it, so repeating it changes nothing.
+    Route::get('/boost/statements/{period}/return', [BoostPartnerController::class, 'statementReturn'])->name('boost.partner.statement_return')->where('period', '\d{4}-\d{2}');
+    Route::post('/boost/{hash}/approve', [BoostPartnerController::class, 'approve'])->name('boost.partner.approve');
+    Route::post('/boost/{hash}/decline', [BoostPartnerController::class, 'decline'])->name('boost.partner.decline');
+    Route::post('/boost/{hash}/payment', [BoostPartnerController::class, 'confirmPayment'])->name('boost.partner.payment');
+    Route::post('/boost/{hash}/payment/withdraw', [BoostPartnerController::class, 'withdrawPayment'])->name('boost.partner.payment_withdraw');
+    Route::post('/boost/{hash}/stop', [BoostPartnerController::class, 'stop'])->name('boost.partner.stop');
+    Route::get('/boost/{hash}/edit', [BoostPartnerController::class, 'edit'])->name('boost.edit');
+    Route::post('/boost/{hash}/edit', [BoostPartnerController::class, 'update'])->name('boost.update');
+    Route::post('/settings/boost-partner/share', [BoostPartnerSettingsController::class, 'saveShare'])->name('boost.partner.settings.share');
+    Route::post('/settings/boost-partner/check', [BoostPartnerSettingsController::class, 'check'])->name('boost.partner.settings.check');
+    Route::post('/settings/boost-partner/disconnect', [BoostPartnerSettingsController::class, 'disconnect'])->name('boost.partner.settings.disconnect');
+    Route::get('/settings/boost-partner/login', [BoostPartnerSettingsController::class, 'login'])->name('boost.partner.settings.login');
+    Route::get('/settings/boost-partner/callback', [BoostPartnerSettingsController::class, 'callback'])->name('boost.partner.settings.callback');
+    Route::post('/settings/boost-partner/select', [BoostPartnerSettingsController::class, 'selectAssets'])->name('boost.partner.settings.select');
+    Route::post('/settings/boost-partner/instructions', [BoostPartnerSettingsController::class, 'saveInstructions'])->name('boost.partner.settings.instructions');
+    Route::post('/settings/boost-partner/card/intent', [BoostPartnerSettingsController::class, 'cardIntent'])->name('boost.partner.settings.card_intent');
+    Route::post('/settings/boost-partner/card', [BoostPartnerSettingsController::class, 'saveCard'])->name('boost.partner.settings.card');
     Route::get('/boost/{hash}', [BoostController::class, 'show'])->name('boost.show');
     Route::post('/boost/{hash}/toggle-pause', [BoostController::class, 'togglePause'])->name('boost.toggle_pause');
     Route::post('/boost/{hash}/cancel', [BoostController::class, 'cancel'])->name('boost.cancel');
@@ -837,6 +871,7 @@ Route::middleware(['auth', 'verified', 'app_subdomain', 'active_day'])->group(fu
     Route::delete('/{subdomain}/delete-event-image', [EventController::class, 'deleteImage'])->name('event.delete_image');
     Route::get('/{subdomain}/events-graphic', [GraphicController::class, 'generateGraphic'])->name('event.generate_graphic');
     Route::get('/{subdomain}/events-graphic/data', [GraphicController::class, 'generateGraphicData'])->name('event.generate_graphic_data');
+    Route::get('/{subdomain}/events-graphic/list-preview', [GraphicController::class, 'listWordingPreview'])->name('event.graphic_list_preview');
     Route::get('/{subdomain}/events-graphic/download', [GraphicController::class, 'downloadGraphic'])->name('event.download_graphic');
     Route::get('/{subdomain}/events-graphic/settings', [GraphicController::class, 'getSettings'])->name('event.graphic_settings');
     Route::post('/{subdomain}/events-graphic/settings', [GraphicController::class, 'saveSettings'])->name('event.save_graphic_settings');
@@ -1060,6 +1095,7 @@ Route::middleware(['auth', 'verified', 'app_subdomain', 'active_day'])->group(fu
         // explains how to turn it on rather than disappearing.
         Route::get('/admin/realtime', [AdminRealtimeController::class, 'index'])->name('admin.realtime');
         Route::get('/admin/realtime/data', [AdminRealtimeController::class, 'data'])->name('admin.realtime.data');
+        Route::get('/admin/realtime/trends', [AdminRealtimeController::class, 'trends'])->name('admin.realtime.trends');
         Route::post('/admin/settings/realtime', [AdminRealtimeController::class, 'updateSettings'])->name('admin.settings.update_realtime');
         Route::get('/admin/users', [AdminController::class, 'users'])->name('admin.users');
         Route::get('/admin/revenue', [AdminController::class, 'revenue'])->name('admin.revenue');
@@ -1077,6 +1113,9 @@ Route::middleware(['auth', 'verified', 'app_subdomain', 'active_day'])->group(fu
         Route::get('/admin/boost', [AdminController::class, 'boost'])->name('admin.boost');
         Route::post('/admin/boost/grant-credit', [AdminController::class, 'boostGrantCredit'])->name('admin.boost.grant_credit');
         Route::post('/admin/boost/set-limit', [AdminController::class, 'boostSetLimit'])->name('admin.boost.set_limit');
+        Route::post('/admin/boost/partners', [BoostPartnerAdminController::class, 'enable'])->name('admin.boost.partners.enable');
+        Route::post('/admin/boost/partners/{partner}/confirm', [BoostPartnerAdminController::class, 'confirm'])->name('admin.boost.partners.confirm');
+        Route::post('/admin/boost/partners/{partner}/disable', [BoostPartnerAdminController::class, 'disable'])->name('admin.boost.partners.disable');
         Route::post('/admin/translation/retry', [AdminController::class, 'retryTranslation'])->name('admin.translation.retry');
         // App Update (selfhost). Registered on every install and 404'd at runtime inside the
         // controller, matching the federation and growth routes above: phpunit pins
@@ -1148,6 +1187,9 @@ Route::middleware(['auth', 'verified', 'app_subdomain', 'active_day'])->group(fu
         Route::get('/admin/blocked/account/{hash}', [AdminBlockController::class, 'account'])->name('admin.blocked.account');
         Route::post('/admin/blocked/account/{hash}/block', [AdminBlockController::class, 'block'])->name('admin.blocked.block');
         Route::post('/admin/blocked/account/{hash}/unblock', [AdminBlockController::class, 'unblock'])->name('admin.blocked.unblock');
+        Route::post('/admin/blocked/account/{hash}/not-spam', [AdminBlockController::class, 'notSpam'])->name('admin.blocked.not_spam');
+        Route::post('/admin/blocked/account/{hash}/flag-again', [AdminBlockController::class, 'flagAgain'])->name('admin.blocked.flag_again');
+        Route::post('/admin/blocked/words', [AdminBlockController::class, 'saveWords'])->name('admin.blocked.words');
         Route::get('/admin/schedules', [AdminController::class, 'schedules'])->name('admin.schedules');
         Route::get('/admin/schedules/{role}/edit', [AdminController::class, 'editSchedule'])->name('admin.schedules.edit');
         Route::put('/admin/schedules/{role}', [AdminController::class, 'updateSchedule'])->name('admin.schedules.update');

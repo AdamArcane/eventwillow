@@ -30,6 +30,7 @@
         <x-doc-nav-group label="Settings" href="#settings">
             <x-doc-nav-link href="#settings-general">Schedule URL</x-doc-nav-link>
             <x-doc-nav-link href="#custom-domain">Custom Domain</x-doc-nav-link>
+            <x-doc-nav-link href="#ticket-presets">Ticket Presets</x-doc-nav-link>
             <x-doc-nav-link href="#settings-notifications">Notifications</x-doc-nav-link>
             <x-doc-nav-link href="#settings-advanced">Advanced</x-doc-nav-link>
             <x-doc-nav-link href="#url-pattern-variables">URL Pattern Variables</x-doc-nav-link>
@@ -638,7 +639,7 @@
             </svg>
             Settings
         </h2>
-        <p class="text-gray-600 dark:text-gray-300 mb-6">The <strong class="text-gray-900 dark:text-white">Settings</strong> section controls how your schedule behaves. The schedule's address is on the page as it opens. <strong class="text-gray-900 dark:text-white">Notifications</strong> and <strong class="text-gray-900 dark:text-white">Advanced</strong> are two rows under it: closed, Notifications lists the emails that are switched on and Advanced lists its three headings.</p>
+        <p class="text-gray-600 dark:text-gray-300 mb-6">The <strong class="text-gray-900 dark:text-white">Settings</strong> section controls how your schedule behaves. The schedule's address is on the page as it opens. <strong class="text-gray-900 dark:text-white">Ticket presets</strong>, <strong class="text-gray-900 dark:text-white">Notifications</strong> and <strong class="text-gray-900 dark:text-white">Advanced</strong> are rows under it: closed, Ticket presets names the presets, Notifications lists the emails that are switched on and Advanced lists its three headings.</p>
 
         <x-doc-screenshot id="creating-schedules--section-settings" alt="The Settings section: the Schedule URL with its copy button and Edit, then the Notifications row and the Advanced row, each saying what it holds" />
 
@@ -704,6 +705,18 @@
             </li>
             <li>Changes may take a few minutes to several hours to propagate. Once active, visitors who go to your custom domain will be seamlessly redirected to your schedule.</li>
         </ol>
+
+        <!-- Ticket presets -->
+        <h3 id="ticket-presets" class="doc-subheading">Ticket presets</h3>
+        <p class="text-gray-600 dark:text-gray-300 mb-4">Ticket setups an event's Tickets tab starts from, such as <em>Free event</em>, <em>Regular</em> at 5 and <em>Special</em> at 20. One of them is the <strong class="text-gray-900 dark:text-white">Default</strong>: every new event on this schedule starts on it, and on how people sign up once the preset says (<em>Usual tickets</em>, carried over from the old <em>Save as default</em>, leaves that as the schedule's last event had it until you choose). A schedule can have up to 30 presets. Each preset has:</p>
+        <ul class="list-disc ml-6 mb-4 text-gray-600 dark:text-gray-300 space-y-1">
+            <li><strong class="text-gray-900 dark:text-white">Name</strong>, what your team picks it by.</li>
+            <li><strong class="text-gray-900 dark:text-white">How people sign up</strong>: Free registration (with an optional limit), Sell tickets, or Not needed.</li>
+            <li>For Sell tickets, its <strong class="text-gray-900 dark:text-white">ticket types</strong>, each with a price (enter 0 for a free one: a preset never leaves a price blank), an optional quantity and a type name, and the <strong class="text-gray-900 dark:text-white">payment method</strong>, <strong class="text-gray-900 dark:text-white">currency</strong> and payment instructions.</li>
+        </ul>
+        <p class="text-gray-600 dark:text-gray-300 mb-4">The first preset you add starts from the tickets of the schedule's newest event. A preset can also be saved from an event, with everything the Tickets tab holds (options, promo codes and add-ons included): see <a href="{{ route('marketing.docs.tickets') }}#ticket-presets" class="doc-link">Ticket presets</a> in the tickets guide. Changing a preset does not change the events already saved with it; each picks up the new prices when the preset is chosen on it again.</p>
+        <h4 id="ticket-presets-team" class="font-semibold text-gray-900 dark:text-white mt-6 mb-2">Team members pick from these presets</h4>
+        <p class="text-gray-600 dark:text-gray-300 mb-4">The owner's switch under the list, offered where the schedule can have a <a href="{{ route('marketing.docs.managing_schedules') }}#team" class="doc-link">team</a>. With it on, everyone else on the team, admins included, sees only the presets on an event's Tickets tab and cannot type prices; the presets themselves can then be changed by the owner alone. A new event a team member adds this way is on the owner's account, so its online payments go to the owner. Once somebody holds a ticket or a reservation for an event (an unpaid or a refunded order counts), or it has a seating plan, its tickets stay as they are; the owner can still change them by hand. An event a team member makes on another schedule of their own and lists here, with tickets or sign-ups, waits on this schedule's Requests tab for the owner to accept, rather than appearing at once. If a plan change means the schedule can no longer have a team, the owner can still turn the switch off. The switch needs a default preset, and every preset to say how people sign up.</p>
 
         <!-- Notifications Tab -->
         <h3 id="settings-notifications" class="doc-subheading">Notifications</h3>
@@ -799,6 +812,11 @@
             <div class="doc-field">
                 <h4 class="font-semibold text-gray-900 dark:text-white mb-2">First Day of Week</h4>
                 <p class="text-sm text-gray-500 dark:text-gray-400">Which day your calendar week starts on. All seven days are available; Sunday unless you change it.</p>
+            </div>
+            <div class="doc-field" id="list-wording">
+                <h4 class="font-semibold text-gray-900 dark:text-white mb-2">Event List Wording</h4>
+                <p class="text-sm text-gray-500 dark:text-gray-400">How each event is worded on your schedule's list, from three choices. <strong class="text-gray-900 dark:text-white">Standard</strong> is the list's own card, and what every schedule starts with. <strong class="text-gray-900 dark:text-white">Same as the Events graphic caption</strong> words each card the way your <a href="{{ route('marketing.docs.event_graphics') }}#text-template" class="doc-link">caption</a> does, so the list says what you post to WhatsApp, and follows the caption when you change it. <strong class="text-gray-900 dark:text-white">My own wording</strong> is a template for the list alone, written with the same <a href="{{ route('marketing.docs.event_graphics') }}#variables" class="doc-link">variables</a>; it starts from your caption.</p>
+                <p class="text-sm text-gray-500 dark:text-gray-400 mt-2">The line with <code class="doc-inline-code">{event_name}</code> becomes the card's title and the next three lines go under it. The list keeps its day headings, each card's time, the price and Sold out labels and the picture, so the date, time, price and link variables are left out on the list, together with the words around them (<code class="doc-inline-code">🕗 {time} | 📍 {venue}</code> reads <em>📍 Blue Room</em>), and so is any line above the title. A custom field shows only where it is set to show on the event page. <code class="doc-inline-code">*bold*</code>, <code class="doc-inline-code">_italic_</code> and <code class="doc-inline-code">~strike~</code> work as they do in WhatsApp. A preview under the field shows your next three events before you save. Visitors who read your schedule in its other language see the standard cards, because your own words cannot be translated. Free on every plan.</p>
             </div>
             <div class="doc-field">
                 <h4 class="font-semibold text-gray-900 dark:text-white mb-2">Show Accessibility Widget</h4>

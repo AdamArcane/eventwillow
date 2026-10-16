@@ -1,7 +1,7 @@
 <x-docs-page
     key="account-settings"
     title="Account Settings: Payments, API, Calendars - Event Schedule"
-    description="Manage your Event Schedule profile and theme, connect Stripe, PayPal, Payfast or Invoice Ninja, and set up API keys, webhooks, calendar sync and backups."
+    description="Manage your Event Schedule profile and theme, connect Stripe, PayPal, Payfast, Razorpay or Invoice Ninja, and set up API keys, webhooks, calendar sync and backups."
     lede="Everything on the Settings page: your profile, how the admin portal looks, the payment method your tickets are sold through, API and webhook access, connected calendars, backups and account security."
 >
     <x-slot:toc>
@@ -17,6 +17,7 @@
             <x-doc-nav-link href="#payment-url">Payment Link</x-doc-nav-link>
             <x-doc-nav-link href="#payfast">Payfast</x-doc-nav-link>
             <x-doc-nav-link href="#paypal">PayPal</x-doc-nav-link>
+            <x-doc-nav-link href="#razorpay">Razorpay</x-doc-nav-link>
         </x-doc-nav-group>
         {{-- The four entries below hold several sections each on the settings page, so each is
              a group here, named as the page's sidebar names it. --}}
@@ -28,6 +29,11 @@
             <x-doc-nav-link href="#google">Google Settings</x-doc-nav-link>
             <x-doc-nav-link href="#microsoft">Outlook Calendar</x-doc-nav-link>
             <x-doc-nav-link href="#facebook">Facebook Settings</x-doc-nav-link>
+        </x-doc-nav-group>
+        <x-doc-nav-group label="Boosts">
+            <x-doc-nav-link href="#boosts">Boosts</x-doc-nav-link>
+            <x-doc-nav-link href="#boosts-account" sub>Page and Ad Account</x-doc-nav-link>
+            <x-doc-nav-link href="#boosts-card" sub>Fee Card</x-doc-nav-link>
         </x-doc-nav-group>
         <x-doc-nav-group label="Developers">
             <x-doc-nav-link href="#api">API Settings</x-doc-nav-link>
@@ -76,7 +82,7 @@
                     </tr>
                     <tr>
                         <td><a href="#payments" class="doc-link">Payment Methods</a></td>
-                        <td>One row per method: Stripe, Invoice Ninja, Payment Link, Payfast and PayPal</td>
+                        <td>One row per method: Stripe, Invoice Ninja, Payment Link, Payfast, PayPal and Razorpay</td>
                     </tr>
                     <tr>
                         <td>Security</td>
@@ -240,7 +246,7 @@
             Payment Methods
         </h2>
         <p class="text-gray-600 dark:text-gray-300 mb-4">
-            Cash needs nothing set up. To take payment any other way, connect a method here. There are five, each a row that opens in place and says beside its name whether it is connected, or what the method is while it is not: Stripe, Invoice Ninja, Payment Link, Payfast and PayPal. The line under Payment Methods in the list of entries names the ones that are. While nothing is connected the first row opens by itself, and a row's button reads <strong class="text-gray-900 dark:text-white">Connect</strong> until there is something to save over.
+            Cash needs nothing set up. To take payment any other way, connect a method here. There are six, each a row that opens in place and says beside its name whether it is connected, or what the method is while it is not: Stripe, Invoice Ninja, Payment Link, Payfast, PayPal and Razorpay. The line under Payment Methods in the list of entries names the ones that are. While nothing is connected the first row opens by itself, and a row's button reads <strong class="text-gray-900 dark:text-white">Connect</strong> until there is something to save over.
         </p>
 
         <x-doc-screenshot id="account-settings--payment-methods" alt="The Payment Methods tab of Settings: five rows, Stripe, Invoice Ninja, Payment Link, Payfast and PayPal, each with a line beside its name" />
@@ -249,7 +255,7 @@
         </p>
         <div class="doc-callout doc-callout-plan mb-6">
             <div class="doc-callout-title">Selling priced tickets needs Pro <x-doc-badge plan="pro" /></div>
-            <p>Taking money for a ticket is the Pro plan, and it comes with all five methods. A free schedule sells nothing priced, apart from during a <a href="{{ route('marketing.docs.tickets') }}#selling-trial" class="doc-link">selling trial</a>, so until then it needs none of them.</p>
+            <p>Taking money for a ticket is the Pro plan, and it comes with all six methods. A free schedule sells nothing priced, apart from during a <a href="{{ route('marketing.docs.tickets') }}#selling-trial" class="doc-link">selling trial</a>, so until then it needs none of them.</p>
         </div>
 
         <h3 id="stripe" class="doc-subheading">Stripe</h3>
@@ -373,10 +379,40 @@
             PayPal settles Australian, Canadian, Hong Kong, New Zealand, Singapore and US dollars, the euro, sterling, the Swiss franc, the Czech koruna, the Danish, Norwegian and Swedish krone, the Brazilian real, the Chinese yuan, the Israeli shekel, the Malaysian ringgit, the Mexican peso, the Philippine peso, the Polish zloty, the Russian rouble and the Thai baht. For the full walkthrough see <a href="{{ route('marketing.docs.tickets') }}#paypal" class="doc-link">Connecting PayPal</a>.
         </p>
 
+        <h3 id="razorpay" class="doc-subheading">Razorpay</h3>
+        <p class="text-gray-600 dark:text-gray-300 mb-4">
+            <x-link href="https://razorpay.com" target="_blank">Razorpay</x-link> takes payment in Indian rupees by UPI, card, netbanking and wallets, and releases the ticket on its own once the buyer has paid. Buyers pay on a Razorpay payment page and come straight back, and we check every payment with Razorpay itself before marking a sale paid. It settles in INR only - if your event is priced in anything else, Razorpay does not appear as an option.
+        </p>
+        <div class="doc-fields">
+            <div class="doc-field">
+                <h4 class="font-semibold text-gray-900 dark:text-white mb-2">What to enter</h4>
+                <p class="text-sm text-gray-500 dark:text-gray-400">Your <strong class="text-gray-900 dark:text-white">Key ID</strong> and <strong class="text-gray-900 dark:text-white">Key Secret</strong>, from the Razorpay Dashboard under <strong class="text-gray-900 dark:text-white">Account &amp; Settings &gt; API Keys</strong>. The Key ID starts with <code>rzp_live_</code>, or <code>rzp_test_</code> for test mode.</p>
+            </div>
+            <div class="doc-field">
+                <h4 class="font-semibold text-gray-900 dark:text-white mb-2">They are checked when you save</h4>
+                <p class="text-sm text-gray-500 dark:text-gray-400">We ask Razorpay whether the keys work before storing them, so a mistyped secret is caught here rather than by a buyer. If Razorpay itself cannot be reached, the keys are saved anyway and you are told they could not be checked - take a test payment before you sell.</p>
+            </div>
+            <div class="doc-field">
+                <h4 class="font-semibold text-gray-900 dark:text-white mb-2">Webhook Secret (recommended)</h4>
+                <p class="text-sm text-gray-500 dark:text-gray-400">The Razorpay row shows a webhook URL with a <strong class="text-gray-900 dark:text-white">Copy</strong> button. In the Razorpay Dashboard, open <strong class="text-gray-900 dark:text-white">Account &amp; Settings &gt; Webhooks</strong>, add that URL, tick <code>payment_link.paid</code> and <code>payment_link.expired</code>, choose a secret and enter the same secret here. With it, a buyer who pays but never comes back from Razorpay (common when paying in a UPI app) still gets their ticket, and a checkout nobody finishes gives its seats back when its payment page expires. Test Mode and Live Mode each need their own webhook. While no secret is saved, the row reads <strong class="text-gray-900 dark:text-white">No webhook</strong>.</p>
+            </div>
+            <div class="doc-field">
+                <h4 class="font-semibold text-gray-900 dark:text-white mb-2">Test mode</h4>
+                <p class="text-sm text-gray-500 dark:text-gray-400">Use your Test Mode keys and nothing is really charged. While they are in use, the payment method reads <strong class="text-gray-900 dark:text-white">Razorpay (Test mode)</strong> wherever you pick it, the row reads <strong class="text-gray-900 dark:text-white">Test mode</strong> and the Tickets tab's Payment row shows a warning. Enter your live keys before you sell real tickets. Changing the Key ID from test to live, or back, clears a saved webhook secret, because the webhook belongs to the other mode.</p>
+            </div>
+            <div class="doc-field">
+                <h4 class="font-semibold text-gray-900 dark:text-white mb-2">"Provided by this installation"</h4>
+                <p class="text-sm text-gray-500 dark:text-gray-400">On a selfhosted site, the administrator can set up one Razorpay account for everyone, exactly as with Payfast and PayPal. If you see this, you can start selling immediately and there is nothing to fill in - payments settle into the site's account. Enter your own keys to be paid into your own account instead, and disconnect them again to go back.</p>
+            </div>
+        </div>
+        <p class="text-gray-600 dark:text-gray-300 mb-6">
+            For the full walkthrough, including what to do without a webhook and when a checkout is refused, see <a href="{{ route('marketing.docs.tickets') }}#razorpay" class="doc-link">Connecting Razorpay</a>.
+        </p>
+
         <div class="doc-callout doc-callout-info">
             <div class="doc-callout-title">Which method to choose</div>
-            <p>One payment method is enough. Stripe, PayPal and Payfast all confirm payment and deliver the ticket without any manual step, so pick whichever of them works where you are. Invoice Ninja marks the sale paid once the invoice is paid, through the webhook it registers when you connect. With a payment link, you mark each sale paid yourself.</p>
-            <p class="mt-3">Refunds differ too. A Stripe or PayPal sale can be refunded in full or in part from the Sales page, and the money goes back through the provider. For every other method, <strong class="text-gray-900 dark:text-white">Mark as Refunded</strong> records a refund you have made yourself. See <a href="{{ route('marketing.docs.tickets') }}#managing-sales" class="doc-link">Managing Sales</a>.</p>
+            <p>One payment method is enough. Stripe, PayPal, Payfast and Razorpay all confirm payment and deliver the ticket without any manual step, so pick whichever of them works where you are. Invoice Ninja marks the sale paid once the invoice is paid, through the webhook it registers when you connect. With a payment link, you mark each sale paid yourself.</p>
+            <p class="mt-3">Refunds differ too. A Stripe, PayPal or Razorpay sale can be refunded in full or in part from the Sales page, and the money goes back through the provider. For every other method, <strong class="text-gray-900 dark:text-white">Mark as Refunded</strong> records a refund you have made yourself. See <a href="{{ route('marketing.docs.tickets') }}#managing-sales" class="doc-link">Managing Sales</a>.</p>
         </div>
     </section>
 
@@ -525,6 +561,30 @@
             <div class="doc-field">
                 <h4 class="font-semibold text-gray-900 dark:text-white mb-2">Setting it up</h4>
                 <p class="text-sm text-gray-500 dark:text-gray-400">Facebook login needs a Facebook app configured by whoever runs the installation. Without it there is no Facebook button or settings section. See <x-link href="{{ route('marketing.docs.saas.facebook_login') }}">Facebook login setup</x-link>.</p>
+            </div>
+        </div>
+    </section>
+
+    <!-- Boosts (boost partners only) -->
+    <section id="boosts" class="doc-section">
+        <h2 class="doc-heading">
+            <svg aria-hidden="true" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" class="w-5 h-5 text-gray-500 dark:text-gray-400 flex-shrink-0">
+                <path stroke-linecap="round" stroke-linejoin="round" d="M10.34 15.84c-.688-.06-1.386-.09-2.09-.09H7.5a4.5 4.5 0 110-9h.75c.704 0 1.402-.03 2.09-.09m0 9.18c.253.962.584 1.892.985 2.783.247.55.06 1.21-.463 1.511l-.657.38c-.551.318-1.26.117-1.527-.461a20.845 20.845 0 01-1.44-4.282m3.102.069a18.03 18.03 0 01-.59-4.59c0-1.586.205-3.124.59-4.59m0 9.18a23.848 23.848 0 018.835 2.535M10.34 6.66a23.847 23.847 0 008.835-2.535" />
+            </svg>
+            Boosts
+        </h2>
+        <p class="text-gray-600 dark:text-gray-300 mb-4">
+            Shown only to an account set up as a boost partner: a network whose schedules boost under its own Facebook Page and Meta ad account. It is separate from the Facebook sign-in under Integrations. How the boosts themselves work is in <x-link href="{{ route('marketing.docs.boost') }}#partners">Boosting under your own Page</x-link>.
+        </p>
+
+        <div class="doc-fields">
+            <div class="doc-field" id="boosts-account">
+                <h3 class="font-semibold text-gray-900 dark:text-white mb-2">Page and ad account</h3>
+                <p class="text-sm text-gray-500 dark:text-gray-400">Follow the numbered steps to share your ad account and Page with our Meta Business, enter the two IDs (a number, <code class="doc-inline-code">act_</code> followed by the number, or the address copied from Facebook), and press <strong class="text-gray-900 dark:text-white">Save and check</strong>. Each check is listed with its result, with the fix when one fails, and <strong class="text-gray-900 dark:text-white">Check again</strong> runs them again once you have fixed something on Facebook. The status reads Waiting for confirmation until we confirm the IDs once, and you are emailed when that is done; requests approved and paid in the meantime start then. Where it is offered, you can sign in with Facebook instead and pick the Page and ad account from your own. <strong class="text-gray-900 dark:text-white">Disconnect</strong> stops your running boosts first, then removes the connection. The same block holds <strong class="text-gray-900 dark:text-white">How businesses pay you</strong>: a link or a contact shown to a business once you approve its boost.</p>
+            </div>
+            <div class="doc-field" id="boosts-card">
+                <h3 class="font-semibold text-gray-900 dark:text-white mb-2">Fee card</h3>
+                <p class="text-sm text-gray-500 dark:text-gray-400">The card our monthly fee is charged to: 20% of the previous month's actual ad spend. When a charge is declined we try the card again automatically for 7 days. A payment your bank asks you to confirm is not tried again on its own: open the statement and press <strong class="text-gray-900 dark:text-white">Pay now</strong> to confirm it. After you update the card, a declined statement is tried on the new card at the next daily charge.</p>
             </div>
         </div>
     </section>
@@ -754,7 +814,7 @@
                 {
                     "@type": "HowToStep",
                     "name": "Configure Payment Methods",
-                    "text": "Connect Stripe, PayPal, Invoice Ninja or Payfast, or set a payment link, to start selling tickets.",
+                    "text": "Connect Stripe, PayPal, Invoice Ninja, Payfast or Razorpay, or set a payment link, to start selling tickets.",
                     "url": "{{ url(route('marketing.docs.account_settings')) }}#payments"
                 },
                 {
