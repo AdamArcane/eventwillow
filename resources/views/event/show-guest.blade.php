@@ -574,7 +574,7 @@
         @if ($bareTalent->isNotEmpty())
         <div id="gp-talent-list" class="gk-o6 bg-white/95 dark:bg-gray-900/95 backdrop-blur-sm sm:rounded-2xl p-5">
           <h2 class="text-sm font-semibold uppercase tracking-wide text-gray-500 dark:text-gray-400">
-            {{ __('messages.talent') }}
+            {{ __('messages.talents') }}
           </h2>
           <ul class="mt-2 flex flex-col gap-1">
             @foreach ($bareTalent as $bare)
