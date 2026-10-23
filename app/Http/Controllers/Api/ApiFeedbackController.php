@@ -29,9 +29,9 @@ class ApiFeedbackController extends Controller
      */
     private function managedRoleIds()
     {
-        return auth()->user()->roles()
-            ->wherePivotIn('level', ['owner', 'admin'])
-            ->pluck('roles.id');
+        // Owner or admin, and on hosted somebody else's schedule only while it is Enterprise, as
+        // on the web (User::isEditor()): the moderation queue is a team page there.
+        return auth()->user()->manageableRoles()->pluck('id');
     }
 
     private function perPage(Request $request): int
@@ -170,7 +170,8 @@ class ApiFeedbackController extends Controller
         $total = 0;
 
         foreach ($models as $model) {
-            $query = $model::with(['event'])
+            // user: submitterName() reads it for every row.
+            $query = $model::with(['event', 'user'])
                 ->where('is_approved', $isApproved)
                 ->whereHas('event.roles', fn ($q) => $q->whereIn('roles.id', $roleIds));
 

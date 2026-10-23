@@ -176,6 +176,8 @@ document.addEventListener('click', function (e) {
 
 @include('role.partials.events-imported')
 
+@include('role.partials.calendar-arrivals')
+
 {{-- Flashed by EventController::update()/store() and RoleController::update() the first time a
      gallery goes from empty to published: the photos, and a way to see them as guests do. A draft
      or unlisted event (or a schedule with no public page) has nothing to open yet. --}}
@@ -265,7 +267,7 @@ document.addEventListener('click', function (e) {
         </div>
 
         <div class="mt-4 flex flex-wrap gap-3" data-map-notice-actions hidden>
-            <x-secondary-link href="{{ route('role.edit', ['subdomain' => $role->subdomain]) }}#engagement-tab-map">
+            <x-secondary-link href="{{ route('role.edit', ['subdomain' => $role->subdomain]) }}#page-tab-map">
                 {{ __('messages.venue_map_review') }}
             </x-secondary-link>
             @if ($venueMapGuestUrl)
@@ -384,6 +386,13 @@ document.addEventListener('click', function (e) {
     });
 })();
 </script>
+@endif
+
+{{-- No events at all: the question the first-event form asks, where they can be brought in from
+     (RoleController::viewAdmin(), $showImportOptions). The calendar's own Add Event below is the
+     way by hand. It goes with the first event. --}}
+@if (! empty($showImportOptions))
+<x-import-options :role="$role" variant="schedule" />
 @endif
 
 {{-- Below the two banners above on purpose: those warn about real problems, this is an

@@ -277,6 +277,7 @@ class User extends Authenticatable implements MustVerifyEmail
             'subscribe_form_viewed_at' => 'datetime',
             'ticket_paywall_viewed_at' => 'datetime',
             'ticket_trial_used_at' => 'datetime',
+            'trial_used_at' => 'datetime',
             'onboarding_nudge_sent_at' => 'datetime',
             // App\Utils\SetupGuide. Deliberately NOT fillable: it is written only by that class.
             'setup_guide' => 'array',
@@ -364,8 +365,8 @@ class User extends Authenticatable implements MustVerifyEmail
      * Scoped claim on purpose: this closes the PAGES, not the endpoints. /sales/action/{id} and
      * the /api/sales routes authorize through canViewEventData(), which carries no Enterprise
      * clause, so a downgraded team member who still holds a sale id can act on it. That gap
-     * predates this method (canEditEvent never filtered either) and closing it means re-gating
-     * Analytics and check-in stats too, which have no such filter on their own role scopes.
+     * predates this method (canEditEvent never filtered either). The /analytics page lists and
+     * totals through this set as well (AnalyticsController, AnalyticsService::getUserRoleIds()).
      *
      * Keys on roles.user_id exactly like viewAdmin(); CheckData::checkRoleOwnership() repairs
      * drift from the pivot.
@@ -1013,6 +1014,11 @@ class User extends Authenticatable implements MustVerifyEmail
     {
         if ($this->madeAndStillRuns($event, $this->owningScheduleId($event))) {
             return true;
+        }
+
+        // planAllowsTeamAccess() asks each schedule's plan, which only hosted reads from billing.
+        if (config('app.hosted')) {
+            $event->roles->loadMissing('subscriptions');
         }
 
         foreach ($event->roles as $role) {

@@ -1,7 +1,9 @@
 <?php
 
 use App\Http\Controllers\AdminBlockController;
+use App\Http\Controllers\AdminCalendarPrivacyController;
 use App\Http\Controllers\AdminController;
+use App\Http\Controllers\AdminDashboardController;
 use App\Http\Controllers\AdminFederationController;
 use App\Http\Controllers\AdminFeedController;
 use App\Http\Controllers\AdminLegalController;
@@ -22,6 +24,7 @@ use App\Http\Controllers\BoostPartnerController;
 use App\Http\Controllers\BoostPartnerSettingsController;
 use App\Http\Controllers\BoxOfficeController;
 use App\Http\Controllers\CalDAVController;
+use App\Http\Controllers\CalendarReviewController;
 use App\Http\Controllers\CarpoolController;
 use App\Http\Controllers\CheckInController;
 use App\Http\Controllers\EventbriteController;
@@ -278,8 +281,8 @@ Route::get('/manifest.webmanifest', [AppController::class, 'manifest'])
 
 // Self-update is available on any non-nexus install (selfhosted or a self-hosted SaaS).
 // On a multi-tenant self-hosted SaaS it is operator-only (the 'admin' middleware,
-// EnsureUserIsAdmin, so a tenant cannot trigger a global update); on a plain selfhost any
-// authenticated user may trigger it.
+// EnsureUserIsAdmin, so a tenant cannot trigger a global update); on a plain selfhost the
+// install's admins may trigger it, or any authenticated user while it has no admin at all.
 //
 // Registered on every install and gated at runtime by can_self_update() inside
 // AppController::update(), rather than wrapped in a registration-time if. Two reasons:
@@ -657,6 +660,8 @@ Route::middleware(['auth', 'verified', 'app_subdomain', 'active_day'])->group(fu
     Route::post('/newsletters', [NewsletterController::class, 'store'])->name('newsletter.store');
     Route::post('/newsletters/preview-draft', [NewsletterController::class, 'previewDraft'])->name('newsletter.preview_draft');
     Route::get('/newsletters/events', [NewsletterController::class, 'getEvents'])->name('newsletter.events');
+    // Who a newsletter would reach and whether it may go: read by the builder before it sends.
+    Route::get('/newsletters/audience', [NewsletterController::class, 'audience'])->name('newsletter.audience');
     Route::get('/newsletters/{hash}/edit', [NewsletterController::class, 'edit'])->name('newsletter.edit');
     Route::put('/newsletters/{hash}', [NewsletterController::class, 'update'])->name('newsletter.update');
     Route::delete('/newsletters/{hash}', [NewsletterController::class, 'delete'])->name('newsletter.delete');
@@ -826,7 +831,6 @@ Route::middleware(['auth', 'verified', 'app_subdomain', 'active_day'])->group(fu
     Route::post('/{subdomain}/subscribe', [SubscriptionController::class, 'store'])->name('subscription.store');
     // Beacon from the event editor's paid-ticket paywall. Plain throttle, not a named limiter.
     Route::post('/{subdomain}/paywall-seen', [SubscriptionController::class, 'paywallSeen'])->name('subscription.paywall_seen')->middleware('throttle:30,1');
-    Route::post('/{subdomain}/ticket-trial', [SubscriptionController::class, 'startTicketTrial'])->name('subscription.ticket_trial')->middleware('throttle:10,1');
     Route::get('/{subdomain}/subscription/portal', [SubscriptionController::class, 'portal'])->name('subscription.portal');
     Route::post('/{subdomain}/subscription/cancel', [SubscriptionController::class, 'cancel'])->name('subscription.cancel');
     Route::post('/{subdomain}/subscription/resume', [SubscriptionController::class, 'resume'])->name('subscription.resume');
@@ -964,6 +968,12 @@ Route::middleware(['auth', 'verified', 'app_subdomain', 'active_day'])->group(fu
         Route::post('/{subdomain}/feeds/{hash}/publish-all', [EventFeedController::class, 'publishAll'])->name('role.feeds.publish_all');
         Route::post('/{subdomain}/feeds/{hash}/decide/{item}', [EventFeedController::class, 'decide'])->name('role.feeds.decide');
         Route::post('/{subdomain}/feeds/{hash}/undo', [EventFeedController::class, 'undo'])->name('role.feeds.undo');
+        // What a calendar sync is keeping off the schedule's public page (CalendarArrival), for
+        // the owner and the admins to publish or keep hidden.
+        Route::get('/{subdomain}/calendar-review', [CalendarReviewController::class, 'index'])->name('role.calendar_review');
+        Route::post('/{subdomain}/calendar-review', [CalendarReviewController::class, 'decide'])->name('role.calendar_review.decide');
+        Route::post('/{subdomain}/calendar-review/publish-all', [CalendarReviewController::class, 'publishAll'])->name('role.calendar_review.publish_all');
+        Route::post('/{subdomain}/calendar-review/keep-publishing/{provider}', [CalendarReviewController::class, 'keepPublishing'])->name('role.calendar_review.keep_publishing')->where('provider', 'google|microsoft|caldav');
     });
     Route::delete('/{subdomain}/uncurate-event/{hash}', [EventController::class, 'uncurate'])->name('event.uncurate');
     Route::get('/{subdomain}/import', [EventController::class, 'showImportHub'])->name('event.show_import');
@@ -1089,11 +1099,17 @@ Route::middleware(['auth', 'verified', 'app_subdomain', 'active_day'])->group(fu
 
     // Admin routes (only for admin users) - protected by admin middleware for defense-in-depth
     Route::middleware(['admin', 'throttle:30,1'])->group(function () {
-        Route::get('/admin/dashboard', [AdminController::class, 'dashboard'])->name('admin.dashboard');
+        // The dashboard is the live view (Realtime) with the slower cards under it. On every
+        // install: tracking is off by default off the nexus, and the page explains how to turn it
+        // on rather than disappearing. Its cards load after the page, each from its own address.
+        Route::get('/admin/dashboard', [AdminDashboardController::class, 'index'])->name('admin.dashboard');
+        Route::get('/admin/dashboard/revenue', [AdminDashboardController::class, 'revenue'])->name('admin.dashboard.revenue');
+        Route::get('/admin/dashboard/panels/{panel}', [AdminDashboardController::class, 'panel'])
+            ->whereIn('panel', AdminDashboardController::PANELS)->name('admin.dashboard.panel');
         Route::redirect('/admin', '/admin/dashboard');
-        // Realtime. On every install: tracking is off by default off the nexus, and the page
-        // explains how to turn it on rather than disappearing.
-        Route::get('/admin/realtime', [AdminRealtimeController::class, 'index'])->name('admin.realtime');
+        // Realtime was a page of its own until 2026-10. Its filters and ?trend= are bookmarked,
+        // which Route::redirect() would drop.
+        Route::get('/admin/realtime', fn (\Illuminate\Http\Request $request) => redirect()->to(route('admin.dashboard').($request->getQueryString() ? '?'.$request->getQueryString() : '')))->name('admin.realtime');
         Route::get('/admin/realtime/data', [AdminRealtimeController::class, 'data'])->name('admin.realtime.data');
         Route::get('/admin/realtime/trends', [AdminRealtimeController::class, 'trends'])->name('admin.realtime.trends');
         Route::post('/admin/settings/realtime', [AdminRealtimeController::class, 'updateSettings'])->name('admin.settings.update_realtime');
@@ -1135,6 +1151,7 @@ Route::middleware(['auth', 'verified', 'app_subdomain', 'active_day'])->group(fu
         // each other's values through as hidden inputs, and a miss silently wipes settings.
         Route::post('/admin/settings/monetization', [AdminController::class, 'updateAdsSettings'])->name('admin.settings.update_ads');
         Route::post('/admin/settings/accommodation', [AdminController::class, 'updateStay22Settings'])->name('admin.settings.update_stay22');
+        Route::post('/admin/settings/home-quotes', [AdminController::class, 'updateHomeQuotes'])->name('admin.settings.update_home_quotes');
         Route::post('/admin/settings/currency', [AdminController::class, 'updateCurrencySettings'])->name('admin.settings.update_currency');
         Route::post('/admin/settings/plan-pricing', [AdminController::class, 'updatePlanPricingSettings'])->name('admin.settings.update_plan_pricing');
 
@@ -1190,6 +1207,17 @@ Route::middleware(['auth', 'verified', 'app_subdomain', 'active_day'])->group(fu
         Route::post('/admin/blocked/account/{hash}/not-spam', [AdminBlockController::class, 'notSpam'])->name('admin.blocked.not_spam');
         Route::post('/admin/blocked/account/{hash}/flag-again', [AdminBlockController::class, 'flagAgain'])->name('admin.blocked.flag_again');
         Route::post('/admin/blocked/words', [AdminBlockController::class, 'saveWords'])->name('admin.blocked.words');
+        // Schedules a calendar sync made into somebody's private calendar (CalendarExposureWatch).
+        // On every install: any install's owners can connect a calendar.
+        Route::get('/admin/private-calendars', [AdminCalendarPrivacyController::class, 'index'])->name('admin.private_calendars');
+        Route::get('/admin/private-calendars/{hash}', [AdminCalendarPrivacyController::class, 'show'])->name('admin.private_calendars.show');
+        Route::post('/admin/private-calendars/{hash}/hide', [AdminCalendarPrivacyController::class, 'hide'])->name('admin.private_calendars.hide');
+        Route::post('/admin/private-calendars/{hash}/put-back', [AdminCalendarPrivacyController::class, 'putBack'])->name('admin.private_calendars.put_back');
+        Route::post('/admin/private-calendars/{hash}/pause', [AdminCalendarPrivacyController::class, 'pause'])->name('admin.private_calendars.pause');
+        Route::post('/admin/private-calendars/{hash}/resume', [AdminCalendarPrivacyController::class, 'resume'])->name('admin.private_calendars.resume');
+        Route::get('/admin/private-calendars/{hash}/email-preview', [AdminCalendarPrivacyController::class, 'emailPreview'])->name('admin.private_calendars.email_preview');
+        Route::post('/admin/private-calendars/{hash}/email', [AdminCalendarPrivacyController::class, 'email'])->name('admin.private_calendars.email');
+        Route::post('/admin/private-calendars/{hash}/reviewed', [AdminCalendarPrivacyController::class, 'reviewed'])->name('admin.private_calendars.reviewed');
         Route::get('/admin/schedules', [AdminController::class, 'schedules'])->name('admin.schedules');
         Route::get('/admin/schedules/{role}/edit', [AdminController::class, 'editSchedule'])->name('admin.schedules.edit');
         Route::put('/admin/schedules/{role}', [AdminController::class, 'updateSchedule'])->name('admin.schedules.update');
@@ -1234,6 +1262,7 @@ Route::middleware(['auth', 'verified', 'app_subdomain', 'active_day'])->group(fu
         Route::get('/admin/newsletters/create', [AdminNewsletterController::class, 'create'])->name('admin.newsletters.create');
         Route::post('/admin/newsletters', [AdminNewsletterController::class, 'store'])->name('admin.newsletters.store');
         Route::post('/admin/newsletters/preview-draft', [AdminNewsletterController::class, 'previewDraft'])->name('admin.newsletters.preview_draft');
+        Route::get('/admin/newsletters/audience', [AdminNewsletterController::class, 'audience'])->name('admin.newsletters.audience');
         Route::get('/admin/newsletters/{hash}/edit', [AdminNewsletterController::class, 'edit'])->name('admin.newsletters.edit');
         Route::put('/admin/newsletters/{hash}', [AdminNewsletterController::class, 'update'])->name('admin.newsletters.update');
         Route::delete('/admin/newsletters/{hash}', [AdminNewsletterController::class, 'delete'])->name('admin.newsletters.delete');
@@ -1328,6 +1357,10 @@ if (config('app.is_nexus')) {
         Route::get('/search', [MarketingController::class, 'search'])->name('marketing.search');
         Route::get('/browse', [MarketingController::class, 'browse'])->name('marketing.browse');
         Route::post('/browse/event/{hash}/toggle-discovery', [MarketingController::class, 'toggleEventDiscovery'])->name('marketing.discovery.toggle')->middleware('auth');
+        Route::post('/browse/schedule/{hash}/toggle-discovery', [MarketingController::class, 'toggleScheduleDiscovery'])->name('marketing.discovery.schedule')->middleware('auth');
+        // A platform admin's pills for the homepage rail, asked by the page after it loads (the page is
+        // the edge's anonymous copy). Named outside marketing.* so it is never marked public.
+        Route::get('/browse/discovery-controls', [MarketingController::class, 'discoveryControls'])->name('discovery.controls')->middleware('throttle:60,1');
         Route::post('/browse/federated/{hash}/block', [MarketingController::class, 'toggleFederatedBlock'])->name('marketing.federation.block')->middleware('auth');
         // Beacon target for outbound clicks on a federated listing. The card link
         // itself stays a direct followable link to the origin, so this cannot be a
@@ -1609,6 +1642,10 @@ if (config('app.is_nexus')) {
             Route::get('/search', [MarketingController::class, 'search'])->name('marketing.search');
             Route::get('/browse', [MarketingController::class, 'browse'])->name('marketing.browse');
             Route::post('/browse/event/{hash}/toggle-discovery', [MarketingController::class, 'toggleEventDiscovery'])->name('marketing.discovery.toggle')->middleware('auth');
+            Route::post('/browse/schedule/{hash}/toggle-discovery', [MarketingController::class, 'toggleScheduleDiscovery'])->name('marketing.discovery.schedule')->middleware('auth');
+            // A platform admin's pills for the homepage rail, asked by the page after it loads (the page is
+            // the edge's anonymous copy). Named outside marketing.* so it is never marked public.
+            Route::get('/browse/discovery-controls', [MarketingController::class, 'discoveryControls'])->name('discovery.controls')->middleware('throttle:60,1');
             Route::post('/browse/federated/{hash}/block', [MarketingController::class, 'toggleFederatedBlock'])->name('marketing.federation.block')->middleware('auth');
             // Beacon target for outbound clicks on a federated listing. The card link
             // itself stays a direct followable link to the origin, so this cannot be a

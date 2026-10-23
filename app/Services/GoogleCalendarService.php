@@ -7,6 +7,7 @@ use App\Models\Role;
 use App\Models\User;
 use App\Repos\EventRepo;
 use App\Services\Concerns\ConvertsLocationToVenue;
+use App\Utils\CalendarPrivacy;
 use App\Utils\EventTextGenerator;
 use App\Utils\MarkdownUtils;
 use App\Utils\SlugPatternUtils;
@@ -32,6 +33,21 @@ class GoogleCalendarService
     protected $calendarService;
 
     protected $eventRepo;
+
+    /** Whether the inbound read under way is this calendar's very first (CalendarArrival). */
+    protected bool $inboundFirstPull = false;
+
+    /** What creating one entry held back, by reason, for the read's counts. */
+    protected array $inboundCounts = [];
+
+    /**
+     * Set by the sync command for the schedules it may give their one full read this run
+     * (CalendarArrival::needsReread()). Webhooks and "Sync now" read only what changed.
+     */
+    public bool $rereadAllowed = false;
+
+    /** Whether the read under way is the one full read, which re-judges entries and rewrites none. */
+    protected bool $inboundRereading = false;
 
     /** What the standing sync needs: read the calendars, and write events to one of them. */
     public const FULL_SCOPES = [
@@ -269,6 +285,7 @@ class GoogleCalendarService
             'google_webhook_expires_at' => null,
         ]);
         Role::where('user_id', $user->id)->update(['sync_direction' => null, 'google_sync_token' => null]);
+        CalendarArrival::resetConsentForOwner($user->id, CalendarArrival::GOOGLE);
 
         \App\Models\CalendarSync::where('user_id', $user->id)->delete();
 
@@ -620,14 +637,7 @@ class GoogleCalendarService
      */
     public static function importEntry(GoogleEvent $event): array
     {
-        // An invitation the calendar's owner said no to is still on the calendar. `self` marks
-        // the reply that is theirs.
-        $declined = false;
-        foreach ($event->getAttendees() ?: [] as $attendee) {
-            if ($attendee->getSelf() && $attendee->getResponseStatus() === 'declined') {
-                $declined = true;
-            }
-        }
+        $declined = self::declinedBySelf($event);
 
         return [
             'id' => $event->getId(),
@@ -805,7 +815,26 @@ class GoogleCalendarService
             'htmlLink' => $event->getHtmlLink(),
             'created' => $event->getCreated(),
             'updated' => $event->getUpdated(),
+            // What the calendar says about publishing it (CalendarArrival::googleReason()).
+            'visibility' => $event->getVisibility(),
+            'event_type' => $event->getEventType(),
+            'declined' => self::declinedBySelf($event),
         ];
+    }
+
+    /**
+     * An invitation the calendar's owner said no to is still on the calendar. `self` marks the
+     * reply that is theirs.
+     */
+    public static function declinedBySelf(GoogleEvent $event): bool
+    {
+        foreach ($event->getAttendees() ?: [] as $attendee) {
+            if ($attendee->getSelf() && $attendee->getResponseStatus() === 'declined') {
+                return true;
+            }
+        }
+
+        return false;
     }
 
     /**
@@ -857,10 +886,37 @@ class GoogleCalendarService
 
         // Serialize inbound sync per role: the webhook and the 15-min poll (or two overlapping runs)
         // could otherwise import the same event twice and race on the sync-token advance.
-        $lock = Cache::lock('google-role-sync-'.$role->id, 120);
-        if (! $lock->get()) {
-            return $results;
+        // The one full read is owed only by a sync that already has a token: one without reads the
+        // whole window anyway.
+        $rereading = $this->rereadAllowed && $role->google_sync_token && CalendarArrival::needsReread($role, CalendarArrival::GOOGLE);
+
+        // What changed comes first, through the stored token, so the full read after it only
+        // judges: it neither applies an edit (that is the token's job, and skipping one there lost
+        // it) nor creates an entry it finds no event for (one the owner deleted here). Its own
+        // token is not kept, so nothing the read of changes has not seen is passed by.
+        $changes = null;
+        if ($rereading) {
+            $this->rereadAllowed = false;
+            try {
+                $changes = $this->syncFromGoogleCalendar($user, $role, $calendarId);
+            } finally {
+                $this->rereadAllowed = true;
+            }
+            $role->refresh();
+            // A failed read, or a stored token that was refused and read the whole window
+            // afresh (which finished the full read), leaves nothing to do.
+            if ($changes['errors'] > 0 || ! $role->google_sync_token || ! CalendarArrival::needsReread($role, CalendarArrival::GOOGLE)) {
+                return $changes;
+            }
         }
+        $this->inboundRereading = (bool) $rereading;
+
+        // A full read saves every entry in the window, which can outlast the usual two minutes.
+        $lock = Cache::lock('google-role-sync-'.$role->id, $rereading ? 900 : 120);
+        if (! $lock->get()) {
+            return $changes ?? $results;
+        }
+        $results = $changes ?? $results;
 
         try {
             if (! $this->refreshTokenIfNeeded($user)) {
@@ -871,19 +927,40 @@ class GoogleCalendarService
 
             $syncToken = $role->google_sync_token ?: null;
 
+            // The very first read of this calendar, which the owner is told about. A token Google
+            // threw away and the read starting over is not one.
+            $this->inboundFirstPull = ! $syncToken && empty(CalendarArrival::settings($role)->google_first_pull);
+            CalendarArrival::bindCarriedOver($role, CalendarArrival::GOOGLE);
+
             // Compute the initial-sync window ONCE - it must stay identical across paginated
             // requests (Google rejects a page request whose params differ from the first).
             $timeMin = now()->subDays(30)->format('c');
             $timeMax = now()->addDays(365)->format('c');
 
             $pageToken = null;
+
+            // The one full read (CalendarArrival::needsReread()): the whole window again, so the
+            // privacy filters reach entries read in before them. One too big for a run resumes
+            // where it stopped, with the window it started with.
+            if ($rereading) {
+                $syncToken = null;
+                $cursor = json_decode((string) CalendarArrival::rereadCursor($role, CalendarArrival::GOOGLE), true);
+                if (is_array($cursor) && ! empty($cursor['page']) && ! empty($cursor['min']) && ! empty($cursor['max'])) {
+                    [$pageToken, $timeMin, $timeMax] = [$cursor['page'], $cursor['min'], $cursor['max']];
+                }
+            }
+
             $restarted = false;
             $pages = 0;
             $nextSyncToken = null;
+            $readStarted = microtime(true);
 
             while (true) {
                 if (++$pages > self::MAX_SYNC_PAGES) {
                     Log::warning('Google sync pagination cap hit', ['role_id' => $role->id]);
+                    if ($rereading && $pageToken) {
+                        CalendarArrival::saveRereadCursor($role, CalendarArrival::GOOGLE, json_encode(['page' => $pageToken, 'min' => $timeMin, 'max' => $timeMax]));
+                    }
                     break;
                 }
 
@@ -923,6 +1000,19 @@ class GoogleCalendarService
                         continue;
                     }
 
+                    // A full read's saved place can go stale the same way: start it over, once,
+                    // with a fresh window, or every run would stop on the same page.
+                    if ($rereading && $pageToken && ! $restarted && in_array($e->getCode(), [400, 410], true)) {
+                        $restarted = true;
+                        CalendarArrival::saveRereadCursor($role, CalendarArrival::GOOGLE, null);
+                        $pageToken = null;
+                        $timeMin = now()->subDays(30)->format('c');
+                        $timeMax = now()->addDays(365)->format('c');
+                        $pages = 0;
+
+                        continue;
+                    }
+
                     Log::error('Failed to list Google Calendar events', [
                         'role_id' => $role->id,
                         'calendar_id' => $calendarId,
@@ -954,11 +1044,26 @@ class GoogleCalendarService
                     $nextSyncToken = $events->getNextSyncToken();
                     break;
                 }
+
+                // A full read that has run its time saves its place and goes on in the next run.
+                if ($rereading && microtime(true) - $readStarted >= CalendarArrival::rereadPageSeconds()) {
+                    CalendarArrival::saveRereadCursor($role, CalendarArrival::GOOGLE, json_encode(['page' => $pageToken, 'min' => $timeMin, 'max' => $timeMax]));
+                    break;
+                }
             }
 
-            // Persist the fresh token only after a clean, fully-paginated run.
+            // Persist the fresh token only after a clean, fully-paginated run, and never the full
+            // read's: the token the read of changes left is what the next read starts from.
             if ($nextSyncToken) {
-                $this->storeGoogleSyncToken($role, $nextSyncToken);
+                if (! $rereading) {
+                    $this->storeGoogleSyncToken($role, $nextSyncToken);
+                }
+                CalendarArrival::recordPull($role, CalendarArrival::GOOGLE, $results, $this->inboundFirstPull);
+
+                // A read that started with no token read the whole window: it was the full read.
+                if (! $syncToken) {
+                    CalendarArrival::finishReread($role, CalendarArrival::GOOGLE);
+                }
             }
         } catch (\Exception $e) {
             Log::error('Failed to sync from Google Calendar', [
@@ -989,6 +1094,7 @@ class GoogleCalendarService
         }
 
         $data = $this->mapGoogleEvent($googleEvent);
+        $sourceReason = CalendarArrival::googleReason($data);
 
         // Match by google_event_id in calendar_syncs.
         $existingSync = \App\Models\CalendarSync::where('role_id', $role->id)
@@ -1016,7 +1122,15 @@ class GoogleCalendarService
         }
 
         if ($existingEvent) {
-            $changed = $this->updateEventFromGoogle($existingEvent, $data, $role);
+            // The one full read only judges: what changed in the calendar was applied by the read
+            // of changes before it, and rewriting the rest would undo what the owner edited here.
+            $changed = $this->inboundRereading ? false : $this->updateEventFromGoogle($existingEvent, $data, $role);
+
+            // The calendar may now say it is private, or its text now carry a passcode.
+            if (CalendarArrival::reconsider($existingEvent, $role, CalendarArrival::GOOGLE, $sourceReason, $existingSync !== null)) {
+                $changed = true;
+            }
+            CalendarExposureWatch::record($existingEvent);
 
             // Backfill the sync mapping when the match came from the name+time fallback (no
             // CalendarSync row yet) so future syncs match reliably by google_event_id even if the
@@ -1032,9 +1146,19 @@ class GoogleCalendarService
                 $results['updated']++;
                 UsageTrackingService::track(UsageTrackingService::GCAL_SYNC, $role->id);
             }
+        } elseif ($this->inboundRereading) {
+            // The full read only judges what is here; a new entry is the read of changes' to add.
+        } elseif ($sourceReason !== null) {
+            // Marked private, declined, or not an event at all: not read in.
+            CalendarArrival::count($results, $sourceReason);
         } else {
-            $this->createEventFromGoogle($data, $role, $calendarId);
+            $this->inboundCounts = [];
+            $created = $this->createEventFromGoogle($data, $role, $calendarId);
+            CalendarExposureWatch::record($created);
             $results['created']++;
+            foreach ($this->inboundCounts as $key => $n) {
+                $results[$key] = ($results[$key] ?? 0) + $n;
+            }
             UsageTrackingService::track(UsageTrackingService::GCAL_SYNC, $role->id);
         }
     }
@@ -1141,12 +1265,18 @@ class GoogleCalendarService
             $event->category_id = $defaultCategoryId;
         }
 
+        $arrival = CalendarArrival::arrival($role, CalendarArrival::GOOGLE, CalendarPrivacy::findings($event->name, $event->description, $googleEvent['location'] ?? null));
+        $event->setVisibilityState($arrival['state']);
+
         $event->save();
 
         // Attach to the role
         $event->roles()->attach($role->id, [
             'is_accepted' => true,
         ]);
+
+        CalendarArrival::holdOnArrival($event, $role, $arrival, $this->inboundFirstPull);
+        CalendarArrival::count($this->inboundCounts, $arrival['hold'] === CalendarArrival::HOLD_REVIEW ? null : $arrival['hold']);
 
         // Track the google_event_id in calendar_syncs
         \App\Models\CalendarSync::create([

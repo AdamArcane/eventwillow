@@ -49,12 +49,17 @@ class GrowthSummary
             ['label' => "Organizers with 5+ events, signed up since {$since} (of those with a schedule)", 'value' => self::organizersWithFullCalendar($data, $since)],
             ['label' => 'Events imported, last 30 days', 'value' => self::dailySum($data, 'events_imported', 30)],
             ['label' => 'Schedules selling (paid ticket in 90 days)', 'value' => self::sellers($data)],
+            ['label' => '  of them, nothing on sale in the next '.GrowthExportService::UPCOMING_DAYS.' days', 'value' => self::sellersWithNothingOnSale($data)],
+            ['label' => 'Schedules with upcoming paid events their plan cannot sell', 'value' => self::countRows($data, 'upcoming_paid_blocked', fn ($v) => $v > 0)],
             ['label' => 'Owners linking events to a self-serve ticketing platform (any / 2+ events)', 'value' => self::linkingToSelfServe($data)],
             ['label' => 'Admin-granted plans', 'value' => $money['by_plan_source']['admin'] ?? null],
             ['label' => 'Selling trials started / converted', 'value' => isset($money['ticket_trials'])
                 ? ($money['ticket_trials']['started'] ?? 0).' / '.($money['ticket_trials']['converted'] ?? 0)
                 : null],
             ['label' => 'Cancellations (all time)', 'value' => $data['churn']['cancelled'] ?? null],
+            ['label' => '  cancelled, still paid to period end', 'value' => self::pendingCancellations($data)],
+            ['label' => 'Stripe trials ending within 7 days (schedules / owners)', 'value' => self::trialsEndingSoon($data)],
+            ['label' => 'Schedules whose Google sync made 100+ events in one day from a primary calendar', 'value' => self::bulkPrimarySyncs($data)],
             // Rolling windows off daily[] and buyers[] (schema 9+), so they compare between any two
             // pulls without a calendar month having to close first.
             ['label' => 'Paid orders, last 30 days', 'value' => self::dailySum($data, 'paid_orders', 30)],
@@ -109,8 +114,9 @@ class GrowthSummary
             return null;
         }
 
-        // The same four sentences the /admin/growth card shows.
+        // The same five states the /admin/growth card shows, in the pull's own English.
         $status = match ($test['phase'] ?? null) {
+            'baseline' => 'One headline, nothing being tested: its numbers are the baseline for the next round.',
             'winner' => sprintf('Winner: %s, since %s.', $test['winner']['key'] ?? '?', $test['winner']['date'] ?? '?'),
             'candidate' => sprintf('%s is leading, and becomes the winner on %s if it keeps the lead.', $test['candidate']['key'] ?? '?', $test['lock_date'] ?? '?'),
             'clicks' => 'Learning: traffic follows sign-up clicks until enough signups come in.',
@@ -129,7 +135,8 @@ class GrowthSummary
                 self::show($row['visitors'] ?? null),
                 self::show($row['clicks'] ?? null),
                 self::show($row['signups'] ?? null),
-                self::percent($row['p_best'] ?? null),
+                // One headline races nobody: its "chance best" is 100% by definition, so it is not shown.
+                ($test['phase'] ?? null) === 'baseline' ? '-' : self::percent($row['p_best'] ?? null),
             ], $test['rows']),
         ];
     }
@@ -172,6 +179,105 @@ class GrowthSummary
         }
 
         return count(array_filter($data['schedules']['rows'] ?? [], fn ($row) => ($row[$i] ?? 0) > 0));
+    }
+
+    /**
+     * The schedule rows as column => value maps, or null when the pull lacks any of $needed
+     * (schema 21 added most of what the rows below ask).
+     *
+     * @return ?list<array<string, mixed>>
+     */
+    private static function scheduleRows(array $data, array $needed): ?array
+    {
+        $columns = $data['schedules']['columns'] ?? [];
+        if (array_diff($needed, $columns) !== []) {
+            return null;
+        }
+
+        return array_map(fn ($row) => array_combine($columns, $row), $data['schedules']['rows'] ?? []);
+    }
+
+    /** How many schedule rows pass $test($value, $row) for one column; null when it is missing. */
+    private static function countRows(array $data, string $column, callable $test): ?int
+    {
+        $rows = self::scheduleRows($data, [$column]);
+
+        return $rows === null ? null : count(array_filter($rows, fn ($row) => $test($row[$column] ?? null, $row)));
+    }
+
+    /**
+     * Sellers (a paid ticket in 90 days) with no ticketed event in the upcoming window, "n / of N".
+     * A seller between events and a seller who stopped both read as zero sales this month; this is
+     * the first half of telling them apart.
+     */
+    private static function sellersWithNothingOnSale(array $data): ?string
+    {
+        $rows = self::scheduleRows($data, ['paid_tickets_90d', 'upcoming_ticketed_events']);
+        if ($rows === null) {
+            return null;
+        }
+
+        $sellers = array_filter($rows, fn ($row) => ($row['paid_tickets_90d'] ?? 0) > 0);
+
+        return count(array_filter($sellers, fn ($row) => ($row['upcoming_ticketed_events'] ?? 0) === 0)).' / '.count($sellers);
+    }
+
+    /**
+     * Subscriptions cancelled but paid to the end of their period, which billing and MRR still
+     * count: "n" followed by the reasons given, e.g. "2 (season_over 2)".
+     */
+    private static function pendingCancellations(array $data): ?string
+    {
+        $rows = self::scheduleRows($data, ['sub_status', 'cancel_pending', 'cancel_reason']);
+        if ($rows === null) {
+            return null;
+        }
+
+        // A cancelled trial is pending too, and pays nothing.
+        $reasons = array_count_values(array_map(fn ($row) => (string) ($row['cancel_reason'] ?? 'none'),
+            array_filter($rows, fn ($row) => ($row['cancel_pending'] ?? false) === true
+                && in_array($row['sub_status'] ?? null, ['active', 'past_due'], true))));
+        arsort($reasons);
+
+        $total = array_sum($reasons);
+        if ($total === 0) {
+            return '0';
+        }
+
+        return $total.' ('.implode(', ', array_map(fn ($reason, $n) => "{$reason} {$n}", array_keys($reasons), $reasons)).')';
+    }
+
+    /**
+     * Schedules whose busiest day was 100+ events pulled by a Google sync that reads the token
+     * account's primary calendar: the shape of a sync that read somebody else's calendar. A day
+     * of hand or ICS imports, or a sync that only pushes (`to`), is not that.
+     */
+    private static function bulkPrimarySyncs(array $data): ?int
+    {
+        $rows = self::scheduleRows($data, ['max_events_one_day_90d', 'max_day_source', 'gsync_direction', 'gsync_calendar']);
+        if ($rows === null) {
+            return null;
+        }
+
+        return count(array_filter($rows, fn ($row) => ($row['max_events_one_day_90d'] ?? 0) >= 100
+            && ($row['max_day_source'] ?? null) === 'google'
+            && in_array($row['gsync_direction'] ?? null, ['from', 'both'], true)
+            && ($row['gsync_calendar'] ?? null) === 'primary'));
+    }
+
+    /** Stripe trials ending within a week and not cancelled, as "schedules / owners": one owner can trial several. */
+    private static function trialsEndingSoon(array $data): ?string
+    {
+        $rows = self::scheduleRows($data, ['uid', 'trial_ends_in', 'cancel_pending']);
+        if ($rows === null) {
+            return null;
+        }
+
+        // A trial already cancelled will not convert, so it is not one to watch.
+        $soon = array_filter($rows, fn ($row) => in_array($row['trial_ends_in'] ?? null, ['0-3', '4-7'], true)
+            && ($row['cancel_pending'] ?? false) !== true);
+
+        return count($soon).' / '.count(array_unique(array_column($soon, 'uid')));
     }
 
     /**

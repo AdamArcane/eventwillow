@@ -52,6 +52,12 @@ class AdminAlertService
         // ever reaching the dashboard panel or the nav badge.
         'jobs_stalled',
         'jobs_failed',
+        // Amber, first of the amber rows: the PHP this install runs on is older than the release
+        // that fixed PHP2Shell (CVE-2026-109618 and CVE-2026-109619), a remote code execution flaw.
+        // Amber and not red because a version number cannot see a fix a distribution backported
+        // (Debian and Ubuntu patch their packages and keep the old number), so on those the row
+        // asks the operator to check. Nothing in the app can fix it; upgrading PHP clears it.
+        'php_vulnerable',
         // Amber, beside the queue rows: nothing is broken for visitors, but the privacy policy
         // promises realtime page views are deleted about an hour after last activity, and rows
         // twice that old mean neither cron rail is running realtime:prune.
@@ -90,6 +96,11 @@ class AdminAlertService
         // schedule they own or an event they made, or in their own name once they own a schedule
         // (SpamWatch). Above the review queues of
         // our own, because a spam schedule is a public page under our name until someone looks.
+        //
+        // Just above it, amber: schedules a calendar sync made into somebody's private calendar,
+        // meeting passcodes and email threads on a public page (CalendarExposureWatch). A person's
+        // own details in public until someone looks, which is the more urgent of the two.
+        'calendar_exposures',
         'spam_suspects',
         'federation_flagged',
         'federation',
@@ -139,6 +150,12 @@ class AdminAlertService
     private const SEVERITY = ['red' => 3, 'amber' => 2, 'blue' => 1];
 
     /**
+     * The first release of each PHP branch with the PHP2Shell fixes (2026-10-21). A branch
+     * not listed (7.x, 8.0, 8.1) has no fixed release and counts as vulnerable.
+     */
+    private const PHP_FIXED_RELEASES = ['8.2' => '8.2.35', '8.3' => '8.3.36', '8.4' => '8.4.27', '8.5' => '8.5.12'];
+
+    /**
      * Memoized for the request: the nav composer and the dashboard controller both
      * ask for this, and it is a dozen COUNT queries.
      */
@@ -184,6 +201,10 @@ class AdminAlertService
 
                 return self::schedulerIsStalled() ? 1 : 0;
             },
+
+            // Suppressed under APP_TESTING for the same reason as the row above: a developer's own
+            // PHP decides it, so it would break every assertion that the panel is empty.
+            'php_vulnerable' => fn () => (! config('app.is_testing') && self::phpIsVulnerable(PHP_VERSION)) ? 1 : 0,
 
             // Jobs that are DUE and still waiting. available_at, not created_at: a delayed
             // dispatch (ReconcileBoostCampaign is +24h) is written with created_at = now, so
@@ -358,6 +379,20 @@ class AdminAlertService
             // Guarded because spam_clearances is new and a selfhost install may not have
             // migrated yet: the nav must not 500 in the middle of an update. Only a missing
             // table is quiet; anything else is reported, or the row would vanish for good.
+            // Guarded as spam_suspects is, for the same reason: new tables on an install that may
+            // not have migrated yet.
+            'calendar_exposures' => function () {
+                try {
+                    return \App\Services\CalendarExposureWatch::count();
+                } catch (\Illuminate\Database\QueryException $e) {
+                    if ($e->getCode() !== '42S02') {
+                        report($e);
+                    }
+
+                    return 0;
+                }
+            },
+
             'spam_suspects' => function () {
                 try {
                     return SpamWatch::count();
@@ -472,6 +507,20 @@ class AdminAlertService
         )->first();
     }
 
+    /** Whether $version is older than the first release of its branch with the PHP2Shell fixes. */
+    public static function phpIsVulnerable(string $version): bool
+    {
+        $branch = implode('.', array_slice(explode('.', $version), 0, 2));
+
+        if (version_compare($branch, '8.5', '>')) {
+            return false;
+        }
+
+        $fixed = self::PHP_FIXED_RELEASES[$branch] ?? null;
+
+        return $fixed === null || version_compare($version, $fixed, '<');
+    }
+
     /**
      * Shared by scheduler_stalled and jobs_stalled, memoized so the two rows read the same clock:
      * called twice, now() advances between them and the cascade could otherwise disagree with
@@ -567,6 +616,7 @@ class AdminAlertService
     {
         [$nav, $tab, $name, $params, $fragment, $color, $subtitle] = match ($type) {
             'scheduler_stalled' => ['system', 'queue', 'admin.queue', [], '', 'red', __('messages.queue')],
+            'php_vulnerable' => ['system', 'queue', 'admin.queue', [], '', 'amber', 'PHP '.PHP_VERSION],
             'jobs_stalled' => ['system', 'queue', 'admin.queue', [], '', 'red', __('messages.queue')],
             'jobs_failed' => ['system', 'queue', 'admin.queue', [], '', 'red', __('messages.queue')],
             'realtime_prune_stalled' => ['system', 'queue', 'admin.queue', [], '', 'amber', __('messages.queue')],
@@ -589,6 +639,7 @@ class AdminAlertService
             'boost_partners_waiting' => ['manage', 'boost', 'admin.boost', [], '#boost-partners', 'amber', 'Boost'],
             'boost_partner_launches_stuck' => ['manage', 'boost', 'admin.boost', [], '#boost-partners', 'red', 'Boost'],
             'boost_statements_failed' => ['manage', 'boost', 'admin.boost', [], '#boost-partners', 'red', 'Boost'],
+            'calendar_exposures' => ['manage', 'private-calendars', 'admin.private_calendars', [], '', 'amber', __('messages.private_calendars')],
             'spam_suspects' => ['manage', 'blocked', 'admin.blocked', [], '#suspects', 'amber', __('messages.blocked')],
             // ?status=flagged, not approved: the filter behind it repeats this row's own
             // count query, so the link lands on exactly the instances it counted rather

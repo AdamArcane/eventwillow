@@ -343,6 +343,35 @@ class Event extends Model
             ?->feed;
     }
 
+    /** The standing calendar syncs, as import_source names them. */
+    public const CALENDAR_SYNC_SOURCES = [self::IMPORT_GOOGLE, self::IMPORT_MICROSOFT, self::IMPORT_CALDAV];
+
+    /**
+     * Whether a standing calendar sync read this event in from its schedule's calendar, so the
+     * entry there is the owner's own and this event the copy, not the other way round. Unpublishing
+     * or cancelling the copy must not reach back and delete the original (deleting the copy does,
+     * only while the schedule pushes its changes to that calendar), and the original must not be
+     * created a second time when the copy is published.
+     *
+     * A one-time import from the same calendar names the same source but always carries a batch
+     * (ImportRun), which a standing sync never writes. An event synced before import_source existed
+     * (2026-10-04) cannot be told from one made here and pushed out, and answers no.
+     */
+    public function cameFromCalendarSync(?string $provider = null, ?Role $role = null): bool
+    {
+        $source = $this->import_source;
+
+        if (! in_array($source, self::CALENDAR_SYNC_SOURCES, true) || $this->import_batch !== null) {
+            return false;
+        }
+
+        if ($provider !== null && $source !== $provider) {
+            return false;
+        }
+
+        return $role === null || (int) $this->creator_role_id === (int) $role->id;
+    }
+
     public static function importColumnsReady(): bool
     {
         return self::$importColumnsReady = self::$importColumnsReady
@@ -867,9 +896,10 @@ class Event extends Model
     }
 
     /**
-     * Dispatch the given calendar-sync action ('create' / 'update' / 'delete') to Google Calendar and
-     * CalDAV for every role (and synced member) that has sync enabled. Shared by the delete hook and by
-     * the soft-cancel / restore flows (cancel removes the synced entry, restore re-creates it).
+     * Dispatch the given calendar-sync action ('create' / 'update' / 'delete' / 'cancel') to Google
+     * Calendar and CalDAV for every role (and synced member) that has sync enabled. Shared by the delete
+     * hook and by the soft-cancel / restore flows (cancel removes the entry this app pushed out, restore
+     * re-creates it; 'cancel' leaves the owner's own entry a sync read the event in from).
      */
     public function dispatchCalendarSync(string $action): void
     {
@@ -1363,6 +1393,90 @@ class Event extends Model
     }
 
     /**
+     * Rows FROM schedule $roleId, the events a platform admin's "Hide schedule" takes out of
+     * discovery:
+     *  - the ones it owns: events.creator_role_id, or for an event from before that column, the
+     *    schedule it was first put on (the same fallback as Role::ownEvents());
+     *  - the ones it is on as a talent or a venue and has not turned down (accepted or pending).
+     *    A venue or an act is put on an event by the event's own people, in its form.
+     *
+     * Never a curator's listing: any curator lists anybody's public event without asking, so a
+     * hidden curator counted by its listings would knock other people's events off discovery
+     * simply by listing them. isFromSchedule() is the same rule in PHP.
+     */
+    public static function constrainFromSchedule($query, int $roleId, string $table = 'events')
+    {
+        return $query->where(fn ($q) => static::fromScheduleArms(
+            $q, $table, fn ($r, string $column) => $r->where($column, $roleId)
+        ));
+    }
+
+    /**
+     * Rows from no schedule a platform admin has hidden (discovery_hidden_schedules): the
+     * negation of constrainFromSchedule() over every hidden schedule at once. Each arm is an
+     * EXISTS or an IS NULL, never a comparison with a column that can be NULL, so the NOT around
+     * them cannot turn into NULL and drop an event nobody hid.
+     */
+    public static function constrainNotOnHiddenSchedule($query, string $table = 'events')
+    {
+        return $query->whereNot(fn ($q) => static::fromScheduleArms(
+            $q, $table, fn ($r, string $column) => $r->whereExists(fn ($h) => $h->select(DB::raw(1))
+                ->from('discovery_hidden_schedules')
+                ->whereColumn('discovery_hidden_schedules.role_id', $column))
+        ));
+    }
+
+    /**
+     * The three arms of constrainFromSchedule(), OR'd. $match constrains the schedule id column
+     * it is given to the schedule(s) being asked about.
+     */
+    private static function fromScheduleArms($query, string $table, \Closure $match)
+    {
+        return $query
+            ->where(fn ($owner) => $match($owner, $table.'.creator_role_id'))
+            ->orWhere(fn ($first) => $first->whereNull($table.'.creator_role_id')
+                ->whereExists(fn ($e) => $match($e->select(DB::raw(1))
+                    ->from('event_role as first_link')
+                    ->whereColumn('first_link.event_id', $table.'.id')
+                    ->whereRaw('first_link.id = (select min(earliest.id) from event_role as earliest where earliest.event_id = first_link.event_id)'),
+                    'first_link.role_id')))
+            ->orWhereExists(fn ($e) => $match($e->select(DB::raw(1))
+                ->from('event_role as link')
+                ->join('roles as link_role', 'link_role.id', '=', 'link.role_id')
+                ->whereColumn('link.event_id', $table.'.id')
+                ->whereIn('link_role.type', ['talent', 'venue'])
+                ->where(fn ($p) => $p->whereNull('link.is_accepted')->orWhere('link.is_accepted', true)),
+                'link.role_id'));
+    }
+
+    /**
+     * constrainFromSchedule() for one loaded event, over its loaded roles and their pivots: whether
+     * a "Hide schedule" of $role would take this event out of discovery. The discovery cards offer
+     * that pill only where it would, so the card that was pressed is always one that goes.
+     */
+    public function isFromSchedule(Role $role): bool
+    {
+        if ($this->creator_role_id) {
+            if ((int) $this->creator_role_id === (int) $role->id) {
+                return true;
+            }
+        } else {
+            $first = $this->roles->sortBy(fn ($r) => (int) $r->pivot?->id)->first();
+
+            if ($first && (int) $first->id === (int) $role->id) {
+                return true;
+            }
+        }
+
+        $link = $this->roles->first(fn ($r) => (int) $r->id === (int) $role->id);
+
+        return $link
+            && in_array($link->type, ['talent', 'venue'], true)
+            && $link->pivot
+            && ($link->pivot->is_accepted === null || (bool) $link->pivot->is_accepted);
+    }
+
+    /**
      * Exclude events that look like throwaway test data from the discovery query.
      *
      * Conservative by design (it must not hide real events). An event is dropped when:
@@ -1584,6 +1698,12 @@ class Event extends Model
 
     public function isPro()
     {
+        // One query for every schedule's subscription, not one per schedule. Hosted only: a
+        // selfhost schedule is Pro without one.
+        if (config('app.hosted')) {
+            $this->roles->loadMissing('subscriptions');
+        }
+
         foreach ($this->roles as $role) {
             if ($role->isPro()) {
                 return true;
@@ -1601,6 +1721,25 @@ class Event extends Model
     public function isInternal()
     {
         return (bool) $this->is_internal;
+    }
+
+    /**
+     * Why "Sync Now" will not copy this event to a calendar, or null when it may. A save pushes
+     * only a published event that is not cancelled (EventRepo::saveEvent()), and the button
+     * follows the same rule: a draft or internal event is not for guests, and cancelling took it
+     * off the calendar until it is restored.
+     */
+    public function calendarSyncRefusal(): ?string
+    {
+        if ($this->is_draft || $this->is_internal) {
+            return __('messages.calendar_not_synced_draft');
+        }
+
+        if ($this->is_cancelled) {
+            return __('messages.calendar_not_synced_cancelled');
+        }
+
+        return null;
     }
 
     /**
@@ -1862,6 +2001,79 @@ class Event extends Model
             $roles->pluck('id')->all(),
             $roles->where('type', '!=', 'curator')->pluck('id')->all(),
         );
+    }
+
+    /**
+     * Events User::canEditEvent() answers yes for, as one query: what the API's List Events
+     * lists, so that it lists nothing Show Event refuses.
+     *
+     * Not managedBy(), which is the money rule and differs from canEditEvent() twice: its "I
+     * made it" arm outlives a place on the team, and it leaves out a venue or talent that has
+     * not answered yet. The arms here are canEditEvent()'s:
+     *  - I made it, while I still run the event's own schedule (or it has none);
+     *  - I run (owner or admin, plan permitting: manageableRoles()) the event's own schedule,
+     *    or a venue or talent schedule it is on that did not turn it down. A curator that only
+     *    lists the event does not count. Listing an event is not running it.
+     * The event's own schedule is creator_role_id, or for an event from before that column the
+     * schedule it was first put on (User::owningScheduleId()).
+     */
+    public function scopeEditableBy(Builder $query, User $user): Builder
+    {
+        $roles = $user->manageableRoles();
+        $roleIds = $roles->pluck('id')->all();
+        $nonCuratorIds = $roles->where('type', '!=', 'curator')->pluck('id')->all();
+        $owning = '(coalesce(events.creator_role_id, (select first_link.role_id from event_role as first_link where first_link.event_id = events.id order by first_link.id limit 1)))';
+
+        // Narrowed first, through indexes, to the events any arm could reach: mine by
+        // events.user_id, my schedules' own by creator_role_id, the ones a venue or talent of
+        // mine has not turned down by its pivot rows, and the legacy ones with no
+        // creator_role_id that are on a schedule of mine. The exact arms below then run on those
+        // rows alone. Without this the arms sit under an OR at the top of the WHERE, which MySQL
+        // cannot make a semi-join, and every page read the whole events table. A derived table
+        // inside IN, not IN (... UNION ...): only the first is materialised as a semi-join
+        // (ScheduleActivity::ownedEventIds() for the same reason).
+        $candidates = DB::table('events')->where('user_id', $user->id)->select('id as event_id');
+
+        if ($roleIds) {
+            $candidates->unionAll(DB::table('events')->whereIn('creator_role_id', $roleIds)->select('id as event_id'));
+            $candidates->unionAll(DB::table('event_role')
+                ->join('events as legacy', 'legacy.id', '=', 'event_role.event_id')
+                ->whereIn('event_role.role_id', $roleIds)
+                ->whereNull('legacy.creator_role_id')
+                ->select('event_role.event_id'));
+        }
+
+        if ($nonCuratorIds) {
+            $candidates->unionAll(DB::table('event_role')
+                ->whereIn('role_id', $nonCuratorIds)
+                ->where(fn ($p) => $p->whereNull('is_accepted')->orWhere('is_accepted', true))
+                ->select('event_id'));
+        }
+
+        $query->whereIn('events.id', DB::query()->fromSub($candidates, 'editable')->select('editable.event_id'));
+
+        return $query->where(function ($q) use ($user, $roleIds, $nonCuratorIds, $owning) {
+            $q->where(fn ($made) => $made->where('events.user_id', $user->id)
+                ->where(fn ($o) => $o->whereRaw($owning.' is null')
+                    ->when($roleIds, fn ($r) => $r->orWhereIn(DB::raw($owning), $roleIds))));
+
+            if (! $roleIds) {
+                return;
+            }
+
+            $q->orWhereExists(fn ($sub) => $sub->selectRaw('1')
+                ->from('event_role as link')
+                ->whereColumn('link.event_id', 'events.id')
+                ->whereIn('link.role_id', $roleIds)
+                ->where(function ($w) use ($nonCuratorIds, $owning) {
+                    $w->whereRaw('link.role_id = '.$owning);
+
+                    if ($nonCuratorIds) {
+                        $w->orWhere(fn ($a) => $a->whereIn('link.role_id', $nonCuratorIds)
+                            ->where(fn ($p) => $p->whereNull('link.is_accepted')->orWhere('link.is_accepted', true)));
+                    }
+                }));
+        });
     }
 
     /**
@@ -2304,6 +2516,96 @@ class Event extends Model
         }
 
         return Carbon::createFromFormat('Y-m-d H:i:s', $date.' '.$timeOfDay, $tz)->setTimezone('UTC');
+    }
+
+    /**
+     * The check-in window of the occurrence on $date, as UTC instants: the door opens a day before
+     * the start and closes when the occurrence ends (its length, or two hours when it has none).
+     * The ticket scanner and the pass scanner both read it, so the two never disagree.
+     *
+     * @return array{opens: Carbon, start: Carbon, end: Carbon}
+     */
+    public function checkInWindow(string $date, ?string $timezone = null): array
+    {
+        $start = $this->occurrenceStartUtc($date, $timezone);
+        $hours = $this->duration > 0 ? $this->duration : 2;
+
+        return [
+            'opens' => $start->copy()->subHours(24),
+            'start' => $start,
+            'end' => $start->copy()->addMinutes(self::durationHoursToMinutes($hours)),
+        ];
+    }
+
+    /**
+     * The date (or dates) of a series the door is on right now, in the schedule's zone.
+     *
+     * A ticket's own window opens a day early, so on a daily series tonight's door would also take
+     * tomorrow's ticket, and tomorrow that ticket would read "already used". This is what says which
+     * night it is: an occurrence in progress wins (every one, when a long one runs into the next);
+     * otherwise the next one whose door has opened; otherwise none. Nearest start is NOT the rule:
+     * at 23:00 a daily 10:00-24:00 market is nearer tomorrow's start than today's and still running.
+     *
+     * A one-off event answers []: each day of a festival is a valid date of its own, and there is no
+     * other occurrence a ticket could be for.
+     *
+     * @return string[]
+     */
+    public function doorOccurrenceDates(?Carbon $now = null): array
+    {
+        if (! $this->starts_at || ! $this->days_of_week) {
+            return [];
+        }
+
+        $tz = $this->scheduleTimezone();
+        $nowUtc = ($now ? $now->copy() : Carbon::now())->setTimezone('UTC');
+        $today = $nowUtc->copy()->setTimezone($tz)->startOfDay();
+        // An occurrence longer than a day is still running after the date it is keyed by.
+        $back = $this->duration > 24 ? min(7, (int) ceil($this->duration / 24)) : 1;
+
+        $inProgress = [];
+        $upcoming = null;
+
+        for ($offset = -$back; $offset <= 1; $offset++) {
+            $date = $today->copy()->addDays($offset)->format('Y-m-d');
+
+            if (! $this->matchesDate($date, $tz)) {
+                continue;
+            }
+
+            $window = $this->checkInWindow($date, $tz);
+
+            if ($nowUtc->gte($window['start']) && $nowUtc->lte($window['end'])) {
+                $inProgress[] = $date;
+            } elseif ($nowUtc->gte($window['opens']) && $nowUtc->lt($window['start'])
+                && (! $upcoming || $window['start']->lt($upcoming['start']))) {
+                $upcoming = ['date' => $date, 'start' => $window['start']];
+            }
+        }
+
+        if ($inProgress) {
+            return $inProgress;
+        }
+
+        return $upcoming ? [$upcoming['date']] : [];
+    }
+
+    /**
+     * A moment as the door reads it, on the schedule's clock: the time alone when it is today
+     * there, with the date when it is not (a ticket checked in last night). 12 or 24 hours as
+     * everywhere else: the viewer's own setting when they made one, else the schedule's.
+     */
+    public function doorClockLabel(Carbon $instant, ?Carbon $now = null): string
+    {
+        $tz = $this->scheduleTimezone();
+        $local = $instant->copy()->setTimezone($tz);
+        $today = ($now ? $now->copy() : Carbon::now())->setTimezone($tz)->format('Y-m-d');
+
+        if ($local->format('Y-m-d') === $today) {
+            return $local->format($this->getTimeFormat());
+        }
+
+        return $this->localizedInstantLabel($instant);
     }
 
     /**
@@ -3845,13 +4147,8 @@ class Event extends Model
             return $role->subdomain == $data['subdomain'];
         });
 
-        if ($role && $role->custom_domain && $useCustomDomain) {
-            if ($role->custom_domain_mode !== 'direct' || $role->custom_domain_status === 'active') {
-                $url = route($routeName, $data, false);
-                $url = $role->custom_domain.$url;
-
-                return $url;
-            }
+        if ($role && $useCustomDomain && ($domain = $role->handedOutCustomDomain())) {
+            return $domain.route($routeName, $data, false);
         }
 
         return route($routeName, $data);
@@ -3953,8 +4250,9 @@ class Event extends Model
      * no schedule for at all. The URL comes from getGuestUrlData(), whose venue/performer slug
      * rule is exactly what that schedule's own calendar links to; the id resolves it either way.
      *
-     * The custom domain is used only when the home schedule is served directly on it (direct +
-     * active); redirect mode keeps the subdomain canonical. getGuestUrl() is deliberately not
+     * The custom domain is used only when it is the home schedule's main address (served directly
+     * on it, and the owner has not made the subdomain the main one: Role::mainAddressIsCustomDomain());
+     * redirect mode keeps the subdomain canonical. getGuestUrl() is deliberately not
      * this: email, graphics and every in-app link go through it and keep their dates, and one
      * that names its schedule keeps that host. One that names no schedule goes to a schedule
      * that serves the event, the same servingHome() choice as above.
@@ -3976,14 +4274,14 @@ class Event extends Model
             : null;
 
         if ($picked && self::servesGuestPage($picked)) {
-            return [$this->buildGuestUrl($data, $picked->servesOnCustomDomain()), $picked];
+            return [$this->buildGuestUrl($data, $picked->mainAddressIsCustomDomain()), $picked];
         }
 
         $home = $this->servingHome();
 
         if ($home) {
             return [
-                $this->buildGuestUrl($this->getGuestUrlData($home->subdomain, $date), $home->servesOnCustomDomain()),
+                $this->buildGuestUrl($this->getGuestUrlData($home->subdomain, $date), $home->mainAddressIsCustomDomain()),
                 $home,
             ];
         }
@@ -3992,7 +4290,7 @@ class Event extends Model
             return [null, null];
         }
 
-        return [$this->buildGuestUrl($data, $picked && $picked->servesOnCustomDomain()), null];
+        return [$this->buildGuestUrl($data, $picked && $picked->mainAddressIsCustomDomain()), null];
     }
 
     /**
@@ -4549,13 +4847,16 @@ class Event extends Model
         }
     }
 
-    public function getShortDateRangeDisplay($fallbackFormat = 'M j, Y')
+    /**
+     * @param  ?string  $date  An occurrence of a series to show instead of its first date.
+     */
+    public function getShortDateRangeDisplay($fallbackFormat = 'M j, Y', ?string $date = null)
     {
         if (! $this->starts_at) {
             return '';
         }
 
-        $s = $this->getStartDateTime(null, true);
+        $s = $this->getStartDateTime($date, true);
 
         if ($this->is_multi_day) {
             $e = $s->copy()->addMinutes($this->durationInMinutes());
@@ -4808,7 +5109,7 @@ class Event extends Model
 
         // Tickets
         $data->tickets_enabled = (bool) $this->tickets_enabled;
-        // The schedule's ticket preset these tickets came from (Settings > Ticket presets), if any.
+        // The schedule's ticket preset these tickets came from (Tickets > Ticket presets), if any.
         $data->ticket_preset_id = $this->ticket_preset_id ? UrlUtils::encodeId($this->ticket_preset_id) : null;
         // Encoded like every other user-visible id. Present but null on a general-admission event
         // so a subscriber can branch on it without special-casing a missing key.
@@ -4832,7 +5133,7 @@ class Event extends Model
                 // one, nor that the seats must be picked rather than counted.
                 if ($ticket->seating_band) {
                     $row['seating_band'] = $ticket->seating_band;
-                    $row['is_allocated'] = $ticket->isAllocated();
+                    $row['is_allocated'] = $ticket->setRelation('event', $this)->isAllocated();
                 }
 
                 if ($ticket->is_pass) {

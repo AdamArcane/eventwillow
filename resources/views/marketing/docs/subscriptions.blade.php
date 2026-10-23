@@ -48,7 +48,7 @@
         </ul>
         <div class="doc-callout doc-callout-plan">
             <div class="doc-callout-title">Passes need a Pro plan</div>
-            <p><x-doc-badge plan="pro" /> A pass always carries a price, so it needs <strong class="text-gray-900 dark:text-white">Pro</strong> twice over: <a href="{{ route('marketing.docs.tickets') }}" class="doc-link">selling a ticket that costs money</a> is a Pro feature in its own right, and the pass switch is another. Free registration and scanning a QR code at the door are on every plan.</p>
+            <p><x-doc-badge plan="pro" /> The pass switch is a <strong class="text-gray-900 dark:text-white">Pro</strong> feature, and a priced pass needs Pro to sell as well, since <a href="{{ route('marketing.docs.tickets') }}#plan-table" class="doc-link">selling a ticket that costs money</a> is Pro in its own right. Free registration and scanning a QR code at the door are on every plan.</p>
             <p class="mt-2">The plan is checked when the pass is used, not only when it is sold. If a schedule drops back to the free plan its pass tickets keep every setting and the scanner still checks holders in, but they can no longer book dates in advance. A selfhosted install counts as Enterprise, so nothing on this page is held back there.</p>
         </div>
     </section>
@@ -110,8 +110,9 @@
             <li>Save the event.</li>
         </ol>
         <p class="text-gray-600 dark:text-gray-300 mb-4"><strong class="text-gray-900 dark:text-white">A pass has one stock pool, not one per date.</strong> On a normal ticket, <strong class="text-gray-900 dark:text-white">Quantity</strong> is the number available <em>on each date</em>. A pass is not tied to a date, so its quantity is a single pool across the whole run: set it to 50 and you sell 50 passes in total, however many events they cover.</p>
-        <p class="text-gray-600 dark:text-gray-300 mb-4"><strong class="text-gray-900 dark:text-white">One pass per order.</strong> A pass is a single redeemable unit: one QR code with one visit counter. Event Schedule fixes <strong class="text-gray-900 dark:text-white">Max Per Order</strong> at 1 on any pass ticket, so the buyer cannot select more than one and you never need to set that field yourself. To buy passes as gifts, place a separate order for each.</p>
-        <p class="text-gray-600 dark:text-gray-300 mb-6">A pass also cannot share an order with normal single-date tickets. Trying it shows "A season pass cannot be purchased together with single-date tickets", so buy them in separate orders.</p>
+        <p class="text-gray-600 dark:text-gray-300 mb-4"><strong class="text-gray-900 dark:text-white">One pass per order.</strong> A pass is a single redeemable unit: one QR code with one visit counter. Event Schedule fixes <strong class="text-gray-900 dark:text-white">Max Per Order</strong> at 1 on any pass ticket, so the buyer cannot select more than one, and the form does not offer <strong class="text-gray-900 dark:text-white">+ Add Limit</strong> on a pass. To buy passes as gifts, place a separate order for each.</p>
+        <p class="text-gray-600 dark:text-gray-300 mb-4">A pass also cannot share an order with normal single-date tickets. Trying it shows "A season pass cannot be purchased together with single-date tickets", so buy them in separate orders.</p>
+        <p id="pass-individual-tickets" class="text-gray-600 dark:text-gray-300 mb-6"><strong class="text-gray-900 dark:text-white">No Individual tickets.</strong> A pass is one QR code for its holder, so an event with a pass type cannot use <a href="{{ route('marketing.docs.tickets') }}#checkout" class="doc-link">Individual tickets</a>. While any ticket type is a pass, that switch in the Checkout row is off and disabled, with a line saying why. To let a holder bring guests, use <a href="#admissions-per-event" class="doc-link">Admissions per event</a>.</p>
 
         <h3 id="types" class="doc-subheading">Subscription types</h3>
         <p class="text-gray-600 dark:text-gray-300 mb-4">The type decides how many times the pass can be used:</p>
@@ -189,7 +190,7 @@
 
         <div class="doc-callout doc-callout-tip mb-6">
             <div class="doc-callout-title">The "pass shop" pattern</div>
-            <p>The tidiest way to sell a pass is to create one event just for it - for example "Memberships" or "Class Passes" - put the pass ticket there, and set its coverage to your real events.</p>
+            <p>The tidiest way to sell a pass is to create one event just for it - for example "Memberships" or "Class Passes" - put the pass ticket there, and set its coverage to your real events. On a one-off event, a pass type is not taken off sale when the event's start time passes, so the shop event's own date does not end pass sales. Use the ticket type's <strong class="text-gray-900 dark:text-white">+ Add Sales Dates</strong> to close them on a date of your choosing.</p>
             <p class="mt-2">To keep that selling event off your public calendar, set <strong class="text-gray-900 dark:text-white">Visibility</strong> to <strong class="text-gray-900 dark:text-white">Unlisted</strong> on the event's <strong class="text-gray-900 dark:text-white">Listing</strong> tab: unlisted events are not listed on your schedule, but anyone with the link can still open the page and buy (you can add an optional password). <x-doc-badge plan="enterprise" /> Unlisted needs an Enterprise plan. Do not use <strong class="text-gray-900 dark:text-white">Draft</strong> or <strong class="text-gray-900 dark:text-white">Internal</strong> here: both are members-only, so guests could not reach the page to buy the pass at all.</p>
         </div>
     </section>
@@ -292,8 +293,8 @@
         <p class="text-gray-600 dark:text-gray-300 mb-4">Because a pass can be valid across many events, the scanner needs to know <em>which</em> event you're checking people into right now.</p>
         <ol class="doc-list doc-list-numbered mb-6">
             <li>Open <strong class="text-gray-900 dark:text-white">Admin Panel &rarr; Sales</strong> on your phone and tap <strong class="text-gray-900 dark:text-white">Scan Ticket</strong>, at the end of the page's title row.</li>
-            <li>At the top, check <strong class="text-gray-900 dark:text-white">Scanning at event</strong> and set it to the event happening now. It arrives pre-selected (an event with sales today, otherwise one running today, otherwise your most recent), it remembers your last choice on that device, and it shows the choice back to you as "Scanning at: &hellip;". The list holds your 100 most recent events, whether or not they sell tickets of their own.</li>
-            <li>Point the camera at the guest's QR code. A visit is recorded and the result appears.</li>
+            <li>At the top, check <strong class="text-gray-900 dark:text-white">Scanning at event</strong> and set it to the event happening now. It arrives pre-selected (an event with sales today, otherwise one running today, otherwise the next one coming up). Today's events are listed first, then the ones coming up, then past ones, up to 100 in all, whether or not they sell tickets of their own, and a recurring event shows the date the door is on rather than its first date. Your choice is remembered on that device for as long as that event is on today.</li>
+            <li>Point the camera at the guest's QR code. A visit is recorded and the result appears. A clean check-in carries on to the next guest by itself after three seconds, except while <strong class="text-gray-900 dark:text-white">Admit guest</strong> is offered; anything else waits for <strong class="text-gray-900 dark:text-white">Scan next</strong>.</li>
         </ol>
         <div class="doc-callout doc-callout-info mb-6">
             <div class="doc-callout-title">One visit per event, per day</div>
@@ -320,7 +321,7 @@
                     <tr>
                         <td><span class="font-semibold text-green-700 dark:text-green-400">Admitted 1 of 2</span></td>
                         <td>A pass that admits more than one person let someone in and still has an admission left for this event.</td>
-                        <td>Scan the next person, or tap <strong class="text-gray-900 dark:text-white">Admit guest</strong>. No extra visit is used.</td>
+                        <td>Tap <strong class="text-gray-900 dark:text-white">Admit guest</strong>, or tap <strong class="text-gray-900 dark:text-white">Scan next</strong> and scan the same code again. No extra visit is used.</td>
                     </tr>
                     <tr>
                         <td><span class="font-semibold text-amber-700 dark:text-amber-400">Already checked in today</span></td>
@@ -331,6 +332,11 @@
                         <td><span class="font-semibold text-amber-700 dark:text-amber-400">All 2 admissions already used today</span></td>
                         <td>Every admission on a multi-person pass has been used at this event today.</td>
                         <td>Sell a ticket for anyone else in the group.</td>
+                    </tr>
+                    <tr>
+                        <td><span class="font-semibold text-amber-700 dark:text-amber-400">Already checked in today</span>, with <span class="font-semibold text-gray-700 dark:text-gray-200">No seats left for another guest</span></td>
+                        <td>A multi-person pass still has an admission left, but the event is full.</td>
+                        <td>Nobody else comes in on this pass unless a seat frees up.</td>
                     </tr>
                     <tr>
                         <td><span class="font-semibold text-gray-700 dark:text-gray-200">Valid pass</span></td>
@@ -413,7 +419,6 @@
             <li><strong class="text-gray-900 dark:text-white">Future events.</strong> "All events" and "sub-schedule" coverage automatically include events you create later; "Specific events" does not.</li>
             <li><strong class="text-gray-900 dark:text-white">Advance booking is checked when it is used, not at the till.</strong> Booking dates ahead needs the schedule to be on a paid plan at that moment, so a pass sold while you were on Pro stops taking bookings if the schedule has since lapsed to free. Scanning it in at the door carries on working.</li>
             <li><strong class="text-gray-900 dark:text-white">Webhooks.</strong> <x-doc-badge plan="pro" /> Pass scans and advance bookings fire <a href="{{ route('marketing.docs.developer.webhooks') }}" class="doc-link">webhooks</a> (<strong class="text-gray-900 dark:text-white">ticket.scanned</strong>, <strong class="text-gray-900 dark:text-white">ticket.booked</strong> and <strong class="text-gray-900 dark:text-white">ticket.booking_cancelled</strong>) if you want to feed another system.</li>
-            <li><strong class="text-gray-900 dark:text-white">Plan.</strong> <x-doc-badge plan="pro" /> Free registration and scanning a ticket at the door are on every plan; a ticket with a price on it needs Pro, and so does the pass switch itself. Selfhosted installs include the lot.</li>
         </ul>
     </section>
 

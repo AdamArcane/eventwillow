@@ -60,14 +60,14 @@
     // The guest submission form shares this view. Everything about links is the editor's alone:
     // a signed-out visitor must never be able to make the server fetch an address.
     $isGuestPage = isset($isGuest) && $isGuest;
-    $hasAi = (bool) (config('services.google.gemini_key') || config('services.openai.api_key'));
+    $hasAi = \App\Utils\ImportOptions::aiAvailable();
     // An editor on an install with no AI key still gets the box: a calendar link, or a page that
     // publishes its own event data, needs no model.
     $linksOnly = ! $hasAi && ! $isGuestPage;
     // Google Calendar as a place to bring events in from. The owner's alone: a schedule's Google
-    // connection is its owner's. Absent where Google is not set up, and in the demo.
-    $googleSource = ! $isGuestPage && config('services.google.client_id')
-        && auth()->id() === $role->user_id && ! is_demo_mode();
+    // connection is its owner's. Absent where Google is not set up, and in the demo. The band on
+    // the first-event form asks the same (App\Utils\ImportOptions), so its tile always lands here.
+    $googleSource = ! $isGuestPage && \App\Utils\ImportOptions::googleAvailable($role, auth()->user());
     $googleConnectUrl = $googleSource
         ? route('google.calendar.redirect', ['from' => 'import', 'subdomain' => $role->subdomain])
         : null;
@@ -147,7 +147,7 @@
                                     <path fill="#FBBC05" d="M5.84 14.09c-.22-.66-.35-1.36-.35-2.09s.13-1.43.35-2.09V7.07H2.18C1.43 8.55 1 10.22 1 12s.43 3.45 1.18 4.93l2.85-2.22.81-.62z"/>
                                     <path fill="#EA4335" d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.07l3.66 2.84c.87-2.6 3.3-4.53 6.16-4.53z"/>
                                 </svg>
-                                    {{ __('messages.google_calendar_integration') }}
+                                    {{ __('messages.import_source_google') }}
                                 </h3>
                                 <button type="button" @click="closeGoogle" :disabled="isLoading"
                                         class="rounded-md px-2 py-1 text-sm font-medium text-gray-600 underline-offset-2 transition-all duration-200 hover:text-gray-900 hover:underline focus:outline-none focus-visible:ring-2 focus-visible:ring-[var(--brand-blue)] disabled:opacity-50 dark:text-gray-400 dark:hover:text-gray-100">
@@ -2480,7 +2480,7 @@
                         this.seriesOriginals[event.series.id] = JSON.parse(JSON.stringify(event));
                     }
                 });
-                this.selectedRows = this.preview.parsed.map((event, i) => this.rowComplete(i) && this.rowListedIndex(i) === null);
+                this.selectedRows = this.preview.parsed.map((event, i) => this.rowComplete(i) && this.rowListedIndex(i) === null && ! event.privacy);
                 this.expandedRow = null;
                 this.addSummary = null;
                 this.stoppedByLimit = false;
@@ -2578,6 +2578,12 @@
                 }
                 if (this.rowListedIndex(idx) !== null) {
                     return @json(__('messages.import_already_listed'), JSON_UNESCAPED_UNICODE);
+                }
+                if (this.preview.parsed[idx].privacy === 'meeting_details') {
+                    return @json(__('messages.import_row_meeting_details'), JSON_UNESCAPED_UNICODE);
+                }
+                if (this.preview.parsed[idx].privacy === 'email_thread') {
+                    return @json(__('messages.import_row_email_thread'), JSON_UNESCAPED_UNICODE);
                 }
 
                 return '';

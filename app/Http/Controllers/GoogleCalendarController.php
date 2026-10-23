@@ -498,6 +498,12 @@ class GoogleCalendarController extends Controller
                 return response()->json(['error' => 'Unauthorized'], 403);
             }
 
+            // Only what guests can see goes to a calendar, as on save (EventRepo::saveEvent()):
+            // a draft or internal event stays off it, and a cancelled one was taken off it.
+            if ($notSynced = $event->calendarSyncRefusal()) {
+                return response()->json(['error' => $notSynced], 422);
+            }
+
             // Ensure user has valid token before syncing
             if (! $this->googleCalendarService->ensureValidToken($user)) {
                 return response()->json(['error' => 'Google Calendar token invalid and refresh failed'], 401);
@@ -689,10 +695,19 @@ class GoogleCalendarController extends Controller
 
             AuditService::log(AuditService::GOOGLE_CALENDAR_SYNC, $user->id, 'Role', $role->id, null, null, $syncDirection);
 
+            // What was read in now waits on the Schedule tab, which the page reloads to show;
+            // the count says where to look (CalendarArrival).
+            $reload = isset($results['from']);
+            if ($reload) {
+                $created = (int) ($results['from']['created'] ?? 0);
+                session()->flash('message', trans_choice('messages.calendar_sync_now_waiting', $created, ['count' => number_format($created)]));
+            }
+
             return response()->json([
                 'message' => __('messages.events_synced'),
                 'sync_direction' => $syncDirection,
                 'results' => $results,
+                'reload' => $reload,
             ]);
 
         } catch (\Exception $e) {

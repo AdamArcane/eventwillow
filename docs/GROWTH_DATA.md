@@ -68,6 +68,9 @@ identifier, subdomain, custom domain or token appears in it.
       (`tickets.venue.com` beside `events.venue.com`) as referrer becomes `(schedule)`;
     - token-shaped path segments become `:token`.
   - Residual risk: a personal website that refers 3 or more signups appears by name.
+- **Dates** on the schedule rows leave only as buckets of days (`*_ends_in`, `last_event_created`).
+  Residual risk: `hero_test.daily` counts signups per day and variant, so a variant with a single
+  signup in a month dates that signup row (`hero_variant`, `created_month`) to the day.
 - **Country** (`schedules.country`): a country shared by fewer than 5 schedules reads `(other)`.
   The threshold is higher than attribution's 3 because a schedule row carries more beside it.
 - **Registration links** (`schedules.external_tickets_90d`): the link is organizer-typed, so only
@@ -125,6 +128,8 @@ credits, legacy `plan_expires` rows and trials, which is most paid-tier schedule
   - `range` (start/end of the funnel window) and `range_applies_to`;
   - `recent_months`, the 6 months that `*_recent` arrays cover, oldest first;
   - `partial_month`, `is_hosted`, `is_nexus`, `app_version`, `releases` (see below), `schema_version`;
+  - `app_commit` (schema 21): the commit the serving container was built from, 12 hex characters,
+    or null where the host does not set `APP_COMMIT`;
   - `row_cap` and `truncated` (whether a row table hit the cap, with the true total);
   - `notes`: caveats that travel with the data. Read them.
 - `funnel` is the onboarding funnel for the window.
@@ -171,7 +176,8 @@ credits, legacy `plan_expires` rows and trials, which is most paid-tier schedule
   - `gmv_by_currency[]` (`{currency, month, amount, sales}`): ticket money organizers took, not
     ours, demo excluded;
   - `ticket_trials` (`{started, running, sold_during, converted, expired_unconverted,
-    started_from}`): the card-free selling trial, which is not a plan.
+    started_from}`): the card-free selling trial, which is not a plan. Retired on 2026-10-20:
+    nothing starts one after that date, so these figures are history from then on.
 - `churn`: `cancelled`, `transferred`, `resumed`, `with_reason`, `by_reason`, `by_source`,
   `by_month`.
 - `nudges`: per activation-nudge key, `{total, last_7_days, last_sent_at}`.
@@ -284,9 +290,20 @@ credits, legacy `plan_expires` rows and trials, which is most paid-tier schedule
     it counts: signing up or in from an SMS invitation link (`User::claimRolesByPhone()`), and the
     "I manage this venue" box on an import, which needs no contact on the placeholder at all.
   - `auto_created` counts placeholders that are STILL ownerless, so a claimed one leaves its month.
-- `meta.releases`: `[{version, first_seen_at}]`, when each version first ran here. It is stamped by
-  the scheduler heartbeat (`App\Utils\ReleaseHistory`), so it is empty before 2026-10-01. Use it to
-  date a change in `daily` to its release.
+- `meta.releases`: `[{version, commit, first_seen_at}]`, when each version first ran here. It is
+  stamped by the scheduler heartbeat (`App\Utils\ReleaseHistory`), so it is empty before 2026-10-01.
+  Use it to date a change in `daily` to its release.
+  - The version moves only at an "Update version" commit, so until schema 21 a deploy under the
+    same version never showed here. From schema 21, where the host sets `APP_COMMIT` (the hosted
+    app spec: `${_self.COMMIT_HASH}`), a new commit is a new entry too, and `commit` names it.
+    Entries from before carry no `commit`. The entries are written by the scheduler heartbeat, so
+    it is the WORKER's `APP_COMMIT` that dates deploys (`meta.app_commit` is the web container's).
+    A container that does not know its commit records none, and at a version change records the
+    version alone. A commit already recorded under the same version is not recorded again, so the
+    old and new containers ticking side by side during a deploy add one entry, and a rollback to
+    an earlier commit of the same version adds none.
+  - Without a commit, the pull's `schema_version` still bounds the deploy: only the commits where
+    `GrowthExportService::SCHEMA_VERSION` held that number can have built it.
 - `daily` (columnar, one row per UTC day) holds:
   - `signups_organizer`, `signups_other`;
   - `first_schedule`, `first_event` (users reaching each for the first time);
@@ -345,6 +362,9 @@ credits, legacy `plan_expires` rows and trials, which is most paid-tier schedule
 - `hero_test`: the homepage headline A/B test (`App\Utils\HeroExperiment`), as the `/admin/growth`
   card shows it. Null off the nexus, and null if the test could not be evaluated.
   - `phase` is where the test stands:
+    - `baseline`: one headline only (from 2026-10-22), so nothing is being tested. It takes all
+      the traffic, never becomes a candidate or a winner, and its `p_best` and `p_best_clicks`
+      are 1 by definition; its counts are the baseline the next round is measured against;
     - `clicks`: learning, the traffic split still follows sign-up clicks;
     - `signups`: enough signups have come in to decide on them alone;
     - `candidate`: one variant is leading and waiting out its hold;
@@ -369,6 +389,10 @@ credits, legacy `plan_expires` rows and trials, which is most paid-tier schedule
     lead.
   - `winner` (`{key, date}`): the locked variant and the day it locked.
   - `reset_at`: the day the counts were last started over from `/admin/growth`, or null.
+  - `daily` (schema 21): `[{date, variant, visitors, clicks, signups}]` since `reset_at`, one entry
+    per day and current variant that had anything. The same rows and cut as `rows`, so a variant's
+    days sum to its totals, give or take what arrived in the up to 10 minutes `rows` may be cached.
+    Use it to split the test at a change to the page under the headline.
   - Reading it:
     - **Join `signups.hero_variant` to `schedules` on `uid` to judge a variant on the sellers it
       produced**, not on signups alone.
@@ -461,11 +485,30 @@ Both are columnar: read `columns[]`, then `rows[][]`. They are newest first and 
 | `features` | Settings switched on: `gcal` (a Google sync direction is set; before schema 12 it read a column nothing wrote), `mscal`, `caldav`, `custom_domain` (working, not failed or pending), `custom_css`, `custom_fields`, `banner`, `feedback`, `carpool`, `gift_cards` (enabled), `accept_requests` (on for nearly everyone by default), `sponsors`, `own_smtp`, `event_interest`, `no_subscribe_panel`, `stay22`, `federation`, `announce_events`, `fan_content`; on the owner's account: `api_key`, `webhooks`; and features actually used: `passes`, `seating`, `promo_codes`, `waitlist`, `sub_schedules`, `newsletter_sent`, `gift_cards_sold`, `gallery`, `boost`, `ai_import`, `team` (anyone but the owner has access) |
 | `days_to_upgrade` | Creation to first real subscription, days; null = never |
 | `country` | ISO country code, or `(other)` when fewer than 5 schedules share it |
-| `gateways` | Payment gateways on the owner's account: `stripe` (Connect onboarding completed), `paypal`, `payfast`, `razorpay`, `invoiceninja` |
+| `gateways` | Payment gateways on the owner's account: `stripe` (Connect onboarding completed), `paypal`, `payfast`, `razorpay`, `invoiceninja`, `payment_url` (a payment link the owner pasted in). Empty means the owner cannot take money online, the same test as the event form's "connect a gateway" notice and the `no_gateway` nudge (`payment_gateways()->connectedFor()`); cash is never listed |
 | `stripe_connected_month` | Month the owner completed Stripe Connect (the only gateway that records when) |
 | `dismissed_steps` | Dashboard next steps dismissed for this schedule (`tickets`, `payments`, ...) |
 | `events_by_source` | Of its listed events: `created` by it, from `other_schedules`, `guest` submissions, linked to a `google` entry by the owner's sync (in either direction), synced from `caldav`, `auto_sourced` (curator rules). These overlap; they do not sum to `events_total`. From schema 12 also `imported` and one `imported_{source}` per import source. See below |
 | `external_tickets_90d` | Events it lists with a registration link instead of our tickets or RSVP: `{events, priced, self_serve, box_office, platforms}`, or null when it has none. See below |
+| `sub_status` | Status of its newest Stripe subscription that got past checkout: `active`, `trialing`, `past_due`, `canceled`, `unpaid`, `paused` (`other` for anything else); null = none (schema 21) |
+| `trial_ends_in` | That subscription's trial end, as a bucket of days (see below), while it is trialing; else null |
+| `cancel_pending` | Cancelled and not over yet. With `sub_status` `active` or `past_due` it is paid to the end of the period, so still counted in `billing` and MRR until then; with `trialing` it is a cancelled trial, which pays nothing and will not convert |
+| `cancel_reason` | The reason key given when that subscription was cancelled (`SubscriptionCancellation::REASONS`, `none` when none was given); never the comment; null when not cancelled, or cancelled with no cancellation row (none was kept before 2026-09-28) |
+| `period_ends_in` | When a pending cancellation takes effect, as a bucket; null unless `cancel_pending` |
+| `plan_ends_in` | When a paid tier that no live subscription pays for ends (an admin grant, a referral credit, a legacy `plan_expires`, a generic trial; the later of a running trial and the plan's expiry), as a bucket; null for a subscription or the free plan. Paid selling on events that were not grandfathered stops with it, and nobody is reminded |
+| `ticket_trial_ends_in` | The card-free selling trial's end, as a bucket (`ended` once over); null = never had one |
+| `upcoming_ticketed_events` | Events it created with tickets switched on, published, not cancelled, with a date in the next 60 days (`GrowthExportService::UPCOMING_DAYS`). A series counts once (`Event::constrainToOccurrencesSince()`, the sitemap's window), from its first date until it ends, so a monthly series, or one held up only by added dates, can count while its next date is further off |
+| `upcoming_paid_events` | Of those, the ones with a live priced ticket type |
+| `upcoming_paid_blocked` | Of those, the ones a guest cannot pay for: the schedule's plan cannot sell paid tickets and the event was never grandfathered (the two questions `Event::canSellPaidTickets()` asks). An old event with no `creator_role_id` is credited to every schedule on it and judged by each one's plan, where the event page asks only the schedule that owns it, so a free schedule on a Pro schedule's old event can read blocked here |
+| `upcoming_orders` | Orders, paid or unpaid, for dates still to come on those events (no imports). Free registrations count: an RSVP or a $0 ticket is stored as a paid order, so this is interest, not money (`unpaid_orders_30d` leaves them out) |
+| `unpaid_orders_30d` | `{unpaid, expired}`: orders placed in the last 30 days that were never paid. `unpaid` is still waiting (cash or a payment link, until the organizer marks it paid); `expired` was released after its hold, which includes every checkout abandoned online. No free registrations or imports |
+| `last_event_created` | Days since it last created an event by hand or through an import a person ran, as a bucket: `0-7`, `8-30`, `31-90`, `91+`; null = never. Feeds and calendar syncs (`feed`, `google`, `microsoft`, `caldav`) are left out, because they add events with nobody there; the import page's own Google read goes with them |
+| `gsync_direction`, `gsync_calendar` | The owner's Google sync: `to`, `from` or `both`, and `chosen` (a calendar picked) or `primary` (none picked, so it reads the token account's primary calendar); both null with no sync |
+| `max_events_one_day_90d`, `max_day_source` | Most events it created on one day in the last 90 days, and where most of that day's came from: an import source (`google`, `feed`, `ics`, ...) or `hand`. 0 and null when it created none. An event made before the import source was recorded (schema 12, 2026-10-04) reads `hand` whatever made it |
+
+A bucket of days ahead (`*_ends_in`) is `0-3`, `4-7`, `8-14`, `15-30`, `31+`, or `ended` once the
+date has passed. Dates leave only as buckets: an exact date beside the rest of a pseudonymous row
+narrows down whose it is.
 
 #### Reading the `imported` buckets of `events_by_source`
 
@@ -559,6 +602,12 @@ created over the API or WhatsApp cannot carry a price.
   and waitlist rows 30 days after their event, and unconfirmed sign-ups after 30 days, so
   `interests_added` for past weeks and the `waitlist` used-feature flag fall between pulls as those
   rows go. Compare them only within one pull.
+- **Synced events arrive as drafts, from the release committed on 2026-10-18.** A standing
+  Google, Outlook or CalDAV sync that a schedule turns on from then on brings its events in as
+  drafts until the owner publishes them (syncs already reading keep publishing), and private,
+  declined, cancelled and out-of-office entries are no longer read in at all. Counts of public
+  events, of events made by a sync, and anything keyed on `published_at` drop for new syncs
+  across that line; compare them within one side of it.
 - **Tiny numbers.** Conversions, sellers and cancellations are small counts. At one a month, a month
   with none and a month with two are both ordinary; never read a single month's change in a small
   count as an effect.
@@ -567,6 +616,25 @@ created over the API or WhatsApp cannot carry a price.
 
 ## Changelog (`meta.schema_version`)
 
+- **23** (2026-10-22)
+  - **`schedules.gateways` can hold `payment_url`**, an owner taking money through a pasted
+    payment link. Before this such an owner read as having no gateway while selling (one billing
+    curator in the 2026-10-22 pull). Do not count "no gateway" across this version.
+- **22** (2026-10-22)
+  - **`hero_test.phase` can be `baseline`**: the homepage runs one headline, which is counted the
+    same way and never locks. Nothing else changed shape.
+- **21** (2026-10-18)
+  - **Additive: nothing earlier changed meaning.** So a review can answer from the pull what it
+    used to ask of the server.
+  - **Deploy identity:** `meta.app_commit`, and a `commit` on each new `meta.releases` entry,
+    where the host sets `APP_COMMIT`. A new commit under the same version is a new entry.
+  - **Subscription state on the schedule rows:** `sub_status`, `trial_ends_in`, `cancel_pending`,
+    `cancel_reason`, `period_ends_in`, `plan_ends_in`, `ticket_trial_ends_in`.
+  - **Selling state:** `upcoming_ticketed_events`, `upcoming_paid_events`,
+    `upcoming_paid_blocked`, `upcoming_orders`, `unpaid_orders_30d`, `last_event_created`.
+  - **Sync state:** `gsync_direction`, `gsync_calendar`, `max_events_one_day_90d`,
+    `max_day_source`.
+  - **`hero_test.daily`**, the headline test by day.
 - **20** (2026-10-15)
   - **`boost.partner_fees`**: the monthly fee boost partners pay on actual spend in their own
     ad accounts. Their campaigns are also counted in `boost.campaigns`, and never in

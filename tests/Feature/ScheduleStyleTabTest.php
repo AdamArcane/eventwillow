@@ -40,7 +40,7 @@ class ScheduleStyleTabTest extends TestCase
     {
         $start = strpos($html, '<div id="section-style"');
         $this->assertNotFalse($start, 'the Style tab is on the page');
-        $end = strpos($html, 'id="section-gallery"', $start) ?: strpos($html, 'id="section-links"', $start);
+        $end = strpos($html, 'class="mobile-section-header" data-section="section-page"', $start) ?: strpos($html, 'class="mobile-section-header" data-section="section-subschedules"', $start);
         $this->assertNotFalse($end);
 
         return substr($html, $start, $end - $start);
@@ -290,7 +290,7 @@ class ScheduleStyleTabTest extends TestCase
     public function test_the_islands_keep_their_typing_and_their_buttons_to_themselves(): void
     {
         $components = glob(resource_path('js/components/Style*.vue'));
-        $this->assertCount(5, $components);
+        $this->assertCount(6, $components);
 
         foreach ($components as $path) {
             $name = basename($path);

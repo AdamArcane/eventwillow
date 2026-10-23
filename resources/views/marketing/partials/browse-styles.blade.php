@@ -203,8 +203,6 @@
         font-size: 0.95rem;
         font-weight: 700;
     }
-    #bw .bw-eyebrow-sep { width: 1.5rem; height: 1px; background-color: var(--bw-line-2); }
-    #bw .bw-eyebrow span:last-child { color: var(--bw-ink-3); font-weight: 500; }
     #bw .bw-pulse {
         position: relative;
         width: 0.55rem;
@@ -327,7 +325,6 @@
         transition: border-color 0.2s ease, transform 0.2s ease;
     }
     #bw .bw-jump a:hover { border-color: var(--bw-blue); transform: translateY(-1px); }
-    #bw .bw-jump a span { color: var(--bw-ink-3); font-weight: 500; font-variant-numeric: tabular-nums; }
 
     /* ==============================================================
        2. The wall
@@ -634,7 +631,7 @@
     }
 
     /* The platform admin's own control, beside the caption rather than over the flyer. */
-    #bw .bw-admin { position: relative; z-index: 3; display: flex; align-items: center; gap: 0.5rem; margin-top: 0.45rem; }
+    #bw .bw-admin { position: relative; z-index: 3; display: flex; flex-wrap: wrap; align-items: center; gap: 0.4rem 0.5rem; margin-top: 0.45rem; }
     #bw .bw-admin span { color: #b45309; font-size: 0.75rem; font-weight: 700; }
     .dark #bw .bw-admin span { color: #fbbf24; }
     #bw .bw-admin button {
@@ -645,9 +642,46 @@
         color: var(--bw-ink);
         font-size: 0.75rem;
         font-weight: 700;
+        white-space: nowrap;
     }
     #bw .bw-admin button:hover { border-color: var(--bw-blue); }
     #bw .bw-admin button.is-restore { border-color: #15803d; background-color: #15803d; color: #ffffff; }
+
+    /* The note an admin's discovery button leaves (partials/browse-discovery-notice): the flash's
+       pill, with room for Undo and a link beside the sentence. */
+    #bw .bw-note { display: inline-flex; flex-wrap: wrap; align-items: center; gap: 0.5rem 0.75rem; border-radius: 1.25rem; }
+    #bw .bw-note form { display: contents; }
+    #bw .bw-note :is(button, a) {
+        padding: 0.25rem 0.75rem;
+        border: 1px solid var(--bw-line-2);
+        border-radius: 999px;
+        background-color: var(--bw-bg);
+        color: var(--bw-ink);
+        font-size: 0.78rem;
+        font-weight: 700;
+        text-decoration: none;
+    }
+    #bw .bw-note :is(button, a):hover { border-color: var(--bw-blue); }
+
+    /* The admin's list of schedules hidden whole: one row a schedule, its Unhide at the end. */
+    #bw .bw-hidden-none { color: var(--bw-ink-3); }
+    #bw .bw-hidden-list { display: grid; gap: 0.6rem; max-width: 48rem; margin: 0; padding: 0; list-style: none; }
+    #bw .bw-hidden-list li {
+        display: flex;
+        flex-wrap: wrap;
+        align-items: center;
+        justify-content: space-between;
+        gap: 0.5rem 1rem;
+        padding: 0.8rem 1rem;
+        border: 1px solid var(--bw-line);
+        border-radius: 1rem;
+        background-color: var(--bw-bg-2);
+    }
+    #bw .bw-hidden-list .bw-admin { margin-top: 0; }
+    #bw .bw-hidden-who { display: flex; flex-direction: column; gap: 0.15rem; min-width: 0; }
+    #bw .bw-hidden-who :is(a, strong) { overflow-wrap: anywhere; color: var(--bw-ink); font-weight: 700; }
+    #bw .bw-hidden-who a:hover { color: var(--bw-blue); }
+    #bw .bw-hidden-who span { color: var(--bw-ink-3); font-size: 0.85rem; }
 
     /* --- A poster set in type, for an event with no flyer: paper by day, lit by night --- */
     #bw .bw-face {

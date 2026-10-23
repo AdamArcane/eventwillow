@@ -132,10 +132,13 @@ class GrowthExportTest extends TestCase
         // it counts the guest pages, 17 since events made by a feed are a source of their own
         // (imported_feed, which arrives with nobody at the keyboard), 18 since the blog section
         // (which posts are read, crawlers left out), 19 since an owner's gateways can include
-        // razorpay, 20 since boost.partner_fees (what boost partners pay on their own spend).
+        // razorpay, 20 since boost.partner_fees (what boost partners pay on their own spend), 21
+        // since the schedule rows say where each schedule stands now (subscription, what is on
+        // sale, unpaid orders, its Google sync) and the deploy carries its commit, 22 since the
+        // headline test can be one arm (phase baseline), 23 since gateways can include payment_url.
         // Bumping this is deliberate: a reader diffing two pulls needs to know the shape (or the
         // meaning) moved.
-        $this->assertSame(20, $data['meta']['schema_version']);
+        $this->assertSame(23, $data['meta']['schema_version']);
         $this->assertSame(GrowthExportService::SCHEMA_VERSION, $data['meta']['schema_version']);
         $this->assertSame(now()->format('Y-m'), $data['meta']['partial_month']['month']);
         $this->assertSame(['funnel', 'funnel_trend'], $data['meta']['range_applies_to']);
@@ -1772,6 +1775,10 @@ class GrowthExportTest extends TestCase
         }
 
         $this->assertSame([], $this->scheduleRow($data, $plain)['gateways']);
+
+        // A payment link is a way to take money (PaymentUrlGateway), so it is not "no gateway".
+        DB::table('users')->where('id', $plain->user_id)->update(['payment_url' => 'https://pay.example.com/me']);
+        $this->assertSame(['payment_url'], $this->scheduleRow($this->build(), $plain)['gateways']);
         $this->assertNotContains('team', $this->scheduleRow($data, $plain)['features'], 'the owner alone is not a team, and a follower is audience');
 
         $this->assertSame(['tickets' => ['total' => 1, 'by_month' => [now()->format('Y-m') => 1]]], $data['dismissed_steps']);

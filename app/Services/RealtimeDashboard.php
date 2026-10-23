@@ -149,6 +149,24 @@ class RealtimeDashboard
         );
     }
 
+    /**
+     * What the address asked for, checked as fromRequest() checks it and with nothing read: the
+     * dashboard is sent before any visit is, and its first poll must ask for the same view, or a
+     * bookmarked filter (or the old /admin/realtime address, which keeps its query) opens
+     * unfiltered.
+     */
+    public function requestState(): array
+    {
+        return [
+            'filters' => (object) $this->filters,
+            'filtered' => $this->filters !== [],
+            'who' => $this->who,
+            'all' => $this->all,
+            'admins' => $this->admins,
+            'feed' => $this->feed,
+        ];
+    }
+
     public function payload(): array
     {
         if (! RealtimeTracker::enabled()) {
@@ -209,8 +227,11 @@ class RealtimeDashboard
                 'win_views' => $consentedViews,
                 'unidentified_views' => $unidentifiedViews,
                 'consent_share' => $allViews > 0 ? (int) round(100 * $consentedViews / $allViews) : null,
+                // Calendars embedded on other sites: no page of their own on the board or in Top
+                // pages, so the Now card gives them a line.
+                'embed_views' => $embedViews,
                 'last_seen_ago' => $nowPeople->isEmpty() ? $this->lastSeenAgo() : null,
-                'phrases' => $this->overviewPhrases($nowPeople, $counts['all'], $consentedViews, $unidentifiedViews, $allViews),
+                'phrases' => $this->overviewPhrases($nowPeople, $counts['all'], $consentedViews, $unidentifiedViews, $allViews, $embedViews),
             ],
             'minutes' => $this->minutes($matchingRows, $marks),
             'counts' => $counts,
@@ -219,40 +240,12 @@ class RealtimeDashboard
                 'pages' => $this->pagesBreakdown($matchingRows, $nowPeople),
                 'sources' => $this->sourcesBreakdown($matchingRows),
                 'countries' => $this->countriesBreakdown($matchingRows),
-                'surfaces' => $this->surfacesBreakdown($pageRows->filter(fn ($row) => $this->matches($row, ignoreSurface: true)), $embedViews),
             ],
             'activity' => $activity,
             'expanded' => $this->expanded($people),
         ];
 
         return $payload;
-    }
-
-    /**
-     * The dashboard teaser: page views in the last five minutes, both consent tiers, no admins.
-     * Page views rather than visitors so it never overstates who can be seen.
-     */
-    public static function recentViews(): ?int
-    {
-        try {
-            if (! RealtimeTracker::enabled()) {
-                return null;
-            }
-
-            $since = RealtimeTracker::ts(RealtimeTracker::now()->subMinutes(5));
-
-            // The last_seen_at bound is what lets the index do the work (started_at has none);
-            // it never drops a row, because last_seen_at is never earlier than started_at.
-            return (new BlockedAccounts)->withoutTheirHits(DB::table('realtime_hits'))
-                ->where('last_seen_at', '>=', $since)
-                ->where('started_at', '>=', $since)
-                ->whereNotNull('engaged_at')
-                ->where('surface', '!=', 'embed')
-                ->where('is_admin', false)
-                ->count();
-        } catch (Throwable) {
-            return null;
-        }
     }
 
     private function fetchRows(): Collection
@@ -393,7 +386,7 @@ class RealtimeDashboard
         }
 
         if ($eventIds) {
-            $found = Event::with('roles')->whereIn('id', array_keys($eventIds))->get()->keyBy('id')->all();
+            $found = Event::with(['roles', 'creatorRole'])->whereIn('id', array_keys($eventIds))->get()->keyBy('id')->all();
             foreach (array_keys($eventIds) as $id) {
                 $this->events[$id] = $found[$id] ?? null;
             }
@@ -547,12 +540,18 @@ class RealtimeDashboard
     {
         $label = null;
         $url = null;
+        $adminUrl = null;
+        $adminLabel = null;
 
         if (in_array($row->surface, ['gp', 'embed'], true)) {
             $event = $row->event_id ? ($this->events[$row->event_id] ?? null) : null;
             $role = $row->role_id ? ($this->roles[$row->role_id] ?? null) : null;
             $label = $event?->name ?: $role?->name;
             $url = $this->guestUrl($role, $event);
+            // The schedule the page is on, in the admin: an event's page leads to its schedule.
+            // Not for a deleted one, as the guest page is not.
+            $adminUrl = $role && ! $role->is_deleted ? route('admin.schedules.edit', ['role' => UrlUtils::encodeId($role->id)]) : null;
+            $adminLabel = $adminUrl ? $role->name : null;
         } elseif ($row->surface === 'auth') {
             $label = $this->authLabel($row->path);
         } else {
@@ -568,6 +567,9 @@ class RealtimeDashboard
             'surface' => $row->surface,
             'surface_label' => __('messages.realtime_surface_'.$row->surface),
             'url' => $url,
+            'admin_url' => $adminUrl,
+            // What the admin link opens, which for an event's page is its schedule.
+            'admin_label' => $adminLabel,
         ];
     }
 
@@ -615,9 +617,10 @@ class RealtimeDashboard
         };
     }
 
-    private function overviewPhrases(Collection $nowPeople, int $visitors, int $views, int $unidentified, int $allViews): array
+    private function overviewPhrases(Collection $nowPeople, int $visitors, int $views, int $unidentified, int $allViews, int $embedViews): array
     {
         $share = $allViews > 0 ? (int) round(100 * $views / $allViews) : null;
+        $total = trans_choice('messages.realtime_views_count', $allViews, ['count' => number_format($allViews)]);
 
         return [
             'split' => __('messages.realtime_split', [
@@ -633,6 +636,16 @@ class RealtimeDashboard
             'not_accepted' => trans_choice('messages.realtime_views_count', $unidentified, ['count' => number_format($unidentified)]),
             'consent' => $share !== null
                 ? __('messages.realtime_consent_share', ['percent' => $share])
+                : null,
+            // Beside "Visitors right now", which counts only people who accepted cookies: how much
+            // of the traffic that leaves out. Said where the number is, not three cards down.
+            'declined' => match (true) {
+                $allViews === 0 => null,
+                $unidentified === 0 => __('messages.realtime_views_last_30', ['views' => $total]),
+                default => __('messages.realtime_declined_line', ['views' => $total, 'percent' => 100 - $share]),
+            },
+            'embed' => $embedViews > 0
+                ? __('messages.realtime_embed_line', ['views' => trans_choice('messages.realtime_views_count', $embedViews, ['count' => number_format($embedViews)])])
                 : null,
         ];
     }
@@ -780,6 +793,8 @@ class RealtimeDashboard
                 'sub' => $page['surface_label'],
                 'icon' => $first->surface,
                 'url' => $page['url'],
+                'admin_url' => $page['admin_url'],
+                'admin_label' => $page['admin_label'],
                 'views' => $entry['views'],
                 'now' => $nowByKey[$key] ?? 0,
                 'filterable' => true,
@@ -829,44 +844,12 @@ class RealtimeDashboard
             ->sortByDesc('views')->take(self::BREAKDOWN_LIMIT)->values()->all();
     }
 
-    private function surfacesBreakdown(Collection $rows, int $embedViews): array
-    {
-        $surfaces = config('app.is_nexus') ? ['wp', 'gp', 'ap', 'auth'] : ['gp', 'ap', 'auth'];
-        $counts = $rows->countBy('surface')->all();
-
-        $list = collect($surfaces)->map(fn ($surface) => [
-            'key' => $surface,
-            'label' => __('messages.realtime_surface_'.$surface),
-            'sub' => null,
-            'icon' => $surface,
-            'url' => null,
-            'views' => $counts[$surface] ?? 0,
-            'now' => 0,
-            'filterable' => true,
-        ])->sortByDesc('views')->values();
-
-        if ($embedViews > 0) {
-            $list->push([
-                'key' => 'embed',
-                'label' => __('messages.realtime_surface_embed'),
-                'sub' => null,
-                'icon' => 'embed',
-                'url' => null,
-                'views' => $embedViews,
-                'now' => 0,
-                'filterable' => false,
-            ]);
-        }
-
-        return $list->all();
-    }
-
     /**
      * Where the people on the site right now are: one entry per area, in a fixed order, for the
      * buttons beside "Visitors right now". An area is where a person's CURRENT page is.
      *
      * The other filters apply; the surface filter does not, so pressing one area leaves the counts
-     * of the rest in place (surfacesBreakdown() makes the same exception). The marketing site
+     * of the rest in place. The marketing site
      * exists on the nexus only, and "Sign up & log in" is a doorway rather than a place to be, so
      * it is listed only while someone is on it or it is the filter.
      *
@@ -919,6 +902,8 @@ class RealtimeDashboard
                         'key' => $key,
                         'label' => $page['label'],
                         'url' => $page['url'],
+                        'admin_url' => $page['admin_url'],
+                        'admin_label' => $page['admin_label'],
                         'count' => $group->count(),
                         'people' => $faces->map(fn ($person) => [
                             'id' => $person['id'],
@@ -1097,6 +1082,8 @@ class RealtimeDashboard
                 'surface' => $row->surface,
                 'surface_label' => $page['surface_label'],
                 'url' => in_array($row->surface, ['wp', 'gp'], true) ? $page['url'] : null,
+                'admin_url' => $row->surface === 'gp' ? $page['admin_url'] : null,
+                'admin_label' => $row->surface === 'gp' ? $page['admin_label'] : null,
                 'secs' => max(0, $end - $row->started),
                 'current' => (bool) $row->is_now,
                 'marker' => null,

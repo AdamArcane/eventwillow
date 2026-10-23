@@ -30,7 +30,7 @@
             It is off by default and is for multi-tenant hosted installs only: nothing exists until
             you set <code class="doc-inline-code">ADS_ENABLED=true</code>, and after that you
             configure it in the <strong>Monetization</strong> card under
-            <strong>System &rarr; Settings</strong> in the admin panel
+            <strong>System &rarr; Settings</strong> in the platform admin panel
             (<code class="doc-inline-code">/admin/settings</code>). The card is shown only when that
             variable is set <em>and</em> the install runs in hosted mode
             (<code class="doc-inline-code">IS_HOSTED=true</code>) and is not eventschedule.com
@@ -46,8 +46,8 @@
         </ul>
         <p>
             Paid schedules never carry either, so removing ads becomes a concrete reason for your
-            customers to upgrade, alongside removing the footer strip that promotes your own
-            marketing site to their visitors.
+            customers to upgrade, alongside removing the <strong>Create your own</strong> card that
+            promotes your own marketing site to their visitors.
         </p>
         <p>
             A third earner, the <a href="#accommodation" class="doc-link">accommodation affiliate</a>,
@@ -91,11 +91,8 @@
             <div class="doc-callout-title">One credit is not an upsell</div>
             <p>The small "Event Schedule" chip in the corner of public pages is the Attribution
             Assurance License credit, and on any install other than eventschedule.com it stays on
-            every schedule you charge for. Do not sell its removal as a paid feature: there is no
-            setting that takes it off, and upgrading a customer does not either. Worth knowing which
-            way round it runs: a free schedule shows your footer strip and no chip, so an upgrade
-            swaps your strip for our chip rather than clearing the page. Say so on your own pricing
-            page before a customer finds it.</p>
+            every schedule, free and paid. Do not sell its removal as a paid feature: there is no
+            setting that takes it off, and upgrading a customer does not either. Say so on your own pricing page before a customer finds it.</p>
         </div>
     </section>
 
@@ -182,7 +179,7 @@
         <ol class="doc-list doc-list-numbered">
             <li>Set <code class="doc-inline-code">ADS_ENABLED=true</code> in your
                 <code class="doc-inline-code">.env</code> and deploy. This is a deliberate
-                deploy-time gate: it cannot be switched on from the admin panel, so a misclick can
+                deploy-time gate: it cannot be switched on from the platform admin panel, so a misclick can
                 never start serving ads across your whole instance.</li>
             <li>Sign in as an administrator, open <strong>Admin</strong> in the sidebar, then
                 <strong>System &rarr; Settings</strong>. A <strong>Monetization</strong> card appears
@@ -293,7 +290,7 @@
             (10 by default) and grows only as the schedule completes Facebook and Instagram boosts. So a
             new advertiser's first promotion is capped at 10 unless you raise that schedule's limit in
             the <strong>Set Spending Limit</strong> card under <strong>Manage &rarr; Boost</strong>
-            in the admin panel. Targeting is
+            in the platform admin panel. Targeting is
             optional: a campaign can be limited to particular kinds of schedule (talent, venue or
             curator) and to visitors in particular countries. Leaving both untouched shows it
             everywhere.
@@ -352,7 +349,7 @@
         <p>
             Every promotion is reviewed before it runs. A paid schedule putting its event in front of
             every free schedule's audience is worth a look first, so new campaigns queue up in a card
-            near the top of <strong>Manage &rarr; Boost</strong> in the admin panel
+            near the top of <strong>Manage &rarr; Boost</strong> in the platform admin panel
             (<code class="doc-inline-code">/admin/boost</code>), titled with how many are awaiting
             review, and appear under <strong>Needs attention</strong> on the admin dashboard.
             The advertiser has already been charged and is waiting, so the queue is worth clearing
@@ -430,7 +427,7 @@
         </div>
 
         <p>Set <code class="doc-inline-code">STAY22_ENABLED=true</code> and an
-        <strong>Accommodation</strong> row appears in the <strong>Engagement</strong> tab of every
+        <strong>Accommodation</strong> row appears in the <strong>Page content</strong> tab of every
         schedule's edit page, holding a <strong>Show nearby accommodation</strong> toggle and a
         <strong>Stay22 affiliate ID</strong> field. Nothing is shown to visitors until a schedule
         owner turns it on there; it is off by default for every schedule, on every plan.</p>
@@ -440,7 +437,7 @@
             A schedule that enters its own Stay22 affiliate ID keeps its own commission. A schedule that
             leaves the field blank falls back to the <strong>Fallback Stay22 affiliate ID</strong> you
             set in the <strong>Accommodation affiliate</strong> card under
-            <strong>System &rarr; Settings</strong> in the admin panel, so the commission comes to
+            <strong>System &rarr; Settings</strong> in the platform admin panel, so the commission comes to
             you instead. The
             settings page states this plainly to the schedule owner, both on the toggle itself and as a
             warning once the map is live without their own ID.
@@ -501,8 +498,8 @@
         <p>
             The two master switches, <code class="doc-inline-code">ADS_ENABLED</code> and
             <code class="doc-inline-code">STAY22_ENABLED</code>, can only be set here. Some of the
-            rest are only starting values that the admin panel overrides; the others have no
-            control in the admin panel at all and need a redeploy to change.
+            rest are only starting values that the platform admin panel overrides; the others have no
+            control in the platform admin panel at all and need a redeploy to change.
         </p>
 
         <div class="doc-table-wrap">
@@ -547,7 +544,7 @@
                 <span>.env</span>
                 <button class="doc-copy-btn">Copy</button>
             </div>
-            <pre><code><span class="code-comment"># Master switch. Cannot be overridden from the admin panel.</span>
+            <pre><code><span class="code-comment"># Master switch. Cannot be overridden from the platform admin panel.</span>
 <span class="code-variable">ADS_ENABLED</span>=<span class="code-value">true</span>
 
 <span class="code-comment"># Google AdSense</span>
@@ -575,10 +572,10 @@
 <span class="code-variable">META_BOOST_DEFAULT_LIMIT</span>=<span class="code-value">10</span>          <span class="code-comment"># starting per-schedule budget ceiling</span>
 
 <span class="code-comment"># Accommodation affiliate. Independent of ADS_ENABLED; also a master switch that</span>
-<span class="code-comment"># cannot be overridden from the admin panel, because the Content-Security-Policy</span>
+<span class="code-comment"># cannot be overridden from the platform admin panel, because the Content-Security-Policy</span>
 <span class="code-comment"># is built from it on every request. Run config:cache after changing it.</span>
 <span class="code-variable">STAY22_ENABLED</span>=<span class="code-value">true</span>
-<span class="code-variable">STAY22_AID</span>=<span class="code-string">your-stay22-affiliate-id</span>   <span class="code-comment"># fallback only; editable in the admin panel</span>
+<span class="code-variable">STAY22_AID</span>=<span class="code-string">your-stay22-affiliate-id</span>   <span class="code-comment"># fallback only; editable in the platform admin panel</span>
 <span class="code-variable">STAY22_MAX_NIGHTS</span>=<span class="code-value">30</span>                <span class="code-comment"># upper bound on the derived stay length</span></code></pre>
         </div>
     </section>

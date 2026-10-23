@@ -81,7 +81,7 @@
               <SetupGuideSuggestions v-if="ownRows.length" plain class="sg-own" :rows="ownRows" :t="t" :st="st" @dismiss="sug.dismiss" @undo="sug.undo" @hold="sug.holdStubs" @release="sug.startStubs" />
               <div class="sg-links">
                 <SetupGuideAction :action="{ label: t.add_photo, href: g.urls.style }" kind="link" />
-                <SetupGuideAction :action="{ label: t.animate_list, href: g.urls.style }" kind="link" />
+                <SetupGuideAction :action="{ label: t.animate_list, href: g.urls.animate || g.urls.style }" kind="link" />
                 <SetupGuideAction :action="{ label: t.dismiss, act: 'dismiss' }" kind="quiet" @act="act" />
               </div>
             </div>
@@ -293,7 +293,7 @@
           </div>
           <div class="sg-links">
             <SetupGuideAction :action="{ label: t.add_photo, href: g.urls.style }" kind="link" />
-            <SetupGuideAction :action="{ label: t.animate_list, href: g.urls.style }" kind="link" />
+            <SetupGuideAction :action="{ label: t.animate_list, href: g.urls.animate || g.urls.style }" kind="link" />
           </div>
         </div>
         <SetupGuideSteps v-else :rows="rows" :guide="g" :t="t" :csrf="csrf" :current="current" :copied="copied" :fresh="freshSteps" @act="act" @copy="copy" />
@@ -435,7 +435,7 @@ const next = computed(() => {
   }
 
   if (current.value === 'event') {
-    return g.draft ? t.publish : (g.type === 'curator' ? t.step_first_events : t.step_event);
+    return g.draft ? (g.draft.review ? t.review_events : t.publish) : (g.type === 'curator' ? t.step_first_events : t.step_event);
   }
 
   if (current.value === 'events') {
@@ -473,6 +473,15 @@ const undoSkip = (step) => [{ label: t.undo, act: 'unskip', step, quiet: true }]
 const eventRow = () => {
   const curator = g.type === 'curator';
   const row = { key: 'event', state: 'current', title: curator ? t.step_first_events : t.step_event };
+
+  // A calendar sync's drafts wait for a look on their own page (CalendarReviewController).
+  if (g.draft && g.draft.review) {
+    row.title = g.draft.name;
+    row.body = t.calendar_waiting_body;
+    row.primary = { label: t.review_events, href: g.draft.review };
+
+    return row;
+  }
 
   if (g.draft) {
     row.title = g.draft.name;
@@ -1057,6 +1066,8 @@ const scheduleMeasure = () => {
 
 const dockStyle = computed(() => ({
   top: dock.top + 'px',
+  // Read by .sg-dock's max-height: the card ends above the save bar wherever it starts.
+  '--sg-dock-top': dock.top + 'px',
   width: dock.width + 'px',
   [rtl ? 'right' : 'left']: dock.side + 'px',
 }));
@@ -1804,7 +1815,10 @@ onBeforeUnmount(() => {
   display: flex;
   flex-direction: column;
   gap: 12px;
-  max-height: calc(100dvh - 7rem);
+  /* From where the card starts to above the save bar, which paints over it at the same z-index.
+     A flat 100dvh - 7rem let a card that starts lower (the import band stands above a first
+     event's form) run on under the bar until the page was scrolled. */
+  max-height: calc(100dvh - var(--sg-dock-top, 7rem) - var(--sg-bar, 0px) - 1rem);
   padding: 14px;
   overflow-y: auto;
   border-radius: 16px;

@@ -113,9 +113,9 @@ class AdminPortalKitTest extends TestCase
         $this->assertSame(1, preg_match('/<h1 class="sr-only">([^<]*)<\/h1>/', $html, $h1), 'the page has a name');
         $this->assertStringContainsString(__('messages.audit_log'), $h1[1]);
 
-        // Five tabs; the group this page is in is the lit one.
+        // Four tabs (Dashboard, Insights, Manage, System); the group this page is in is the lit one.
         $this->assertSame(1, preg_match('/<nav class="ap-tabs" id="admin-nav"[^>]*>(.*?)<\/nav>/s', $html, $nav));
-        $this->assertSame(5, substr_count($nav[1], 'class="ap-tab"'));
+        $this->assertSame(4, substr_count($nav[1], 'class="ap-tab"'));
         $this->assertSame(1, substr_count($nav[1], 'aria-current='));
         $this->assertSame(1, preg_match('/data-admin-group="system"\s+aria-current="true"/', $nav[1]));
 
@@ -131,8 +131,49 @@ class AdminPortalKitTest extends TestCase
         $this->assertSame(3, substr_count($select[1], '<optgroup'));
         $this->assertSame(1, preg_match('/<option value="'.preg_quote(route('admin.audit_log'), '/').'" selected>/', $select[1]));
 
-        // The menus were the last Alpine on these pages.
+        // The old menus were the last Alpine on these pages.
         $this->assertSame(0, substr_count($html, 'openDropdown'));
+    }
+
+    public function test_pointing_at_a_group_lists_its_pages(): void
+    {
+        // A page in another group was two presses and a page you did not want away: the group's
+        // tab, then its row. Each group's tab now has its pages in a menu, from the same list.
+        config(['app.hosted' => true, 'auth.admin_requires_two_factor' => false]);
+        $this->adminActing();
+
+        $html = $this->get(route('admin.audit_log'))->assertOk()->getContent();
+
+        $this->assertSame(1, preg_match('/<nav class="ap-tabs" id="admin-nav"[^>]*>(.*?)<\/nav>/s', $html, $nav));
+        $this->assertSame(1, preg_match('/<nav class="ap-subtabs[^"]*"[^>]*>(.*?)<\/nav>/s', $html, $row));
+        preg_match_all('/<div class="admin-nav-menu[^"]*" id="admin-nav-menu-(\w+)" data-admin-menu="\1" hidden>(.*?)<\/div>/s', $html, $menus, PREG_SET_ORDER);
+        $this->assertSame(['insights', 'manage', 'system'], array_column($menus, 1), 'one closed menu for each group');
+
+        // The strip scrolls sideways, which would cut off a menu hanging inside it.
+        $this->assertStringNotContainsString('class="admin-nav-menu', $nav[1]);
+
+        foreach ($menus as [, $group]) {
+            $this->assertSame(1, preg_match('/data-admin-group="'.$group.'"[^>]*aria-controls="admin-nav-menu-'.$group.'" aria-expanded="false"/', $nav[1]), "$group: the tab names its menu");
+        }
+
+        // The System menu is the row this page shows, link for link, with this page marked.
+        $menu = collect($menus)->firstWhere(1, 'system')[2];
+        preg_match_all('/href="([^"]+)"/', $menu, $inMenu);
+        preg_match_all('/href="([^"]+)"/', $row[1], $inRow);
+        $this->assertSame($inRow[1], $inMenu[1]);
+        $this->assertSame(1, substr_count($menu, 'aria-current="page"'));
+        $this->assertSame(1, preg_match('/href="'.preg_quote(route('admin.audit_log'), '/').'" class="admin-nav-menu-link"\s+aria-current="page"/', $menu));
+
+        // The other two list their own pages, and nothing there is marked.
+        $insights = collect($menus)->firstWhere(1, 'insights')[2];
+        foreach (['admin.users', 'admin.revenue', 'admin.analytics', 'admin.usage', 'admin.growth'] as $route) {
+            $this->assertSame(1, substr_count($insights, 'href="'.route($route).'"'), "$route is in the Insights menu");
+        }
+        $manage = collect($menus)->firstWhere(1, 'manage')[2];
+        foreach (['admin.boost', 'admin.schedules', 'admin.blocked', 'admin.feeds', 'admin.domains', 'admin.referrals', 'admin.newsletters.index'] as $route) {
+            $this->assertSame(1, substr_count($manage, 'href="'.route($route).'"'), "$route is in the Manage menu");
+        }
+        $this->assertSame(0, substr_count($insights.$manage, 'aria-current'));
     }
 
     public function test_the_navigation_has_no_words_left_in_english(): void
@@ -425,7 +466,7 @@ class AdminPortalKitTest extends TestCase
             }
         }
         $this->assertSame(
-            ['admin/app-update', 'admin/blocked-account', 'admin/legal', 'admin/newsletters/segment-edit', 'admin/newsletters/segments', 'admin/schedules-edit', 'admin/settings', 'newsletter/segment-edit', 'newsletter/segments'],
+            ['admin/app-update', 'admin/blocked-account', 'admin/legal', 'admin/newsletters/segment-edit', 'admin/newsletters/segments', 'admin/private-calendars-schedule', 'admin/schedules-edit', 'admin/settings', 'newsletter/segment-edit', 'newsletter/segments'],
             collect($pages)->keys()->sort()->values()->all()
         );
         foreach ($pages as $view => [$titled, $beside]) {
@@ -487,9 +528,9 @@ class AdminPortalKitTest extends TestCase
     {
         // The navigation is ahead of the page's stack on every admin page. Inside the stack, as
         // its second child after the hidden heading, it took the stack's gap, and the tabs
-        // jumped 16px between Dashboard or Realtime and any other page.
+        // jumped 16px between the Dashboard and any other page.
         $this->adminActing();
-        foreach (['/admin/dashboard', '/admin/realtime', '/admin/users'] as $url) {
+        foreach (['/admin/dashboard', '/admin/users'] as $url) {
             $html = $this->get($url)->assertOk()->getContent();
             $nav = strpos($html, '<div class="admin-nav">');
             $this->assertNotFalse($nav, $url);
@@ -518,7 +559,7 @@ class AdminPortalKitTest extends TestCase
 
         // One size of Save on Platform settings: each card's Save is that card's one action.
         $settings = file_get_contents(resource_path('views/admin/settings.blade.php'));
-        $this->assertSame(7, preg_match_all('/<x-brand-button type="submit">\{\{ __\(\'messages\.save\'\) \}\}<\/x-brand-button>/', $settings));
+        $this->assertSame(8, preg_match_all('/<x-brand-button type="submit">\{\{ __\(\'messages\.save\'\) \}\}<\/x-brand-button>/', $settings));
         $this->assertSame(0, preg_match_all('/<x-brand-button[^>]*size="sm"/', $settings));
     }
 }

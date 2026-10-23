@@ -2,8 +2,10 @@
 
 namespace App\Services;
 
+use Codedge\Updater\Models\Release;
 use Codedge\Updater\UpdaterManager;
 use Illuminate\Support\Facades\Artisan;
+use Illuminate\Support\Facades\File;
 
 /**
  * Single owner of everything the selfhost self-updater needs to know: which version is
@@ -147,9 +149,12 @@ class AppUpdateService
      * Download and apply the latest release, run migrations, then clear the caches the
      * updater cannot reach.
      *
-     * Returns ['status' => 'updated'|'up_to_date'|'error', 'message' => string].
+     * Returns ['status' => 'updated'|'up_to_date'|'error', 'message' => string], and on an
+     * error a 'detail' for the console. Only the console asks for the file a refused update
+     * stopped at: finding it walks the app again, in a request the walk that refused it has
+     * already made long, and the web pages never show it.
      */
-    public function performUpdate(UpdaterManager $updater): array
+    public function performUpdate(UpdaterManager $updater, bool $forConsole = false): array
     {
         try {
             if (! $updater->source()->isNewVersionAvailable()) {
@@ -160,7 +165,30 @@ class AppUpdateService
 
             $release = $updater->source()->fetch($versionAvailable);
 
-            $updater->source()->update($release);
+            // The updater copies nothing unless every file of the app is writable, and says so
+            // only by returning false. Unchecked, an install that gave the web user just
+            // storage, bootstrap and public was told it had updated, and was offered the same
+            // update again on its next visit. The cached version is kept: it is still waiting.
+            if (! $updater->source()->update($release)) {
+                // A folder that will not go must not turn the message below into a generic one.
+                try {
+                    $this->forgetFetchedRelease($release);
+                } catch (\Exception $e) {
+                    report($e);
+                }
+
+                // The path goes to the console only: on a plain selfhost install with no admin
+                // account any signed-in user can open Settings > App Update (can_self_update()).
+                $blocked = $forConsole ? $this->firstUnwritableFile(base_path()) : null;
+
+                return [
+                    'status' => 'error',
+                    'message' => __('messages.app_update_files_not_writable'),
+                    'detail' => 'The updater needs write access to every file under '.base_path()
+                        .($blocked ? ', and cannot write to '.$blocked : '')
+                        .'. Run this command as root, then run the chown from the installation guide\'s file permissions step again.',
+                ];
+            }
 
             Artisan::call('migrate', ['--force' => true]);
 
@@ -180,6 +208,84 @@ class AppUpdateService
             // surfacing raw exception text; 'detail' is for the console only.
             return ['status' => 'error', 'message' => __('messages.error'), 'detail' => $e->getMessage()];
         }
+    }
+
+    /**
+     * fetch() downloads and extracts the release to a folder named for the package, not the
+     * version, and the next fetch() reuses any such folder without downloading again
+     * (Release::isSourceAlreadyFetched()). Left behind by a refused update, it was installed
+     * by the next attempt, under whatever version GitHub then called the newest.
+     */
+    protected function forgetFetchedRelease(Release $release): void
+    {
+        $archive = $release->getStoragePath();
+        $name = $release->getRelease();
+
+        // Only the archive fetch() named and the folder beside it. createFolderFromFile('/tmp')
+        // is '/tmp', so a path that is not that archive must never reach deleteDirectory().
+        if (! $archive || ! $name || basename($archive) !== $name) {
+            return;
+        }
+
+        $folder = createFolderFromFile($archive);
+
+        if ($folder === '' || $folder === $archive || dirname($folder) !== dirname($archive)) {
+            return;
+        }
+
+        // A folder fetch() would reuse is not always one it made. A download path that holds the
+        // install names the install itself (SELF_UPDATER_DOWNLOAD_PATH=/var/www beside
+        // /var/www/eventschedule), and deleteDirectory() follows a link, so one planted at
+        // /tmp/eventschedule would have it empty whatever it leads to.
+        if (is_link($folder) || $this->holdsTheApp($folder)) {
+            return;
+        }
+
+        File::delete($archive);
+        File::deleteDirectory($folder);
+    }
+
+    /** Whether `$folder` is the app's own folder or its storage, or a folder above either. */
+    protected function holdsTheApp(string $folder): bool
+    {
+        $real = realpath($folder);
+
+        if ($real === false) {
+            return false;
+        }
+
+        // rtrim first: realpath('/') is '/', and '//' starts no path.
+        $prefix = rtrim($real, DIRECTORY_SEPARATOR).DIRECTORY_SEPARATOR;
+
+        foreach ([base_path(), storage_path()] as $path) {
+            $path = realpath($path);
+
+            if ($path !== false && str_starts_with($path.DIRECTORY_SEPARATOR, $prefix)) {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    /**
+     * The file checkPermissions() stopped at, walked the same way: every file, no excludes.
+     */
+    protected function firstUnwritableFile(string $directory): ?string
+    {
+        try {
+            $files = new \RecursiveIteratorIterator(new \RecursiveDirectoryIterator($directory, \FilesystemIterator::SKIP_DOTS));
+
+            foreach ($files as $file) {
+                if ($file->isFile() && ! $file->isWritable()) {
+                    return $file->getPathname();
+                }
+            }
+        } catch (\UnexpectedValueException $e) {
+            // A folder that cannot be read is no reason to hide the message itself.
+        }
+
+        return null;
     }
 
     /**

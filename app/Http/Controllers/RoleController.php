@@ -37,6 +37,7 @@ use App\Repos\EventRepo;
 use App\Services\AnalyticsService;
 use App\Services\AuditService;
 use App\Services\BoostBillingService;
+use App\Services\CalendarArrival;
 use App\Services\CuratorSourceService;
 use App\Services\DemoService;
 use App\Services\DigitalOceanService;
@@ -51,6 +52,7 @@ use App\Services\SmsService;
 use App\Services\TicketPresets;
 use App\Services\UsageTrackingService;
 use App\Utils\AiImageIssuance;
+use App\Utils\Aurora;
 use App\Utils\ColorUtils;
 use App\Utils\CustomFieldUtils;
 use App\Utils\DateUtils;
@@ -2588,7 +2590,7 @@ class RoleController extends Controller
             // those events out (GraphicController), and so do the past events fetched below for
             // this same view.
             if ($role->isCurator()) {
-                $events = Event::with(['roles', 'parts', 'approvedVideos', 'approvedPhotos', 'approvedComments.user', 'polls' => fn ($q) => $q->withCount('votes')])->withCount(['approvedVideos', 'approvedComments', 'approvedPhotos', 'polls'])
+                $events = Event::with(['roles', 'parts', 'tickets', 'approvedVideos', 'approvedPhotos', 'approvedComments.user', 'polls' => fn ($q) => $q->withCount('votes')])->withCount(['approvedVideos', 'approvedComments', 'approvedPhotos', 'polls'])
                     ->inMonth($startOfGridUtc, $endOfGridUtc)
                     ->whereIn('id', function ($query) use ($role) {
                         $query->select('event_id')
@@ -2601,7 +2603,7 @@ class RoleController extends Controller
                     ->orderBy('starts_at')
                     ->get();
             } else {
-                $events = Event::with(['roles', 'parts', 'approvedVideos', 'approvedPhotos', 'approvedComments.user', 'polls' => fn ($q) => $q->withCount('votes')])->withCount(['approvedVideos', 'approvedComments', 'approvedPhotos', 'polls'])
+                $events = Event::with(['roles', 'parts', 'tickets', 'approvedVideos', 'approvedPhotos', 'approvedComments.user', 'polls' => fn ($q) => $q->withCount('votes')])->withCount(['approvedVideos', 'approvedComments', 'approvedPhotos', 'polls'])
                     ->inMonth($startOfGridUtc, $endOfGridUtc)
                     ->where(function ($query) use ($role) {
                         $query->whereHas('roles', function ($query) use ($role) {
@@ -2641,7 +2643,7 @@ class RoleController extends Controller
         $hasMorePastEvents = false;
         if (request()->graphic && ! $role->hide_past_events) {
             if ($role->isCurator()) {
-                $pastEvents = Event::with(['roles', 'parts', 'approvedVideos', 'approvedPhotos', 'approvedComments.user', 'polls' => fn ($q) => $q->withCount('votes')])->withCount(['approvedVideos', 'approvedComments', 'approvedPhotos', 'polls'])
+                $pastEvents = Event::with(['roles', 'parts', 'tickets', 'approvedVideos', 'approvedPhotos', 'approvedComments.user', 'polls' => fn ($q) => $q->withCount('votes')])->withCount(['approvedVideos', 'approvedComments', 'approvedPhotos', 'polls'])
                     ->fullyPast(Carbon::now('UTC'))
                     ->whereNull('days_of_week')
                     ->whereIn('id', function ($query) use ($role) {
@@ -2656,7 +2658,7 @@ class RoleController extends Controller
                     ->limit(51)
                     ->get();
             } else {
-                $pastEvents = Event::with(['roles', 'parts', 'approvedVideos', 'approvedPhotos', 'approvedComments.user', 'polls' => fn ($q) => $q->withCount('votes')])->withCount(['approvedVideos', 'approvedComments', 'approvedPhotos', 'polls'])
+                $pastEvents = Event::with(['roles', 'parts', 'tickets', 'approvedVideos', 'approvedPhotos', 'approvedComments.user', 'polls' => fn ($q) => $q->withCount('votes')])->withCount(['approvedVideos', 'approvedComments', 'approvedPhotos', 'polls'])
                     ->fullyPast(Carbon::now('UTC'))
                     ->whereNull('days_of_week')
                     ->whereHas('roles', fn ($q) => $q->where('role_id', $role->id)->where('is_accepted', true))
@@ -3029,7 +3031,7 @@ class RoleController extends Controller
         $unlockedEventIds = ! $isMemberOrAdmin ? $this->getUnlockedEventIds() : [];
 
         if ($role->isCurator()) {
-            $pastEvents = Event::with(['roles', 'parts', 'approvedVideos', 'approvedPhotos', 'approvedComments.user', 'polls' => fn ($q) => $q->withCount('votes')])->withCount(['approvedVideos', 'approvedComments', 'approvedPhotos', 'polls'])
+            $pastEvents = Event::with(['roles', 'parts', 'tickets', 'approvedVideos', 'approvedPhotos', 'approvedComments.user', 'polls' => fn ($q) => $q->withCount('votes')])->withCount(['approvedVideos', 'approvedComments', 'approvedPhotos', 'polls'])
                 ->fullyPast($beforeDate)
                 ->whereNull('days_of_week')
                 ->whereIn('id', function ($query) use ($role) {
@@ -3052,7 +3054,7 @@ class RoleController extends Controller
                 ->limit(51)
                 ->get();
         } else {
-            $pastEvents = Event::with(['roles', 'parts', 'approvedVideos', 'approvedPhotos', 'approvedComments.user', 'polls' => fn ($q) => $q->withCount('votes')])->withCount(['approvedVideos', 'approvedComments', 'approvedPhotos', 'polls'])
+            $pastEvents = Event::with(['roles', 'parts', 'tickets', 'approvedVideos', 'approvedPhotos', 'approvedComments.user', 'polls' => fn ($q) => $q->withCount('votes')])->withCount(['approvedVideos', 'approvedComments', 'approvedPhotos', 'polls'])
                 ->fullyPast($beforeDate)
                 ->whereNull('days_of_week')
                 ->whereHas('roles', fn ($q) => $q->where('role_id', $role->id)->where('is_accepted', true))
@@ -3540,7 +3542,17 @@ class RoleController extends Controller
             $sortBy = 'created_at';
         }
 
-        $eventIds = $role->events()->pluck('events.id');
+        // The events whose history (and buyers) this schedule may read, the Sales page's rule
+        // (Event::scopeManagedThrough()): its own events, and somebody else's only once a venue
+        // or talent schedule ACCEPTED it. Never every link: a curator that merely lists an event,
+        // or a schedule that declined one, is not handed its buyers.
+        $eventIds = $role->ownEvents()->pluck('events.id');
+        if (! $role->isCurator()) {
+            $eventIds = $eventIds
+                ->merge($role->events()->wherePivot('is_accepted', true)->pluck('events.id'))
+                ->unique()
+                ->values();
+        }
 
         $query = AuditLog::with('user')
             ->where(function ($q) use ($eventIds, $role) {
@@ -3937,6 +3949,19 @@ class RoleController extends Controller
             // No table yet.
         }
 
+        // A schedule with no events at all: the Schedule tab asks where they can be brought in from
+        // (<x-import-options variant="schedule">). The calendar loads its events by Ajax, so this
+        // asks the question itself (ImportOptions::scheduleIsEmpty()). Not for a viewer, who cannot
+        // add events; not on a schedule that is not claimed, where adding one is refused
+        // (EventController::create()) and the calendar's own Add Event is hidden; and not on the
+        // redirect that undid an import, whose notice already offers to import again.
+        $showImportOptions = $tab === 'schedule'
+            && ! is_demo_mode()
+            && ! session('import_undone')
+            && $role->isClaimed()
+            && auth()->user()->isEditor($subdomain)
+            && \App\Utils\ImportOptions::scheduleIsEmpty($role);
+
         return view('role/show-admin', compact(
             'subdomain',
             'role',
@@ -3975,6 +4000,7 @@ class RoleController extends Controller
             'pendingBookingCount',
             'currencies',
             'openTransfer',
+            'showImportOptions',
         ));
     }
 
@@ -4644,6 +4670,13 @@ class RoleController extends Controller
         $roles = $query->orderBy($sortBy, $sortDir)->get();
 
         // Get member calendar sync status for followed roles
+        // Which of these the person may edit, asked once for the list: User::isEditor() is a query,
+        // and the table asked it on every row. Same rule: an owner or admin place, while the plan
+        // allows a team (planAllowsTeamAccess() reads subscription('default'), hence the eager load).
+        $editableRoleIds = $user->editor()->whereIn('roles.id', $roleIds)->with('subscriptions')->get()
+            ->filter(fn ($role) => $user->planAllowsTeamAccess($role))
+            ->pluck('id')->all();
+
         $memberSyncCalendarIds = \App\Models\RoleUser::where('user_id', $user->id)
             ->whereIn('role_id', $roleIds)
             ->whereNotNull('google_calendar_id')
@@ -4669,6 +4702,7 @@ class RoleController extends Controller
             'sortBy' => $sortBy,
             'sortDir' => $sortDir,
             'memberSyncCalendarIds' => $memberSyncCalendarIds,
+            'editableRoleIds' => $editableRoleIds,
             'duplicateVenueCount' => $duplicateVenueCount,
         ];
 
@@ -4729,7 +4763,7 @@ class RoleController extends Controller
         // default(true), so no schedule created through the UI would ever announce a new event,
         // silently breaking the promise the subscribe panel makes to every guest who signs up.
         $role->announce_new_events = true;
-        // Same again for roles.show_subscribe_panel (Settings > Advanced, also rendered here), or
+        // Same again for roles.show_subscribe_panel (Engagement > Mailing list, also rendered here), or
         // every schedule made through the UI would start with its sign-up panel hidden. Its
         // sibling show_event_interest defaults to false, which is what a missing attribute paints.
         $role->show_subscribe_panel = true;
@@ -4738,8 +4772,14 @@ class RoleController extends Controller
         $role->show_sponsors = true;
         $role->font_family = 'Roboto';
         $role->font_color = '#ffffff';
-        $role->accent_color = '#007BFF';
-        $role->background = 'image';
+        // A new schedule's page is an Aurora, on a random palette whose accent the buttons take,
+        // so the two match (Aurora::randomStart()). The gradient and the built-in picture are
+        // still chosen, so switching the type later lands on something. role/partials/create-form
+        // carries all of these, the accent included, as hidden fields.
+        $auroraStart = Aurora::randomStart();
+        $role->accent_color = $auroraStart['accent'];
+        $role->background = 'aurora';
+        $role->setRelation('auroraSetting', new \App\Models\AuroraSetting(['palette' => $auroraStart['palette'], 'colors' => null, 'seed' => $auroraStart['seed'], 'motion' => true]));
         $role->background_color = '#888888';
         $role->background_colors = ColorUtils::randomGradient();
         $role->background_image = ColorUtils::randomBackgroundImage();
@@ -5135,6 +5175,13 @@ class RoleController extends Controller
             $role->save();
         }
 
+        // Aurora's own settings, which live beside the schedule (aurora_settings) and need its id.
+        // The first-schedule form posts a random palette and arrangement as hidden fields
+        // (role/partials/create-form); the full form posts what its Background row shows.
+        if ($request->boolean('aurora_submitted')) {
+            Aurora::saveFromRequest($role, $request);
+        }
+
         if (! $role->email_verified_at) {
             $role->sendEmailVerificationNotification();
         }
@@ -5408,7 +5455,7 @@ class RoleController extends Controller
     ];
 
     /**
-     * "Event list wording" (Settings, Advanced; App\Utils\ListWording): how the schedule's list
+     * "Event list wording" (Style, Events; App\Utils\ListWording): how the schedule's list
      * words each event. Kept in graphic_settings, which no fill reaches (SERVER_OWNED_FIELDS), so it
      * is written here, by key, and only from a save whose form carried the field: absent is not
      * "standard". A wording of the list's own is kept when another choice is made, so choosing it
@@ -5457,6 +5504,18 @@ class RoleController extends Controller
             $request->files->remove('profile_image');
             $request->files->remove('header_image');
             $request->files->remove('new_sponsor_logos');
+        }
+
+        // A calendar row posts the direction it was drawn with (role/partials/calendar-publish-
+        // switch). When that is what is posted, the owner left the radios alone, and a direction
+        // that changed since the page was opened (the operator paused reading, a transfer stopped
+        // it) stays as it is: a tab left open must not start reading the calendar again.
+        foreach (['google' => 'sync_direction', 'microsoft' => 'microsoft_sync_direction', 'caldav' => 'caldav_sync_direction'] as $provider => $field) {
+            if ($request->has("{$provider}_direction_rendered") && $request->has($field)
+                && (string) $request->input($field) === (string) $request->input("{$provider}_direction_rendered")
+                && (string) $role->{$field} !== (string) $request->input("{$provider}_direction_rendered")) {
+                $request->merge([$field => $role->{$field}]);
+            }
         }
 
         // Guard custom_css behind Pro plan
@@ -5637,6 +5696,25 @@ class RoleController extends Controller
             ? $request->input('microsoft_calendar_id')
             : $oldMicrosoftCalendarId;
 
+        // Starting to read a calendar needs one the owner chose. With none, the sync read the
+        // account's main calendar (Google's 'primary', Outlook's default), which is how one
+        // schedule published somebody's whole work calendar. A sync already reading is left as
+        // it is; the row's main-calendar notice speaks to it.
+        $startsReading = fn ($old, $new) => in_array($new, ['from', 'both'], true) && ! in_array($old, ['from', 'both'], true);
+        if ($googleSubmitted && $startsReading($oldSyncDirection, $newSyncDirection) && ! $newCalendarId) {
+            return redirect()->back()->withInput()->withErrors(['google_calendar_id' => __('messages.calendar_sync_choose_calendar')]);
+        }
+        if ($microsoftSubmitted && $startsReading($oldMicrosoftSyncDirection, $request->input('microsoft_sync_direction')) && ! $newMicrosoftCalendarId) {
+            return redirect()->back()->withInput()->withErrors(['microsoft_calendar_id' => __('messages.calendar_sync_choose_calendar')]);
+        }
+        // Said on the Schedule tab this save lands on: where the events will turn up, as drafts.
+        $readingStarted = match (true) {
+            $googleSubmitted && $startsReading($oldSyncDirection, $newSyncDirection) => CalendarArrival::GOOGLE,
+            $microsoftSubmitted && $startsReading($oldMicrosoftSyncDirection, $request->input('microsoft_sync_direction')) => CalendarArrival::MICROSOFT,
+            $isOwner && $startsReading($role->caldav_sync_direction, $request->input('caldav_sync_direction', $role->caldav_sync_direction)) && $role->hasCalDAVSettings() => CalendarArrival::CALDAV,
+            default => null,
+        };
+
         // Capture old category state for rename detection.
         $oldEventCategories = $role->event_categories;
         $eventCategoriesSubmitted = $request->boolean('event_categories_submitted');
@@ -5703,6 +5781,14 @@ class RoleController extends Controller
             $ownerPivot?->update(['google_calendar_id' => $newCalendarId ?: null]);
         }
 
+        // Before the webhook below is made: Google's first ping pulls inside this request, and
+        // what it reads in must arrive the way this save says.
+        // Only from a page that drew the switch: one opened before it existed posts the row's
+        // marker and no switch, which would read as "off" and quietly stop a sync that publishes.
+        if ($googleSubmitted && ! is_demo_mode() && $request->has('google_publish_on_arrival')) {
+            $this->savePublishOnArrival($role, CalendarArrival::GOOGLE, $newSyncDirection, $oldSyncDirection, $request->boolean('google_publish_on_arrival'), $request->input('google_publish_rendered'));
+        }
+
         // If sync_direction or calendar changed, handle webhook management
         if (($newSyncDirection && $oldSyncDirection !== $newSyncDirection) ||
             ($oldCalendarId !== $newCalendarId)) {
@@ -5726,6 +5812,10 @@ class RoleController extends Controller
                 $ownerPivot?->update(['microsoft_calendar_id' => $newMicrosoftCalendarId ?: null]);
             }
 
+            if (! is_demo_mode() && $request->has('microsoft_publish_on_arrival')) {
+                $this->savePublishOnArrival($role, CalendarArrival::MICROSOFT, $newMicrosoftSyncDirection, $oldMicrosoftSyncDirection, $request->boolean('microsoft_publish_on_arrival'), $request->input('microsoft_publish_rendered'));
+            }
+
             // Handle subscription management whenever the direction (incl. to "no sync") or the
             // calendar changed. The direction condition must NOT require a truthy new value, or
             // switching to "no sync" would leave the subscription live until it auto-expires.
@@ -5733,6 +5823,12 @@ class RoleController extends Controller
                 ($oldMicrosoftCalendarId !== $newMicrosoftCalendarId)) {
                 $this->handleMicrosoftSyncAndCalendarChanges($role, $newMicrosoftSyncDirection, $oldMicrosoftSyncDirection, $newMicrosoftCalendarId, $oldMicrosoftCalendarId);
             }
+        }
+
+        // CalDAV's direction is a field of this form (its connection is made on the page by
+        // CalDAVController); the switch beside it is saved here, behind its own marker.
+        if ($isOwner && $request->has('caldav_integration_submitted') && $request->has('caldav_publish_on_arrival') && ! is_demo_mode()) {
+            $this->savePublishOnArrival($role, CalendarArrival::CALDAV, $role->caldav_sync_direction, $role->getOriginal('caldav_sync_direction'), $request->boolean('caldav_publish_on_arrival'), $request->input('caldav_publish_rendered'));
         }
 
         // Only a CHANGE is cleaned, and the outer guard is load-bearing now that cleanSubdomain()
@@ -6147,7 +6243,18 @@ class RoleController extends Controller
 
         $role->save();
 
-        // Settings > Ticket presets, right after the schedule's own save and before the image
+        // ResolveCustomDomain keeps a custom host's row for ten minutes, subdomain included, and
+        // the custom domain block below forgets it only when the host or the mode changes. After a
+        // rename (the field is shown in Direct mode when the subdomain is the main address), the
+        // domain would route to the old name: a 404, or the schedule of whoever claims it next.
+        // After the save, so a request in between cannot cache the old row again.
+        if ($role->subdomain !== $storedSubdomain) {
+            foreach (array_unique(array_filter([$oldCustomDomainHost, $role->custom_domain_host])) as $host) {
+                \Illuminate\Support\Facades\Cache::forget("custom_domain:{$host}");
+            }
+        }
+
+        // Tickets > Ticket presets, right after the schedule's own save and before the image
         // checks below can return early. Only from a page that showed the list, and only by whoever
         // may change it (the owner, or an editor while the team does not pick from presets); the
         // switch is the owner's alone and is offered where a schedule can have a team.
@@ -6648,8 +6755,27 @@ class RoleController extends Controller
                 'is_hidden' => ! $role->getGuestUrl(),
                 'thumbs' => $role->galleryImages->take(4)->map(fn ($image) => $image->thumbUrl())->all(),
                 'url' => $role->getGuestUrl() ? $role->getGuestUrl().'#gp-gallery' : null,
-                'edit_url' => route('role.edit', ['subdomain' => $role->subdomain]).'#section-gallery',
+                'edit_url' => route('role.edit', ['subdomain' => $role->subdomain]).'#page-tab-gallery',
             ]);
+        }
+
+        // Aurora's palette, arrangement and motion, which live beside the schedule
+        // (aurora_settings) as the map's switches below do. Only on a save whose form drew the
+        // Background row (aurora_submitted), and after the header pictures above, so Match header
+        // samples the header this save leaves the schedule with.
+        if ($request->boolean('aurora_submitted')) {
+            Aurora::saveFromRequest($role, $request);
+        }
+
+        // The main address of a schedule served directly on its own domain, which lives beside
+        // the schedule (custom_domain_settings) as Aurora's settings do. Only on a save that drew
+        // the choice, for Direct mode, and on Enterprise, where every custom domain field is
+        // frozen otherwise (the guard above).
+        if ($request->boolean('custom_domain_main_address_submitted')
+            && $role->isEnterprise()
+            && $role->custom_domain_mode === 'direct'
+            && in_array($request->input('custom_domain_main_address'), \App\Models\CustomDomainSetting::VALUES, true)) {
+            \App\Models\CustomDomainSetting::store($role, $request->input('custom_domain_main_address'));
         }
 
         // A venue map that has not had its first pass: note its venues' addresses now, and give
@@ -6680,6 +6806,10 @@ class RoleController extends Controller
             if (config('queue.default') !== 'sync') {
                 \App\Jobs\PlaceScheduleVenues::dispatch($role->id);
             }
+        }
+
+        if ($readingStarted && ! is_demo_mode()) {
+            $redirect->with('calendar_reading_started', $readingStarted);
         }
 
         // The owner lands on the schedule's admin page, so that is where a map just switched on,
@@ -7399,7 +7529,7 @@ class RoleController extends Controller
     }
 
     /**
-     * The AI import form's optional fields (Settings > Advanced): which ones it shows, and which of
+     * The AI import form's optional fields (Settings > New events): which ones it shows, and which of
      * those a submitter must fill in. Only when the section was on the page.
      */
     private function applyImportFormFields(Request $request, Role $role): void
@@ -8301,7 +8431,7 @@ class RoleController extends Controller
         // First, let's try a very basic search to see if we can get any events at all
         if ($role->isCurator()) {
             // For curators, get events they're associated with
-            $events = Event::with('roles')
+            $events = Event::with(['roles', 'creatorRole'])
                 ->whereIn('id', function ($query) use ($role) {
                     $query->select('event_id')
                         ->from('event_role')
@@ -8325,7 +8455,7 @@ class RoleController extends Controller
                 ->get();
         } else {
             // For venues/talents
-            $baseQuery = Event::with('roles');
+            $baseQuery = Event::with(['roles', 'creatorRole']);
 
             $baseQuery->whereHas('roles', function ($query) use ($role) {
                 $query->where('role_id', $role->id)
@@ -8892,6 +9022,51 @@ class RoleController extends Controller
      * settings page disables those two choices and says how to allow them; this is what holds
      * when a request arrives anyway.
      */
+    /**
+     * The owner's "Publish new events automatically" for one calendar (CalendarArrival). Only
+     * while the sync reads that calendar; turned on, it is bound to the calendar now chosen, so
+     * choosing another one by any path falls back to drafts. Choosing a direction also answers
+     * a pause or a change of owner that stopped the reading.
+     */
+    private function savePublishOnArrival(Role $role, string $provider, ?string $direction, ?string $oldDirection, bool $wanted, ?string $rendered = null): void
+    {
+        $reads = in_array($direction, ['from', 'both'], true);
+
+        if ($direction !== $oldDirection) {
+            CalendarArrival::clearStopped($role, $provider);
+        }
+
+        // A sync that no longer reads takes the word given for its arrivals with it, whatever the
+        // hidden switch still posts; so does a word given for another calendar (the binding no
+        // longer matches), or it would hold again the day that calendar is chosen again.
+        if (CalendarArrival::tablesReady() && CalendarArrival::settings($role)->{"{$provider}_publishes"}
+            && (! $reads || ! CalendarArrival::publishes($role, $provider))) {
+            CalendarArrival::setPublishing($role, $provider, false);
+        }
+        if (! $reads) {
+            return;
+        }
+
+        // The switch as the page drew it: left as it was, it says nothing. Otherwise a tab opened
+        // before the operator paused the sync (which takes the owner's word back) would give it
+        // again with the next save. A page from before this was posted has no such field.
+        if ($rendered !== null && (bool) $rendered === $wanted) {
+            return;
+        }
+
+        // Only a CHANGE is the owner's word. The rows post on every save the owner makes, from any
+        // tab, and a sync carried over from before drafts renders with the switch on: answering
+        // here would quietly settle the Schedule tab's "keep publishing your main calendar?"
+        // (publish_confirmed_at) for somebody who only fixed a typo.
+        if ($wanted) {
+            if (! CalendarArrival::publishes($role, $provider)) {
+                CalendarArrival::setPublishing($role, $provider, true);
+            }
+        } elseif (CalendarArrival::publishes($role, $provider)) {
+            CalendarArrival::setPublishing($role, $provider, false);
+        }
+    }
+
     private static function googleDirectionFor($user, $direction): ?string
     {
         if (! in_array($direction, ['to', 'from', 'both'], true)) {

@@ -120,11 +120,15 @@ if (! function_exists('map_tiles')) {
      * fetched from it before the visitor has allowed marketing cookies or pressed the control
      * beside the sentence that names it.
      *
+     * The braces of the address's placeholders may be written percent-encoded (%7Bz%7D for {z}):
+     * DigitalOcean's console reads a brace in a variable's value as its own template syntax and
+     * refuses to save it, and no tile server's address holds an encoded brace of its own.
+     *
      * @return array{url: string, name: string, attribution: string}|null
      */
     function map_tiles(): ?array
     {
-        $url = trim((string) config('services.map.tile_url'));
+        $url = str_ireplace(['%7B', '%7D'], ['{', '}'], trim((string) config('services.map.tile_url')));
 
         return $url === '' ? null : [
             'url' => $url,
@@ -932,9 +936,10 @@ if (! function_exists('sitemap_url')) {
     /**
      * The sitemap that applies to the host the current request arrived on.
      *
-     * A custom domain gets its own. The global sitemap may not carry a third-party host's URLs -
-     * Google reports every one as "URL not allowed" and discards it - so pointing a custom domain
-     * at the global sitemap advertises one containing none of that host's pages. Every other host
+     * A custom domain that is its schedule's main address gets its own. The global sitemap may not
+     * carry a third-party host's URLs - Google reports every one as "URL not allowed" and discards
+     * it - so pointing such a domain at the global sitemap advertises one containing none of that
+     * host's pages. Every other host
      * keeps the global sitemap, which on tenant subdomains is also the cross-submission grant that
      * keeps their URLs legal inside it.
      *
@@ -943,7 +948,12 @@ if (! function_exists('sitemap_url')) {
      */
     function sitemap_url(): string
     {
-        $customDomainHost = request()->attributes->get('custom_domain_host');
+        // A custom domain whose schedule made its subdomain the main address has no sitemap of its
+        // own (SitemapController::schedule() answers for the canonical host only): its pages are
+        // in the global sitemap, at subdomain URLs, so it points there like the subdomain does.
+        $customDomainHost = request()->attributes->get('custom_domain_subdomain_is_main')
+            ? null
+            : request()->attributes->get('custom_domain_host');
         $base = $customDomainHost ? 'https://'.$customDomainHost : config('app.url');
 
         // Relative form, so the path stays tied to the route definition. It ignores the route's
@@ -1170,8 +1180,12 @@ if (! function_exists('can_self_update')) {
      *
      * Disabled on nexus (eventschedule.com deploys via git/CI) and in testing.
      * On a multi-tenant self-hosted SaaS (hosted) it is operator-only (admin),
-     * so a tenant can't trigger a global update. On a plain selfhost it is
-     * available to any authenticated user.
+     * so a tenant can't trigger a global update. On a plain selfhost it is the
+     * install's admins too, because with ALLOW_REGISTRATION on "any signed-in
+     * account" is anyone who signs up, and the update replaces the app's files
+     * and runs migrate --force. An install with no admin at all (its first
+     * account predates the automatic admin flag, issue #106) keeps the old rule,
+     * any signed-in account, or nobody could update it from the app.
      */
     function can_self_update(?\App\Models\User $user = null): bool
     {
@@ -1179,11 +1193,11 @@ if (! function_exists('can_self_update')) {
             return false;
         }
 
-        if (! config('app.hosted')) {
-            return true; // plain selfhost - any authenticated user
+        if (! config('app.hosted') && ! \App\Models\User::where('is_admin', true)->exists()) {
+            return true; // plain selfhost with no admin - any authenticated user
         }
 
-        return (bool) ($user ?? auth()->user())?->isAdmin(); // self-hosted SaaS - admin only
+        return (bool) ($user ?? auth()->user())?->isAdmin(); // admin only
     }
 }
 

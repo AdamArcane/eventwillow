@@ -12,6 +12,11 @@
             <directory>tests/Feature</directory>
         </testsuite>
     </testsuites>
+    <extensions>
+        <!-- N+1 queries: the end-of-run report, the baseline's ratchet and its writer.
+             See tests/Support/QueryGuard.php. -->
+        <bootstrap class="Tests\Support\QueryGuardExtension"/>
+    </extensions>
     <source>
         <include>
             <directory>app</directory>
@@ -81,6 +86,14 @@
         -->
         <env name="STRIPE_KEY" value="sk_test_fake_connect" force="true"/>
         <env name="STRIPE_PLATFORM_SECRET" value="sk_test_fake_platform" force="true"/>
+        <!--
+            The platform's publishable key is cashier.key, which the event form reads to offer
+            "Save and start free trial" in place of the plain upgrade link. .env.example ships it
+            empty, so CI never drew that button while a developer with a key set always did, and
+            EventTicketPanelAccessTest passed on one and failed on the other. A test that wants the
+            button sets config(['cashier.key' => ...]) itself.
+        -->
+        <env name="STRIPE_PLATFORM_KEY" value="" force="true"/>
         <!--
             Same reasoning as the Stripe keys above, for the installation-wide Payfast account and the
             default payment method. These are documented for operators to set, so a developer who

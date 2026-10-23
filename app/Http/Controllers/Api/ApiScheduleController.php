@@ -15,6 +15,7 @@ use App\Services\AuditService;
 use App\Services\BoostBillingService;
 use App\Services\MetaAdsService;
 use App\Services\ScheduleDeletionService;
+use App\Utils\Aurora;
 use App\Utils\ColorUtils;
 use App\Utils\TimezoneUtils;
 use Illuminate\Http\Request;
@@ -35,9 +36,13 @@ class ApiScheduleController extends Controller
             self::MAX_PER_PAGE
         );
 
+        // subscriptions: each schedule's data says what its plan includes (isPro()).
+        // manageableRoles(): owner or admin, and on hosted somebody else's schedule only while
+        // it is Enterprise, as on the web (User::isEditor()).
         $schedules = auth()->user()->roles()
-            ->with('groups')
+            ->with(['groups', 'subscriptions'])
             ->wherePivotIn('level', ['owner', 'admin'])
+            ->whereIn('roles.id', auth()->user()->manageableRoles()->pluck('id'))
             ->where('is_deleted', false)
             ->wherePro();
 
@@ -83,6 +88,11 @@ class ApiScheduleController extends Controller
 
         if (! $role) {
             return response()->json(['error' => 'Schedule not found'], 404);
+        }
+
+        // On hosted a team belongs to the Enterprise plan, as on the web (User::isEditor()).
+        if (! auth()->user()->planAllowsTeamAccess($role)) {
+            return response()->json(['error' => 'Unauthorized'], 403);
         }
 
         if (! $role->isPro()) {
@@ -152,6 +162,11 @@ class ApiScheduleController extends Controller
         $role->subdomain = Role::generateSubdomain($request->name);
         $role->user_id = $user->id;
         $role->background_colors = ColorUtils::randomGradient();
+        // An Aurora on a random palette, its accent the palette's, as the new-schedule form makes
+        // (RoleController::create()). The row with the palette needs the id, below.
+        $auroraStart = Aurora::randomStart();
+        $role->background = 'aurora';
+        $role->accent_color = $auroraStart['accent'];
 
         // Handle email verification
         if (! config('app.hosted')) {
@@ -161,6 +176,8 @@ class ApiScheduleController extends Controller
         }
 
         $role->save();
+
+        Aurora::saveSettings($role, $auroraStart['palette'], null, $auroraStart['seed'], true);
 
         // Mirrors the email half of RoleController::store(). Role::boot() has no created
         // hook, so without this an API-created schedule sits unverified with no email ever
@@ -200,6 +217,11 @@ class ApiScheduleController extends Controller
 
         if (! $role) {
             return response()->json(['error' => 'Schedule not found'], 404);
+        }
+
+        // On hosted a team belongs to the Enterprise plan, as on the web (User::isEditor()).
+        if (! auth()->user()->planAllowsTeamAccess($role)) {
+            return response()->json(['error' => 'Unauthorized'], 403);
         }
 
         if (! $role->isPro()) {

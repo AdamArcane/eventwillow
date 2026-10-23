@@ -19,7 +19,7 @@ class SyncEventToGoogleCalendar implements ShouldQueue
 
     protected $role;
 
-    protected $action; // 'create', 'update', 'delete'
+    protected $action; // 'create', 'update', 'delete', 'cancel' (a delete that leaves the owner's original)
 
     protected $user; // Optional: specific user (defaults to role owner)
 
@@ -120,6 +120,7 @@ class SyncEventToGoogleCalendar implements ShouldQueue
                     $this->updateEvent($googleCalendarService);
                     break;
                 case 'delete':
+                case 'cancel':
                     $this->deleteEvent($googleCalendarService);
                     break;
             }
@@ -180,6 +181,13 @@ class SyncEventToGoogleCalendar implements ShouldQueue
     private function createEvent(GoogleCalendarService $googleCalendarService): void
     {
         $calendarId = $this->getSyncCalendarId();
+
+        // Already in that calendar: read in from it by the sync, or pushed there before. Publishing
+        // a draft the sync brought in used to make a second copy beside the owner's own entry.
+        $sync = $this->getCalendarSync();
+        if ($sync?->google_event_id && (! $sync->google_calendar_id || $sync->google_calendar_id === $calendarId)) {
+            return;
+        }
         $googleEvent = $googleCalendarService->createEvent($this->event, $this->role, $calendarId);
 
         if ($googleEvent) {
@@ -222,7 +230,7 @@ class SyncEventToGoogleCalendar implements ShouldQueue
         $sync = $this->getCalendarSync();
         $googleEventId = $sync?->google_event_id;
 
-        if (! $googleEventId) {
+        if (! $googleEventId || $this->isOwnersOriginal()) {
             return;
         }
 
@@ -233,5 +241,22 @@ class SyncEventToGoogleCalendar implements ShouldQueue
         if ($success) {
             $sync->delete();
         }
+    }
+
+    /**
+     * Whether the entry this would delete is the owner's own, which the sync read this event in
+     * from, and must stay. The original belongs to the owner's calendar: hiding the event here (a
+     * draft) or cancelling it (which can be undone) never deletes it, and deleting the event takes
+     * it out only while the schedule pushes its changes to that calendar. A team member's copy is
+     * always ours to remove.
+     */
+    private function isOwnersOriginal(): bool
+    {
+        if ((int) $this->getSyncUser()->id !== (int) $this->role->user_id
+            || ! $this->event->cameFromCalendarSync(Event::IMPORT_GOOGLE, $this->role)) {
+            return false;
+        }
+
+        return $this->event->is_draft || $this->action === 'cancel' || ! $this->role->syncsToGoogle();
     }
 }

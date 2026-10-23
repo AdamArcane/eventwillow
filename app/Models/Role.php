@@ -2539,14 +2539,138 @@ class Role extends Model implements MustVerifyEmail
             });
     }
 
+    /** Every value of `roles.background`. Aurora's own settings are in `aurora_settings`. */
+    public const BACKGROUNDS = ['aurora', 'gradient', 'solid', 'image'];
+
     public function hasConfiguredBackground(): bool
     {
         return match ($this->background) {
             'gradient' => filled($this->background_colors),
             'solid' => filled($this->background_color),
             'image' => filled($this->background_image) || filled($this->background_image_url),
+            // Drawn from the schedule's colours, so there is always something to draw.
+            'aurora' => true,
             default => false,
         };
+    }
+
+    /**
+     * Whether the owner's custom CSS styles the page's own background, on `html`, `body` or
+     * `:root`, as marketing/custom-css told Pro owners to do before the background was drawn on
+     * a layer of its own (partials/guest-background). Such a page keeps the old rule on `body`
+     * for a gradient or a picture, so the owner's override still lands; Aurora draws its layer
+     * whatever the CSS says, and the Style tab says so.
+     *
+     * Only for a schedule whose custom CSS is printed at all (the same gate as layouts/app-guest).
+     */
+    public function customCssStylesPageBackground(): bool
+    {
+        $css = (string) $this->custom_css;
+
+        if ($css === '' || ! $this->isPro()) {
+            return false;
+        }
+
+        // One pass over the text, a character at a time, so it is linear whatever it is given
+        // (the first version was one pattern that backtracked for seconds on a long selector
+        // list, on every view of the page). Strings and url() are read past whole, so a brace or
+        // a "/*" inside one is not taken for CSS; a comment is dropped, one left open running to
+        // the end as in a browser. Each block is opened under its selector, nested rules (&)
+        // resolved against their parent, and every declaration is asked whether it sets a
+        // background while its rule names the page.
+        $length = strlen($css);
+        $stack = [];
+        $buffer = '';
+        $i = 0;
+
+        while ($i < $length) {
+            $c = $css[$i];
+
+            if ($c === '/' && ($css[$i + 1] ?? '') === '*') {
+                $end = strpos($css, '*/', $i + 2);
+                $i = $end === false ? $length : $end + 2;
+
+                continue;
+            }
+
+            if ($c === '"' || $c === "'") {
+                $j = $i + 1;
+                while ($j < $length && $css[$j] !== $c) {
+                    $j += $css[$j] === '\\' ? 2 : 1;
+                }
+                $buffer .= '""';
+                $i = $j + 1;
+
+                continue;
+            }
+
+            if (($c === 'u' || $c === 'U') && strncasecmp(substr($css, $i, 4), 'url(', 4) === 0) {
+                $close = strpos($css, ')', $i + 4);
+                $buffer .= 'url()';
+                $i = $close === false ? $length : $close + 1;
+
+                continue;
+            }
+
+            if ($c === '{') {
+                $selector = trim($buffer);
+                $parent = end($stack) ?: null;
+                if ($parent !== null && $parent[0] !== '@' && $selector !== '' && $selector[0] !== '@') {
+                    // A nested rule: & is its parent, and no & means somewhere inside it.
+                    $selector = str_contains($selector, '&') ? str_replace('&', $parent, $selector) : $parent.' '.$selector;
+                }
+                $stack[] = $selector;
+                $buffer = '';
+            } elseif ($c === ';' || $c === '}') {
+                $rule = end($stack);
+                if (is_string($rule) && $rule !== '' && $rule[0] !== '@'
+                    && preg_match('~^\s*(?:-(?:webkit|moz)-)?background(?:-[a-z]+)*\s*:~i', $buffer) === 1
+                    && self::selectsThePage($rule)) {
+                    return true;
+                }
+                $buffer = '';
+                if ($c === '}') {
+                    array_pop($stack);
+                }
+            } else {
+                $buffer .= $c;
+            }
+
+            $i++;
+        }
+
+        return false;
+    }
+
+    /**
+     * Whether a selector list names the page itself: one of its selectors ENDS on html, body or
+     * :root (html body, .dark body, body.x). "body .card" styles a card, and ".body" a class.
+     * Split on the commas between selectors only, never those inside :not() or :is().
+     */
+    private static function selectsThePage(string $selectors): bool
+    {
+        $depth = 0;
+        $start = 0;
+        $list = [];
+        for ($i = 0, $n = strlen($selectors); $i < $n; $i++) {
+            $c = $selectors[$i];
+            $depth += $c === '(' ? 1 : ($c === ')' ? -1 : 0);
+            if ($c === ',' && $depth <= 0) {
+                $list[] = substr($selectors, $start, $i - $start);
+                $start = $i + 1;
+            }
+        }
+        $list[] = substr($selectors, $start);
+
+        foreach ($list as $selector) {
+            $parts = preg_split('#[\s>+~]+#', trim($selector), -1, PREG_SPLIT_NO_EMPTY) ?: [];
+            $last = end($parts);
+            if (is_string($last) && preg_match('~^(?:html|body|:root)(?![\w-])~i', $last) === 1) {
+                return true;
+            }
+        }
+
+        return false;
     }
 
     /*
@@ -2727,7 +2851,7 @@ class Role extends Model implements MustVerifyEmail
         return [
             'default' => ['profile_image_url', 'image_variants', ImageUtils::VARIANT_WIDTHS],
             'header' => ['header_image_url', 'header_image_variants', ImageUtils::BANNER_VARIANT_WIDTHS],
-            'background' => ['background_image_url', 'background_image_variants', ImageUtils::BANNER_VARIANT_WIDTHS],
+            'background' => ['background_image_url', 'background_image_variants', ImageUtils::PAGE_VARIANT_WIDTHS],
         ];
     }
 
@@ -3402,20 +3526,41 @@ class Role extends Model implements MustVerifyEmail
             return '';
         }
 
-        if ($useCustomDomain && $this->custom_domain) {
-            if ($this->custom_domain_mode !== 'direct' || $this->custom_domain_status === 'active') {
-                return $this->custom_domain;
-            }
+        if ($useCustomDomain && ($domain = $this->handedOutCustomDomain())) {
+            return $domain;
         }
 
         return route('role.view_guest', ['subdomain' => $this->subdomain]);
     }
 
     /**
+     * The custom domain the app hands out for this schedule (mail, shares, the QR code, the admin's
+     * copy button, generated text), or null when it hands out the subdomain. The one rule behind
+     * getGuestUrl(true), Event::getGuestUrl(..., true), EventTextGenerator and the event graphics.
+     *
+     * Redirect mode keeps handing out its domain, which forwards to the subdomain. Direct mode does
+     * once the domain is active, unless the owner made the subdomain the main address
+     * (mainAddressIsCustomDomain()).
+     */
+    public function handedOutCustomDomain(): ?string
+    {
+        if (! $this->custom_domain) {
+            return null;
+        }
+
+        if ($this->custom_domain_mode === 'direct') {
+            return $this->mainAddressIsCustomDomain() ? $this->custom_domain : null;
+        }
+
+        return $this->custom_domain;
+    }
+
+    /**
      * Whether the schedule is served directly on its custom domain (DigitalOcean direct mode,
      * provisioned and active). This is the only mode where the custom domain renders the page
-     * itself, so it is the only mode whose URL should be used as the SEO canonical. Redirect
-     * mode 301s the custom domain to the subdomain, so the subdomain stays canonical there.
+     * itself, so it is the only mode whose URL may be the SEO canonical, and it is, unless the
+     * owner made the subdomain the main address (mainAddressIsCustomDomain()). Redirect mode 301s
+     * the custom domain to the subdomain, so the subdomain stays canonical there.
      */
     public function servesOnCustomDomain(): bool
     {
@@ -3425,13 +3570,27 @@ class Role extends Model implements MustVerifyEmail
     }
 
     /**
-     * The schedule's canonical guest URL: the custom domain when served directly on it, else the
-     * subdomain route. Passing the strict result as the flag means getGuestUrl's broad gate is
-     * only ever reached in the direct+active case, where both gates agree.
+     * Whether the custom domain is this schedule's MAIN address: served directly on it, and the
+     * owner has not made the subdomain the main one (CustomDomainSetting). servesOnCustomDomain()
+     * still answers where the pages are served, which routing, cookies, allow-lists and gateway
+     * return URLs ask; this answers what the canonical, the sitemaps and every handed-out link name.
+     *
+     * Read once per request for every schedule (CustomDomainSetting::subdomainFirstIds()), and only
+     * reached for one served on an active domain, so a list of a thousand events costs no query.
+     */
+    public function mainAddressIsCustomDomain(): bool
+    {
+        return $this->servesOnCustomDomain()
+            && CustomDomainSetting::mainAddressOf($this) === CustomDomainSetting::CUSTOM;
+    }
+
+    /**
+     * The schedule's canonical guest URL: the custom domain when it is the main address
+     * (mainAddressIsCustomDomain()), else the subdomain route.
      */
     public function getCanonicalUrl()
     {
-        return $this->getGuestUrl($this->servesOnCustomDomain());
+        return $this->getGuestUrl($this->mainAddressIsCustomDomain());
     }
 
     /**
@@ -3896,6 +4055,11 @@ class Role extends Model implements MustVerifyEmail
     /**
      * A card-free trial of paid ticket selling is running. Not a Pro trial: it opens
      * canSellPaidTickets() and nothing else. See the 2026_09_28_000001 migration for why.
+     *
+     * Retired on 2026-10-20 (one trial per login, at checkout: RoleBillable::checkoutTrialEnd()).
+     * Nothing starts one any more; this, ticketTrialRunning(), the Plan tab's card and the
+     * ending reminders stay only for the trials already running, and can go once the last
+     * ticket_trial_ends_at has passed (2026-10-27 at the latest).
      */
     public function onTicketTrial(): bool
     {
@@ -3943,34 +4107,6 @@ class Role extends Model implements MustVerifyEmail
 
         return $query->where(fn ($q) => $q->wherePro()
             ->orWhere('ticket_trial_ends_at', '>', now()));
-    }
-
-    /**
-     * Whether the owner may start a selling trial on this schedule.
-     *
-     * Once per OWNER, not per schedule: isEligibleForTrial() is per schedule, so a second
-     * schedule would be a second trial. Every schedule the owner has, deleted ones included, is
-     * checked for an earlier selling trial or any subscription at all, since someone who has
-     * already paid for Pro has nothing left to try.
-     */
-    public function isEligibleForTicketTrial(): bool
-    {
-        if (! config('app.hosted') || $this->isPro() || is_demo_role($this) || ! $this->user_id) {
-            return false;
-        }
-
-        // users.ticket_trial_used_at first: deleting a schedule removes its row outright, so the
-        // schedule stamp alone let trial, delete, recreate grant it again.
-        if (User::whereKey($this->user_id)->whereNotNull('ticket_trial_used_at')->exists()) {
-            return false;
-        }
-
-        // A subscription that never started (a declined card, an abandoned 3DS) is not "has
-        // already paid", the same line the growth funnel draws.
-        return ! static::where('user_id', $this->user_id)
-            ->where(fn ($q) => $q->whereNotNull('ticket_trial_ends_at')
-                ->orWhereHas('subscriptions', fn ($sub) => $sub->whereNotIn('stripe_status', ['incomplete', 'incomplete_expired'])))
-            ->exists();
     }
 
     /**
@@ -4060,39 +4196,19 @@ class Role extends Model implements MustVerifyEmail
     public function showBranding()
     {
         // The free-tier fact every free-tier surface reads: the event-page card, both embed
-        // snippet lines, the ticket-embed frame and the newsletter footer. Which credit the page
-        // itself carries is split between showFooterStrip() and creditChipReason().
+        // snippet lines, the ticket-embed frame and the newsletter footer. The credit the page
+        // itself carries is creditChipReason()'s alone.
         //
         // A single-tenant install has no tiers - actualPlanTier() short-circuits to
         // 'enterprise' - and those surfaces are a hosted platform's growth CTAs, so they have
         // nothing to say there. Selfhost attribution is the credit chip instead; see
         // creditChipReason(). This branch used to read `! $this->isWhiteLabeled()`, which
         // was unconditionally false when unhosted, so the behaviour is unchanged.
-        //
-        // showFooterStrip() builds on this, and creditChipReason() stands down on that, so the
-        // strip wins wherever it renders and the chip fills in elsewhere. Keep this branch
-        // answering false: it is what stops a selfhost from being read as a strip-bearing
-        // install and losing its attribution.
         if (! config('app.hosted')) {
             return false;
         }
 
         return $this->actualPlanTier() === 'free';
-    }
-
-    /**
-     * Whether this schedule's guest pages end with the dark footer strip, "Create your free
-     * schedule at ..." linking marketing_url().
-     *
-     * The strip is the growth CTA of whoever runs the platform, so it is a free-tier thing on an
-     * operator's own platform and nowhere else. eventschedule.com credits its free tier with the
-     * small corner chip instead (creditChipReason() answers 'free_plan'), which is why this is
-     * false on the nexus whatever the plan. It is the strip's one predicate: the layout gates on
-     * it and creditChipReason() stands down on it, so a page never carries both credits.
-     */
-    public function showFooterStrip(): bool
-    {
-        return ! config('app.is_nexus') && $this->showBranding();
     }
 
     /**
@@ -4116,31 +4232,39 @@ class Role extends Model implements MustVerifyEmail
     }
 
     /**
+     * The words that say who the credit chip credits: its tooltip, and the ticket frame's line.
+     * They come from the translations for the visitor's language, but a translation can be
+     * overridden at /admin/translations, and an operator renamed the chip's tooltip to their own
+     * brand that way while the link still went to eventschedule.com. It is the license
+     * attribution and not the operator's to rebrand (docs/BRANDING_MATRIX.md rule 1), so any
+     * wording that drops the name falls back to the English line.
+     */
+    public static function creditChipTitle(): string
+    {
+        $title = __('messages.powered_by_event_schedule');
+
+        return is_string($title) && str_contains($title, 'Event Schedule') ? $title : 'Powered by Event Schedule';
+    }
+
+    /**
      * Why this schedule's guest pages carry the small "Event Schedule" credit chip, or null when
-     * they do not - either because none is owed, or because the footer strip is already carrying
-     * one:
+     * they do not:
      *
      *  - 'selfhost'     the Attribution Assurance License credit on a single-tenant install.
-     *  - 'saas'         the same credit on an operator's own multi-tenant platform.
-     *  - 'free_plan'    a free schedule on eventschedule.com. The nexus runs no footer strip, so
-     *                   the chip is its free tier's page credit, and a paid plan takes it off.
+     *  - 'saas'         the same credit on an operator's own multi-tenant platform, on every
+     *                   tenant whatever its tier.
+     *  - 'free_plan'    a free schedule on eventschedule.com, where a paid plan takes it off.
      *  - 'granted_plan' an Enterprise plan a nexus admin handed out by hand. Customers paying
      *                   through Stripe buy white-label and never carry it, and neither do
      *                   plans earned through the referral programme.
      *
-     * Off the nexus it is keyed on the deployment rather than the plan, then stood down wherever
-     * the footer strip already renders. The two predicates start from different questions: the
-     * strip is a growth CTA that belongs to whoever runs the platform, so it turns on the
-     * tenant's tier; this chip is the license credit, owed by whoever redistributes the software,
-     * so it turns on the deployment. An operator's paying tenant is as much a part of that
-     * redistribution as their free one, and the tenant's subscription is between them and the
-     * operator. What the two share is a page, and a page carries one credit: where
-     * showFooterStrip() has already put the strip there, this answers null.
-     *
-     * On an operator's platform that lands the chip on the tiers they charge for and leaves their
-     * free tier showing their own strip alone. Two consequences that read like bugs and are not:
-     * upgrading a tenant there ADDS the chip rather than removing it, and an operator's free tier
-     * carries no Event Schedule attribution at all, because their strip links marketing_url().
+     * Off the nexus it is keyed on the deployment rather than the plan: the chip is the license
+     * credit, owed by whoever redistributes the software, and an operator's tenant is part of
+     * that redistribution on every tier, the free one and the ones they charge for alike. The
+     * tenant's subscription is between them and the operator. Operators once had a dark footer
+     * strip on their free tier, linking their own marketing_url(), and the chip stood down
+     * wherever it rendered, so a free tenant there carried no Event Schedule credit at all; the
+     * strip was removed on 2026-10-20 and the chip now sits on every page there.
      * eventschedule.com is still the one install that sells white-label, so it is the one install
      * where the chip turns on the plan: its free tier carries it, a paid plan takes it off, and an
      * admin-granted one keeps it.
@@ -4161,21 +4285,11 @@ class Role extends Model implements MustVerifyEmail
             return 'selfhost';
         }
 
-        // The strip is already crediting this page, and the two are alternatives rather than a
-        // pair - see docs/BRANDING_MATRIX.md rule 2. Deliberately below the selfhost branch:
-        // showFooterStrip() is false when unhosted, so today either order behaves the same and
-        // no test can tell them apart, but if that ever changes, this order is what keeps the
-        // attribution on an install that is meant to always carry it.
-        if ($this->showFooterStrip()) {
-            return null;
-        }
-
         if (! config('app.is_nexus')) {
             return 'saas';
         }
 
-        // The nexus's free tier. There is no strip here to defer to, so the chip takes the
-        // strip's place. Ahead of the granted-plan test, though the order is not load-bearing:
+        // The nexus's free tier. Ahead of the granted-plan test, though the order is not load-bearing:
         // that one needs the Enterprise tier, so a lapsed grant - plan_source still 'admin', tier
         // now free - lands here either way.
         if ($this->showBranding()) {
@@ -4193,7 +4307,7 @@ class Role extends Model implements MustVerifyEmail
      * Whether this schedule's public pages are monetized (ads / paid promotions).
      *
      * Mirrors showBranding(): a free-tier schedule carries them, a paying one does not,
-     * so removing ads is a concrete Pro benefit alongside removing the branding footer.
+     * so removing ads is a concrete Pro benefit alongside removing the free-tier branding.
      *
      * Gated on actualPlanTier() rather than config('app.hosted') on purpose. Selfhost
      * already resolves to 'enterprise' there, so a single-tenant install is never
@@ -4430,7 +4544,16 @@ class Role extends Model implements MustVerifyEmail
     }
 
     /**
-     * The schedule's venue map settings (Engagement > Venue map). Not columns here because this
+     * The schedule's Aurora background settings (App\Utils\Aurora). No row reads as Aurora from
+     * the accent, arranged by the schedule's id, moving.
+     */
+    public function auroraSetting()
+    {
+        return $this->hasOne(AuroraSetting::class)->withDefault(['palette' => 'accent', 'colors' => null, 'seed' => null, 'motion' => true]);
+    }
+
+    /**
+     * The schedule's venue map settings (Page content > Venue map). Not columns here because this
      * table is at MySQL's row-size limit; a schedule with no row has its map off, which the
      * default model says. Read through App\Services\VenueMap, which also knows whether the
      * install has a map at all.
@@ -4438,6 +4561,24 @@ class Role extends Model implements MustVerifyEmail
     public function venueMapSetting()
     {
         return $this->hasOne(VenueMapSetting::class)->withDefault(['enabled' => false, 'starts_open' => false, 'ready_at' => null]);
+    }
+
+    /**
+     * A platform admin's "Hide schedule": present while this schedule's events are kept out of
+     * discovery (Event::constrainNotOnHiddenSchedule()). Not a column here; see the table's
+     * migration.
+     */
+    public function discoveryHide()
+    {
+        return $this->hasOne(DiscoveryHiddenSchedule::class);
+    }
+
+    /** Schedules a platform admin has hidden from discovery. */
+    public function scopeHiddenFromDiscovery($query)
+    {
+        return $query->whereExists(fn ($q) => $q->select(DB::raw(1))
+            ->from('discovery_hidden_schedules')
+            ->whereColumn('discovery_hidden_schedules.role_id', 'roles.id'));
     }
 
     /**
@@ -4881,10 +5022,9 @@ class Role extends Model implements MustVerifyEmail
             return null;
         }
 
-        if ($this->isOnTrial()) {
-            return config('usage.ai_parse_daily_limit_trial');
-        }
-
+        // A trial gets the allowance of the plan it is a trial of. It used to get a trial cap of
+        // its own (10), so starting a trial of a paid plan cut a schedule's AI import from the 50
+        // a day it had on Free.
         if ($this->isEnterprise()) {
             return config('usage.ai_parse_daily_limit_enterprise');
         }
@@ -5191,7 +5331,7 @@ class Role extends Model implements MustVerifyEmail
         return $this->hasMany(\App\Models\EventTemplate::class)->orderByDesc('created_at');
     }
 
-    /** Ticket presets (Settings > Ticket presets), in the owner's order. Read through App\Services\TicketPresets. */
+    /** Ticket presets (Tickets > Ticket presets), in the owner's order. Read through App\Services\TicketPresets. */
     public function ticketPresets()
     {
         return $this->hasMany(\App\Models\TicketPreset::class)->orderBy('sort_order')->orderBy('id');
@@ -5204,6 +5344,20 @@ class Role extends Model implements MustVerifyEmail
     public function ticketPresetSetting()
     {
         return $this->hasOne(\App\Models\TicketPresetSetting::class)->withDefault(['team_uses_presets' => false]);
+    }
+
+    /**
+     * How this schedule's calendar syncs treat what they read in (App\Services\CalendarArrival).
+     * A table of its own because this one is at MySQL's row-size limit; no row reads as "arrive
+     * as drafts", which is the safe answer for a sync nobody has said anything about.
+     */
+    public function calendarSyncSetting()
+    {
+        return $this->hasOne(\App\Models\CalendarSyncSetting::class)->withDefault([
+            'google_publishes' => false,
+            'microsoft_publishes' => false,
+            'caldav_publishes' => false,
+        ]);
     }
 
     /**

@@ -592,4 +592,41 @@ class AdminAlertsTest extends TestCase
         $this->actingAs($user)->get(route('admin.dashboard'))
             ->assertRedirect();
     }
+
+    public function test_a_php_without_the_php2shell_fixes_is_flagged(): void
+    {
+        foreach (['7.4.33', '8.1.31', '8.2.34', '8.3.11', '8.3.35', '8.4.26', '8.5.11'] as $version) {
+            $this->assertTrue(AdminAlertService::phpIsVulnerable($version), $version);
+        }
+
+        foreach (['8.2.35', '8.3.36', '8.3.40', '8.4.27', '8.5.12', '8.6.0', '9.0.0'] as $version) {
+            $this->assertFalse(AdminAlertService::phpIsVulnerable($version), $version);
+        }
+
+        // Upload progress is off wherever a PHP reads its settings from: .user.ini for FPM and
+        // CGI, .htaccess for mod_php.
+        $userIni = parse_ini_file(public_path('.user.ini'));
+        $this->assertFalse(filter_var($userIni['session.upload_progress.enabled'], FILTER_VALIDATE_BOOLEAN));
+        $this->assertFalse(filter_var($userIni['fatal_error_backtraces'], FILTER_VALIDATE_BOOLEAN));
+
+        $htaccess = file_get_contents(public_path('.htaccess'));
+        $this->assertStringContainsString('php_flag session.upload_progress.enabled off', $htaccess);
+        $this->assertStringContainsString('php_flag fatal_error_backtraces off', $htaccess);
+        $this->assertNotEmpty(trans_choice('messages.admin_alert_php_vulnerable', 1));
+        $this->assertNotSame('messages.admin_alert_php_vulnerable', trans_choice('messages.admin_alert_php_vulnerable', 1));
+    }
+
+    /**
+     * Amber, not red: Debian and Ubuntu backport the fix and keep the old version number, so the
+     * row cannot tell a patched distro PHP from a vulnerable one and asks the operator to check.
+     * The row's count is held at zero under test (it reads the real PHP_VERSION), so its
+     * definition is read directly.
+     */
+    public function test_the_php2shell_row_is_amber(): void
+    {
+        $row = (new \ReflectionMethod(AdminAlertService::class, 'row'))->invoke(null, 'php_vulnerable', 1);
+
+        $this->assertSame('amber', $row['color']);
+        $this->assertSame('PHP '.PHP_VERSION, $row['subtitle']);
+    }
 }

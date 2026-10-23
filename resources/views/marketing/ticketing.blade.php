@@ -569,11 +569,12 @@
         // order the code checks them, and with the tone the scanner actually
         // shows. Nothing invented: each string mirrors a real messages.* key on
         // that path. WARN is deliberately not REFUSE - a second scan of a used
-        // ticket comes back as an orange warning over the holder's details
-        // (messages.warning_ticket_used), and no second admission is recorded.
+        // ticket comes back amber over the holder's details with the time of the
+        // first scan (messages.scan_already_checked_in, scan_first_scanned_at),
+        // and no second admission is recorded.
         $gateLog = [
             ['pass', 'ADMIT',  'Sarah M. - General - first scan'],
-            ['warn', 'WARN',   'This ticket has already been used'],
+            ['warn', 'WARN',   'Already checked in, first scanned at 8:12 PM'],
             ['stop', 'REFUSE', 'Not authorized to scan this ticket'],
             ['stop', 'REFUSE', 'Check-in opens 24 hours before the start'],
             ['stop', 'REFUSE', 'The check-in period has ended'],
@@ -624,7 +625,7 @@
             ['Gift cards', 'Sell a balance somebody sends to a recipient by email, redeemable against tickets on your schedule.', 'Pro'],
             ['Post-event feedback', 'Star ratings and comments collected from ticket buyers and registrants after the event ends.', 'Pro'],
             ['Webhooks', 'POST notifications for sales, cancellations and check-ins, into whatever you already run.', 'Pro'],
-            ['Embeddable ticket form', 'Put the purchase form on the website you already have, in one iframe. The RSVP embed is free.', 'Pro'],
+            ['Embeddable ticket form', 'Put the purchase form on the website you already have, in one iframe. The RSVP embed is free.', 'Pro', null, ['marketing.embed_tickets', 'How the ticket embed works']],
         ];
 
         $steps = [
@@ -644,7 +645,7 @@
             ],
             [
                 'q' => 'Do I need a paid plan to sell tickets?',
-                'a' => 'To charge for one, yes: a ticket with a price on it is a Pro feature, at '.plan_price($proMonthly).' a month with a 7 day free trial, which also brings the live check-in dashboard, waitlists, promo codes, passes and the sales export. We take no platform fee on any tier, whatever you charge. Free registration is separate and unlimited on every plan: turn on RSVP for a free event, set a capacity limit, and attendees still get a confirmation email with a QR code that scans at the door for nothing.',
+                'a' => 'To charge for one, yes: a ticket with a price on it is a Pro feature, at '.plan_price($proMonthly).' a month with a '.config('app.trial_days').'-day free trial, which also brings the live check-in dashboard, waitlists, promo codes, passes and the sales export. We take no platform fee on any tier, whatever you charge. Free registration is separate and unlimited on every plan: turn on RSVP for a free event, set a capacity limit, and attendees still get a confirmation email with a QR code that scans at the door for nothing.',
             ],
             [
                 'q' => 'How does QR code check-in work?',
@@ -1179,7 +1180,7 @@
                         <h3 class="es-turn-ink text-lg font-black">The moment there is a price on it</h3>
                         <span class="es-turn-plan es-turn-plan-pro">Pro</span>
                     </div>
-                    <p class="es-turn-muted mb-5 text-sm leading-relaxed">Put a number in the price field and you are on Pro, which brings the rest of this page with it: {{ plan_price($proMonthly) }} a month with a 7 day free trial, and still zero platform fees.</p>
+                    <p class="es-turn-muted mb-5 text-sm leading-relaxed">Put a number in the price field and you are on Pro, which brings the rest of this page with it: {{ plan_price($proMonthly) }} a month with a {{ config('app.trial_days') }}-day free trial, and still zero platform fees.</p>
                     <ul class="es-turn-muted space-y-2.5 text-sm">
                         @foreach (['Ticket types with their own price, quantity and sales window', 'Promo codes, add-ons, gift cards and installment plans', 'Passes and season subscriptions across many events', 'Custom questions at checkout, and individual tickets per guest', 'The check-in dashboard and the sold-out waitlist', 'The ticket form embedded on the website you already have'] as $proItem)
                             <li class="flex gap-2.5">
@@ -1214,11 +1215,17 @@
 
             <div class="grid gap-4 md:grid-cols-2 lg:grid-cols-4" data-reveal-group="70">
                 @foreach ($afterSale as $afterRow)
-                    @php [$aTitle, $aBody, $aPlan] = $afterRow; $aAnchor = $afterRow[3] ?? null; @endphp
+                    @php [$aTitle, $aBody, $aPlan] = $afterRow; $aAnchor = $afterRow[3] ?? null; $aLink = $afterRow[4] ?? null; @endphp
                     <div @if ($aAnchor) id="{{ $aAnchor }}" @endif class="es-turn-card flex scroll-mt-24 flex-col p-6" data-reveal="panel">
                         <span class="es-turn-plan es-turn-plan-pro mb-3 self-start">{{ $aPlan }}</span>
                         <h3 class="es-turn-ink mb-2 text-base font-bold">{{ $aTitle }}</h3>
                         <p class="es-turn-muted text-sm leading-relaxed">{{ $aBody }}</p>
+                        @if ($aLink)
+                            <a href="{{ route($aLink[0]) }}" class="es-turn-link mt-auto inline-flex items-center gap-1 pt-4 text-sm font-semibold transition-colors">
+                                {{ $aLink[1] }}
+                                <svg aria-hidden="true" class="h-3.5 w-3.5 rtl:rotate-180" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M9 5l7 7-7 7" /></svg>
+                            </a>
+                        @endif
                     </div>
                 @endforeach
             </div>

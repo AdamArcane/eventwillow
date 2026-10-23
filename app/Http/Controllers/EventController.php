@@ -55,6 +55,7 @@ use App\Utils\GalleryUtils;
 use App\Utils\GeminiUtils;
 use App\Utils\HoneypotUtils;
 use App\Utils\ImageUtils;
+use App\Utils\ImportOptions;
 use App\Utils\ImportRun;
 use App\Utils\MoneyUtils;
 use App\Utils\SetupGuide;
@@ -566,7 +567,7 @@ class EventController extends Controller
             session()->forget('cloned_event');
         } else {
             // Default behavior for new event: the schedule's default ticket preset, if it has one
-            // (Settings > Ticket presets, which took over from roles.default_tickets).
+            // (Tickets > Ticket presets, which took over from roles.default_tickets).
             $event->ticket_currency_code = MoneyUtils::getCurrencyForCountry($role->country_code);
             $event->payment_method = payment_gateways()->defaultMethodFor($user, $event->ticket_currency_code);
             $event->tickets = collect([new Ticket]);
@@ -693,6 +694,9 @@ class EventController extends Controller
             'subdomain' => $subdomain,
             'title' => $isFirstEventRun ? __('messages.next_step_add_first_event') : __('messages.add_event'),
             'isFirstEventRun' => $isFirstEventRun,
+            // The places events can be brought in from, above the form (<x-import-options>): on
+            // someone's first event, on a schedule that has none, and not over a copy.
+            'showImportBand' => $isFirstEventRun && ! $clonedData && ImportOptions::scheduleIsEmpty($role),
             'presetState' => TicketPresets::formState($role, $event, $user, $presetCopiedFrom ?? null),
             'selectedVenue' => $venue,
             'venues' => $venues,
@@ -794,7 +798,14 @@ class EventController extends Controller
 
         // Build the clone payload (shared with Event Templates) and stash it for the
         // create form to consume.
-        session(['cloned_event' => EventRepo::buildClonePayload($event)]);
+        //
+        // A copy is listed where a new event is: on the schedule's default curators, which store()
+        // adds through autoCurateEvent(), and not on every curator the source happened to be on.
+        // A template keeps its curators, because somebody saved that listing on purpose.
+        $payload = EventRepo::buildClonePayload($event);
+        $payload['curators'] = [];
+        $payload['curator_groups'] = [];
+        session(['cloned_event' => $payload]);
 
         return redirect(route('event.create', ['subdomain' => $subdomain]));
     }
@@ -1108,6 +1119,13 @@ class EventController extends Controller
                 ? __('messages.saved_without_notifying')
                 : __('messages.event_updated'));
 
+        // Only a save that went through whole: the layout toasts one message, and a refused flyer
+        // or gallery is said on the schedule page below.
+        if (! $this->eventRepo->aiImageRejected && ! GalleryUtils::errorMessage($gallery)
+            && ($checkout = $this->subscribeAfterSave($request, $event))) {
+            return $checkout->with('message', $message);
+        }
+
         $redirect = redirect(route('role.view_admin', $data));
         $this->flashGalleryPublished($redirect, $gallery, $event, $subdomain);
 
@@ -1123,6 +1141,39 @@ class EventController extends Controller
         }
 
         return $redirect->with('message', $message);
+    }
+
+    /**
+     * The paywall's "Save and start free trial" (then_subscribe): once the event is saved, go on
+     * to checkout for the schedule whose plan decides its tickets, carrying the event so checkout
+     * comes back to it (SubscriptionController::returnEvent()). Null, and the usual redirect, for
+     * anyone who cannot check out there (only its owner can) or a schedule that already sells.
+     */
+    private function subscribeAfterSave(Request $request, Event $event): ?\Illuminate\Http\RedirectResponse
+    {
+        if (! $request->boolean('then_subscribe') || ! config('app.hosted') || ! config('cashier.key')) {
+            return null;
+        }
+
+        $event->unsetRelation('creatorRole');
+        $selling = $event->ticketingRole();
+
+        if (! $selling || $selling->user_id !== $request->user()->id || $selling->canSellPaidTickets() || is_demo_role($selling)) {
+            return null;
+        }
+
+        // The flag rides in a hidden field, so a price taken off after the button was pressed
+        // must not still send the save to checkout.
+        if (! $event->tickets_enabled || ! $event->tickets()->where('price', '>', 0)->where('is_addon', false)->exists()) {
+            return null;
+        }
+
+        return redirect()->route('role.subscribe', [
+            'subdomain' => $selling->subdomain,
+            'tier' => 'pro',
+            'source' => 'tickets',
+            'event' => UrlUtils::encodeId($event->id),
+        ]);
     }
 
     /**
@@ -1569,7 +1620,7 @@ class EventController extends Controller
     }
 
     /**
-     * "Save these tickets as a preset" that Settings > Ticket presets could not hold is refused
+     * "Save these tickets as a preset" that Tickets > Ticket presets could not hold is refused
      * before the event is saved, so nothing is half done (TicketPresets::assertSavable()).
      */
     private function refuseUnsavablePreset(Request $request, Role $presetSchedule): void
@@ -1691,6 +1742,10 @@ class EventController extends Controller
             $this->eventRepo->aiImageRejected ? __('messages.ai_image_not_applied') : null,
             $agendaImageRejected ? __('messages.agenda_image_not_applied') : null,
         ]);
+
+        if (! $refused && ! GalleryUtils::errorMessage($gallery) && ($checkout = $this->subscribeAfterSave($request, $event))) {
+            return $checkout->with('message', __('messages.event_created'));
+        }
 
         $redirect = redirect(route('role.view_admin', $data));
         $this->flashGalleryPublished($redirect, $gallery, $event, $subdomain);
@@ -2055,7 +2110,8 @@ class EventController extends Controller
 
         $removed = 0;
         $kept = 0;
-        foreach ($this->importedEvents($role, $request->user(), $batch)->get() as $event) {
+        // Deleting one reads its schedules, its parts and its owner for the webhook and the calendars.
+        foreach ($this->importedEvents($role, $request->user(), $batch)->with(['roles', 'parts', 'creatorRole'])->get() as $event) {
             // The same two refusals as deleting one by hand.
             if ($request->user()->cannot('delete', $event) || $event->appointment_type_id || $event->sales()->exists()) {
                 $kept++;
@@ -3340,6 +3396,19 @@ class EventController extends Controller
             // shown with the privacy policy. The page ticked it and never sent it.
             'terms' => __('messages.terms_of_service'),
         ]);
+
+        // Off hosted there is no code step, so nothing here has shown that this person reads the
+        // address. An account that is waiting for its owner (an invited team member, somebody who
+        // bought a ticket) is not handed to whoever types its address: the address is mailed its
+        // set-password link, as sign-up and the login page do for it.
+        if ($isStub && ! config('app.hosted')) {
+            throw ValidationException::withMessages([
+                'account_email' => [match (\App\Utils\StubAccountUtils::send($existingUser)) {
+                    \App\Utils\StubAccountUtils::THROTTLED => __('messages.login_password_link_already_sent'),
+                    default => __('messages.login_no_password_yet'),
+                }],
+            ]);
+        }
 
         // Verify the emailed 6-digit code (hosted only, matching registration).
         if (config('app.hosted') && ! config('app.is_testing')) {
@@ -4806,7 +4875,7 @@ class EventController extends Controller
         }
 
         // Load all recent events for manual selection
-        $events = Event::with('creatorRole')->whereHas('roles', function ($query) use ($role) {
+        $events = Event::with(['creatorRole', 'roles'])->whereHas('roles', function ($query) use ($role) {
             $query->where('role_id', $role->id);
         })
             ->whereDoesntHave('parts')

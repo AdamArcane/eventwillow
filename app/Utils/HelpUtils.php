@@ -28,50 +28,60 @@ class HelpUtils
         '{subdomain}/edit' => [
             'doc' => '/docs/creating-schedules',
             'anchors' => [
+                // In the order of the form: its tabs down the sidebar, and each tab's rows.
                 'section-details' => '/docs/creating-schedules#details',
                 'details-tab-general' => '/docs/creating-schedules#details-general',
                 'details-tab-localization' => '/docs/creating-schedules#details-localization',
-                'section-address' => '/docs/creating-schedules#address',
                 'details-tab-contact' => '/docs/creating-schedules#contact-info',
+                'details-tab-announcement' => '/docs/creating-schedules#announcement-bar',
+                'section-sources' => '/docs/creating-schedules#event-sources',
+                'section-address' => '/docs/creating-schedules#address',
                 'section-merge' => '/docs/creating-schedules#merge',
                 'section-style' => '/docs/schedule-styling#overview',
-                'section-gallery' => '/docs/creating-schedules#gallery',
                 // The Style tab's four rows, in the order of the page, by the id of the row itself.
                 // Header opens on the header style; Events on the default layout, with the event
                 // animation under it.
                 'style-tab-advanced' => '/docs/schedule-styling#header-style',
                 'style-tab-background' => '/docs/schedule-styling#backgrounds',
                 'style-tab-animation' => '/docs/schedule-styling#event-layout',
+                // And by its pane, which is what the setup guide's Animate step and the graphic
+                // page's list-wording link name.
+                'style-content-animation' => '/docs/schedule-styling#event-layout',
                 'style-tab-css' => '/docs/schedule-styling#custom-css',
+                'section-page' => '/docs/creating-schedules#page-content',
+                'page-tab-general' => '/docs/creating-schedules#social-links',
+                'links-tab-social_links' => '/docs/creating-schedules#social-links',
+                'page-tab-videos' => '/docs/creating-schedules#videos',
+                'links-tab-youtube_videos' => '/docs/creating-schedules#videos',
+                'page-tab-gallery' => '/docs/creating-schedules#gallery',
+                'page-tab-sponsors' => '/docs/creating-schedules#sponsors',
+                'page-tab-map' => '/docs/creating-schedules#venue-map',
+                'page-tab-accommodation' => '/docs/creating-schedules#accommodation',
                 'section-subschedules' => '/docs/creating-schedules#customize',
                 'customize-tab-subschedules' => '/docs/creating-schedules#customize-subschedules',
                 'customize-tab-custom-fields' => '/docs/creating-schedules#customize-custom-fields',
                 'customize-tab-categories' => '/docs/creating-schedules#customize-categories',
                 'customize-tab-custom-labels' => '/docs/creating-schedules#customize-custom-labels',
-                'section-settings' => '/docs/creating-schedules#settings',
-                'section-links' => '/docs/creating-schedules#videos-links',
-                'links-tab-youtube_videos' => '/docs/creating-schedules#videos-links',
-                'links-tab-social_links' => '/docs/creating-schedules#videos-links',
                 'section-engagement' => '/docs/creating-schedules#engagement',
-                'engagement-tab-feedback' => '/docs/creating-schedules#engagement-feedback',
-                'engagement-tab-fan_content' => '/docs/creating-schedules#engagement-fan-content',
                 'engagement-tab-requests' => '/docs/creating-schedules#engagement-requests',
+                'engagement-tab-mailing-list' => '/docs/creating-schedules#engagement-mailing-list',
+                'engagement-tab-fan_content' => '/docs/creating-schedules#engagement-fan-content',
+                'engagement-tab-feedback' => '/docs/creating-schedules#engagement-feedback',
                 'engagement-tab-carpool' => '/docs/creating-schedules#engagement-carpool',
-                'engagement-tab-sponsors' => '/docs/creating-schedules#engagement-sponsors',
-                'engagement-tab-map' => '/docs/creating-schedules#engagement-venue-map',
-                'engagement-tab-accommodation' => '/docs/creating-schedules#engagement-accommodation',
-                'section-gift-cards' => '/docs/gift-cards#setup',
-                'section-sources' => '/docs/creating-schedules#event-sources',
-                'section-auto-import' => '/docs/creating-schedules#auto-import',
-                'section-integrations' => '/docs/creating-schedules#integrations',
-                'integration-tab-email' => '/docs/creating-schedules#integrations-email',
+                'section-tickets' => '/docs/creating-schedules#tickets',
+                'tickets-tab-presets' => '/docs/creating-schedules#ticket-presets',
+                'tickets-tab-gift-cards' => '/docs/gift-cards#setup',
+                'section-settings' => '/docs/creating-schedules#settings',
                 'settings-tab-general' => '/docs/creating-schedules#settings-general',
-                'settings-tab-tickets' => '/docs/creating-schedules#ticket-presets',
+                'settings-tab-events' => '/docs/creating-schedules#settings-new-events',
                 'settings-tab-notifications' => '/docs/creating-schedules#settings-notifications',
                 'settings-tab-advanced' => '/docs/creating-schedules#settings-advanced',
+                'section-integrations' => '/docs/creating-schedules#integrations',
+                'integration-tab-email' => '/docs/creating-schedules#integrations-email',
                 'integration-tab-google' => '/docs/creating-schedules#integrations-google',
                 'integration-tab-microsoft' => '/docs/creating-schedules#integrations-microsoft',
                 'integration-tab-caldav' => '/docs/creating-schedules#integrations-caldav',
+                'integration-tab-auto-import' => '/docs/creating-schedules#auto-import',
                 'integration-tab-feeds' => '/docs/creating-schedules#integrations-feeds',
                 'integration-tab-advanced' => '/docs/creating-schedules#integrations-advanced',
             ],
@@ -83,7 +93,6 @@ class HelpUtils
                 'section-listing' => '/docs/creating-events#listing',
                 'section-calendar-sync' => '/docs/creating-events#google-calendar',
                 'section-venue' => '/docs/creating-events#venue',
-                'section-gallery' => '/docs/creating-events#gallery',
                 'section-participants' => '/docs/creating-events#participants',
                 'section-recurring' => '/docs/creating-events#recurring',
                 'section-agenda' => '/docs/creating-events#agenda',
@@ -96,13 +105,19 @@ class HelpUtils
                 'ticket-mode-tickets' => '/docs/tickets#ticketing',
                 'ticket-tab-tickets' => '/docs/tickets#ticketing',
                 'ticket-tab-payment' => '/docs/tickets#payment-row',
-                'ticket-tab-options' => '/docs/tickets#options',
+                'ticket-tab-checkout' => '/docs/tickets#checkout',
+                'ticket-tab-sales_rules' => '/docs/tickets#sales-rules',
                 'ticket-tab-promo_codes' => '/docs/tickets#promo-codes',
                 'ticket-tab-add_ons' => '/docs/tickets#add-ons',
                 // A preset chip or tile pressed (event/partials/ticket-presets-*).
                 'ticket-presets' => '/docs/tickets#ticket-presets',
+                'agenda-tab-import' => '/docs/creating-events#agenda-import',
+                'section-page' => '/docs/creating-events#page-content',
+                'page-tab-gallery' => '/docs/creating-events#gallery',
+                'page-tab-sponsors' => '/docs/creating-events#sponsors',
+                // Old addresses of tabs that became rows (window.eventSectionAliases in event/edit.blade.php).
+                'section-gallery' => '/docs/creating-events#gallery',
                 'section-event-settings' => '/docs/creating-events#sponsors',
-                'settings-tab-sponsors' => '/docs/creating-events#sponsors',
                 'section-engagement' => '/docs/creating-events#engagement',
                 'engagement-tab-polls' => '/docs/creating-events#polls',
                 'engagement-tab-feedback' => '/docs/creating-events#feedback',
@@ -121,7 +136,6 @@ class HelpUtils
                 'section-listing' => '/docs/creating-events#listing',
                 'section-calendar-sync' => '/docs/creating-events#google-calendar',
                 'section-venue' => '/docs/creating-events#venue',
-                'section-gallery' => '/docs/creating-events#gallery',
                 'section-participants' => '/docs/creating-events#participants',
                 'section-recurring' => '/docs/creating-events#recurring',
                 'section-agenda' => '/docs/creating-events#agenda',
@@ -134,13 +148,19 @@ class HelpUtils
                 'ticket-mode-tickets' => '/docs/tickets#ticketing',
                 'ticket-tab-tickets' => '/docs/tickets#ticketing',
                 'ticket-tab-payment' => '/docs/tickets#payment-row',
-                'ticket-tab-options' => '/docs/tickets#options',
+                'ticket-tab-checkout' => '/docs/tickets#checkout',
+                'ticket-tab-sales_rules' => '/docs/tickets#sales-rules',
                 'ticket-tab-promo_codes' => '/docs/tickets#promo-codes',
                 'ticket-tab-add_ons' => '/docs/tickets#add-ons',
                 // A preset chip or tile pressed (event/partials/ticket-presets-*).
                 'ticket-presets' => '/docs/tickets#ticket-presets',
+                'agenda-tab-import' => '/docs/creating-events#agenda-import',
+                'section-page' => '/docs/creating-events#page-content',
+                'page-tab-gallery' => '/docs/creating-events#gallery',
+                'page-tab-sponsors' => '/docs/creating-events#sponsors',
+                // Old addresses of tabs that became rows (window.eventSectionAliases in event/edit.blade.php).
+                'section-gallery' => '/docs/creating-events#gallery',
                 'section-event-settings' => '/docs/creating-events#sponsors',
-                'settings-tab-sponsors' => '/docs/creating-events#sponsors',
                 'section-engagement' => '/docs/creating-events#engagement',
                 'engagement-tab-polls' => '/docs/creating-events#polls',
                 'engagement-tab-feedback' => '/docs/creating-events#feedback',
@@ -199,6 +219,7 @@ class HelpUtils
         // Simple page-level mappings
         '{subdomain}/schedule' => '/docs/managing-schedules#schedule',
         '{subdomain}/appointments' => '/docs/appointments',
+        '{subdomain}/appointments/bookings/*/reschedule' => '/docs/appointments#rescheduling',
         '{subdomain}/templates' => '/docs/managing-schedules#templates',
         '{subdomain}/availability' => '/docs/managing-schedules#availability',
         // The seating tab, the designer and the box office console. No ticket-tab-* entry to go
@@ -213,6 +234,7 @@ class HelpUtils
         '{subdomain}/seating/*/design' => '/docs/allocated-seating#build',
         '{subdomain}/seating/box-office/*' => '/docs/allocated-seating#box-office',
         '{subdomain}/requests' => '/docs/managing-schedules#requests',
+        '{subdomain}/calendar-review' => '/docs/creating-schedules#calendar-review',
         // The platform admin's list of every feed. Before the schedule's own feed pages: on a
         // page with no schedule in its address `{subdomain}/feeds` reads as `*/feeds`, which
         // is this page too, and the first match wins.
@@ -223,11 +245,15 @@ class HelpUtils
         '{subdomain}/feeds/*' => '/docs/managing-schedules#feeds-review',
         '{subdomain}/followers' => '/docs/managing-schedules#followers',
         '{subdomain}/team' => '/docs/managing-schedules#team',
+        // The team tab's own pages: '{subdomain}/team' above matches the tab alone.
+        '{subdomain}/team/add-member' => '/docs/managing-schedules#team',
+        '{subdomain}/team/transfer' => '/docs/managing-schedules#transfer-ownership',
+        'schedule-transfer/*' => '/docs/managing-schedules#transfer-ownership',
         '{subdomain}/plan' => '/docs/managing-schedules#plan',
         '{subdomain}/audit-log' => '/docs/managing-schedules#audit-log',
         '{subdomain}/videos' => '/docs/managing-schedules#videos',
         '{subdomain}/merge-venues*' => '/docs/creating-schedules#merge',
-        '{subdomain}/subscribe' => '/docs/creating-schedules',
+        '{subdomain}/subscribe' => '/docs/managing-schedules#plan',
         'my-carpools' => '/docs/creating-schedules#engagement-carpool',
         '{subdomain}/import' => '/docs/ai-import',
         '{subdomain}/import/ai' => '/docs/ai-import',
@@ -246,14 +272,16 @@ class HelpUtils
                 'graphic-pane-email' => '/docs/event-graphics#email-scheduling',
             ],
         ],
-        'events' => '/docs/getting-started',
         // Explicit rather than load-bearing: '{subdomain}/merge-venues*' above already matches
         // this page, because resolvePattern() substitutes '*' for {subdomain} when there is no
         // route parameter. Kept so the mapping survives if that fallback ever tightens, and so
         // the page is not silently relying on it.
         'following/merge-venues*' => '/docs/creating-schedules#merge',
         'following' => '/docs/sharing#followers',
-        'tickets' => '/docs/tickets',
+        // The tickets the signed-in person HOLDS (TicketController::tickets), not the organizer's
+        // side: no guide section covers this page, so Help opens the docs home rather than
+        // Selling Tickets.
+        'tickets' => '/docs',
         // /sales carries six tabs covering four different doc pages, so a flat mapping sent the
         // Help button to "Managing Sales" from the Installments, Subscriptions and Gift Cards
         // tabs alike. Keyed on the tab BUTTON ids, which is what navigation.blade.php reads from
@@ -272,12 +300,12 @@ class HelpUtils
         'sales.import' => '/docs/tickets#importing-attendees',
         // The signed-in dashboard.
         'dashboard' => '/docs/getting-started#dashboard',
-        // Realtime is the second tab here: a schedule owner's own live view (not /admin/realtime,
-        // which is the operator's and has its own entry below).
+        // Realtime is the second tab here: a schedule owner's own live view (not the live part of
+        // /admin/dashboard, which is the operator's and has its own entry below).
         'analytics' => [
             'doc' => '/docs/analytics',
             'anchors' => [
-                'tab-web' => '/docs/analytics',
+                'tab-web' => '/docs/analytics#web-analytics',
                 'tab-revenue' => '/docs/analytics#revenue',
                 'tab-checkins' => '/docs/analytics#checkins',
                 'tab-realtime' => '/docs/analytics#realtime',
@@ -293,8 +321,10 @@ class HelpUtils
         'checkin' => '/docs/tickets#checkin-dashboard',
         'waitlist' => '/docs/tickets#waitlist',
         'referrals' => '/docs/referral-program',
+        // The live view and the cards under it. Realtime was a page of its own until 2026-10;
+        // its old address redirects here.
         'admin/dashboard*' => '/docs/selfhost/admin#dashboard',
-        'admin/realtime*' => '/docs/selfhost/admin#realtime',
+        'admin/realtime*' => '/docs/selfhost/admin#dashboard',
         // The pages of the Insights, Manage and System tabs, in the navigation's own order
         // (admin/partials/_navigation). Each one opened the guide's front page until 2026-10.
         'admin/users*' => '/docs/selfhost/admin#insights-users',
@@ -306,6 +336,7 @@ class HelpUtils
         'admin/boost*' => '/docs/selfhost/admin#manage-boost',
         'admin/schedules*' => '/docs/selfhost/admin#manage-plans',
         'admin/blocked*' => '/docs/selfhost/admin#manage-blocked',
+        'admin/private-calendars*' => '/docs/selfhost/admin#manage-private-calendars',
         // Hosted only, and the operator's own walkthrough is on the SaaS side of the guide.
         'admin/domains*' => '/docs/saas/custom-domains#admin-management',
         'admin/referrals*' => '/docs/selfhost/admin#manage-referrals',

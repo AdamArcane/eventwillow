@@ -24,7 +24,7 @@ class GoogleImportUtils
      * Entry types that are not events: birthdays, working locations, out-of-office and focus
      * blocks, and entries Google made from mail (a flight, a hotel booking).
      */
-    private const EVENT_TYPES = ['default'];
+    public const EVENT_TYPES = ['default'];
 
     /**
      * The calendars to offer, in the order to offer them: the person's own first, then ones
@@ -278,14 +278,18 @@ class GoogleImportUtils
      * "GMT+02:00") and names it "+02:00", which is not a zone the calendar reader knows, and
      * the entry was lost. For an entry that happens once a name that is not listed falls back
      * to the calendar's own zone: the moment carries its offset, so it is the same moment
-     * either way. One that repeats needs more care (clockOf()).
+     * either way. One that repeats needs more care (clockOf()). An old name goes through
+     * TimezoneUtils::canonicalize() first, so Asia/Calcutta is written as Asia/Kolkata on every
+     * install, including one whose system tz database has no Asia/Calcutta at all.
      */
     private static function zone($name): ?string
     {
         static $listed = null;
         $listed ??= array_flip(\DateTimeZone::listIdentifiers(\DateTimeZone::ALL_WITH_BC));
 
-        return is_string($name) && isset($listed[$name]) ? $name : null;
+        $name = TimezoneUtils::canonicalize($name);
+
+        return $name !== null && isset($listed[$name]) ? $name : null;
     }
 
     /** A value escaped as calendar text: one line, with its commas and semicolons kept literal. */

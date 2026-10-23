@@ -50,7 +50,7 @@
             </svg>
             Overview
         </h2>
-        <p class="text-gray-600 dark:text-gray-300 mb-4">This page turns a working selfhosted install into a platform other people sign up to. Each customer schedule gets a subdomain of your domain, your logo and domain are on the product, and paid plans are billed through your own Stripe account. The setup itself is done in <code class="doc-inline-code">.env</code>, your DNS and your web server. Once it is running you operate the platform from the admin panel at <code class="doc-inline-code">/admin</code>, the <strong>Admin</strong> entry in the sidebar of an administrator's account, which the <a href="{{ route('marketing.docs.selfhost.admin') }}" class="doc-link">Admin Panel guide</a> describes tab by tab.</p>
+        <p class="text-gray-600 dark:text-gray-300 mb-4">This page turns a working selfhosted install into a platform other people sign up to. Each customer schedule gets a subdomain of your domain, your logo and domain are on the product, and paid plans are billed through your own Stripe account. The setup itself is done in <code class="doc-inline-code">.env</code>, your DNS and your web server. Once it is running you operate the platform from the platform admin panel at <code class="doc-inline-code">/admin</code>, the <strong>Admin</strong> entry in the sidebar of an administrator's account, which the <a href="{{ route('marketing.docs.selfhost.admin') }}" class="doc-link">Admin Panel guide</a> describes tab by tab.</p>
 
         <p class="text-gray-600 dark:text-gray-300 mb-6">Event Schedule supports two deployment modes:</p>
 
@@ -80,7 +80,7 @@
 
         <p class="text-gray-600 dark:text-gray-300 mb-4">In SaaS mode each customer schedule gets its own subdomain, and signing in, the admin portal and billing all live on one shared <code class="doc-inline-code">app</code> subdomain. A schedule on an Enterprise plan can additionally be served from the customer's own domain; see <a href="{{ route('marketing.docs.saas.custom_domains') }}" class="doc-link">Custom Domains</a>.</p>
 
-        <p class="text-gray-600 dark:text-gray-300 mb-4">The <code class="doc-inline-code">app</code> and <code class="doc-inline-code">www</code> hosts never resolve to a schedule, and a list of names the app needs for itself (among them <code class="doc-inline-code">admin</code>, <code class="doc-inline-code">api</code>, <code class="doc-inline-code">blog</code>, <code class="doc-inline-code">docs</code>, <code class="doc-inline-code">demo</code> and anything starting with <code class="doc-inline-code">demo-</code>) cannot be taken as a subdomain. A customer who asks for a reserved name is given a different subdomain instead, and renaming a schedule to one from the admin panel is refused with "That subdomain is reserved".</p>
+        <p class="text-gray-600 dark:text-gray-300 mb-4">The <code class="doc-inline-code">app</code> and <code class="doc-inline-code">www</code> hosts never resolve to a schedule, and a list of names the app needs for itself (among them <code class="doc-inline-code">admin</code>, <code class="doc-inline-code">api</code>, <code class="doc-inline-code">blog</code>, <code class="doc-inline-code">docs</code>, <code class="doc-inline-code">demo</code> and anything starting with <code class="doc-inline-code">demo-</code>) cannot be taken as a subdomain. A customer who asks for a reserved name, when creating a schedule or renaming it on its edit page, is given a random eight-letter subdomain instead. A new name starting with <code class="doc-inline-code">demo-</code> is refused there with "That subdomain is reserved", and so is renaming a schedule to any reserved name from the platform admin panel.</p>
 
         <div class="doc-callout doc-callout-info">
             <div class="doc-callout-title">Your platform does not serve the Event Schedule marketing site</div>
@@ -90,6 +90,30 @@
             domain then redirects visitors to the sign-in page, and you point
             <code class="doc-inline-code">APP_MARKETING_URL</code> at whatever marketing site you run yourself.</p>
         </div>
+
+        <h3 id="go-live-checklist" class="doc-subheading">The minimum to go live</h3>
+        <ol class="doc-steps doc-steps--compact">
+            <li class="doc-step">
+                <h4 class="doc-step-title">Turn on SaaS mode</h4>
+                <p>Set <code class="doc-inline-code">IS_HOSTED</code>, <code class="doc-inline-code">APP_URL</code> and <code class="doc-inline-code">APP_MARKETING_URL</code>. See <a href="#core-settings" class="doc-link">Core SaaS Settings</a>.</p>
+            </li>
+            <li class="doc-step">
+                <h4 class="doc-step-title">Point DNS and the certificate at every subdomain</h4>
+                <p>A wildcard record, a wildcard certificate and a web server that answers for both. See <a href="#dns" class="doc-link">DNS Configuration</a> and <a href="#webserver" class="doc-link">Web Server Configuration</a>.</p>
+            </li>
+            <li class="doc-step">
+                <h4 class="doc-step-title">Make it yours</h4>
+                <p>Set <code class="doc-inline-code">SUPPORT_EMAIL</code> and publish your own legal pages. See <a href="#support-email" class="doc-link">Support Address</a> and <a href="#legal-pages" class="doc-link">Legal Pages</a>.</p>
+            </li>
+            <li class="doc-step">
+                <h4 class="doc-step-title">Connect Stripe, if you sell plans</h4>
+                <p>The keys, the Price IDs, and the subscription webhook with its signing secret. See <a href="#stripe" class="doc-link">Stripe Subscription Setup</a>.</p>
+            </li>
+            <li class="doc-step">
+                <h4 class="doc-step-title">Keep the scheduler running</h4>
+                <p>Without it no reminder, queued email, calendar sync or demo reset happens. See <a href="#scheduler" class="doc-link">Scheduler and queue</a>, then work through <a href="#verification" class="doc-link">Verification Steps</a>.</p>
+            </li>
+        </ol>
     </section>
 
     {{-- Prerequisites --}}
@@ -167,7 +191,7 @@
                     <tr>
                         <td><code class="doc-inline-code">APP_MARKETING_URL</code></td>
                         <td><code class="doc-inline-code">https://eventschedule.com</code></td>
-                        <td>Your own marketing site, and the base of every link the app builds to a page it does not serve itself: the footer strip on your free tier's public pages, the logo in the admin portal's sidebar and on the sign-in pages, the <strong>Help</strong> button (<code class="doc-inline-code">/docs/...</code>), the <strong>Learn more</strong> and <strong>Compare plans</strong> links on upgrade prompts (<code class="doc-inline-code">/features/...</code>, <code class="doc-inline-code">/pricing</code>), and the privacy policy and terms (<code class="doc-inline-code">/privacy</code>, <code class="doc-inline-code">/terms-of-service</code>) until you <a href="#legal-pages" class="doc-link">publish your own</a>. Point it at your site rather than leaving the default, and have your site answer or redirect those paths.</td>
+                        <td>Your own marketing site, and the base of every link the app builds to a page it does not serve itself: the <strong>Create your own</strong> card on your free tier's event pages, the logo in the admin portal's sidebar and on the sign-in pages, the <strong>Help</strong> button (<code class="doc-inline-code">/docs/...</code>), the <strong>Learn more</strong> and <strong>Compare plans</strong> links on upgrade prompts (<code class="doc-inline-code">/features/...</code>, <code class="doc-inline-code">/pricing</code>), and the privacy policy and terms (<code class="doc-inline-code">/privacy</code>, <code class="doc-inline-code">/terms-of-service</code>) until you <a href="#legal-pages" class="doc-link">publish your own</a>. Point it at your site rather than leaving the default, and have your site answer or redirect those paths.</td>
                     </tr>
                     <tr>
                         <td><code class="doc-inline-code">IS_NEXUS</code></td>
@@ -228,19 +252,19 @@
 
         <div class="doc-callout doc-callout-info">
             <div class="doc-callout-title">One credit a page</div>
-            <p>Your sender name, logos and domain make the platform yours, and your free tier's footer
-            strip points at your <code class="doc-inline-code">APP_MARKETING_URL</code> rather than
-            ours. One thing is not yours to repoint: a small "Event Schedule" chip in the corner of
-            the public pages of every customer you charge. It is the
+            <p>Your sender name, logos and domain make the platform yours, and your free tier's
+            <strong>Create your own</strong> card points at your <code class="doc-inline-code">APP_MARKETING_URL</code>
+            rather than ours. One thing is not yours to repoint: a small "Event Schedule" chip in the
+            corner of every customer's public pages, on every plan. It is the
             attribution the <a href="https://github.com/eventschedule/eventschedule/blob/main/LICENSE" target="_blank" rel="noopener" class="doc-link">Attribution Assurance License</a>
             asks for in return for the software, so it links to eventschedule.com and
-            <code class="doc-inline-code">APP_MARKETING_URL</code> does not change it. A free schedule
-            shows your footer strip instead of the chip, so no page carries two credits.</p>
+            <code class="doc-inline-code">APP_MARKETING_URL</code> does not change it, and neither does
+            overriding its wording at <strong>Admin &gt; Translations</strong>.</p>
         </div>
 
         <h3 id="legal-pages" class="doc-subheading">Legal Pages</h3>
         <p class="text-gray-600 dark:text-gray-300 mb-4">The privacy policy, terms of service and cookie policy your customers and their visitors are linked to are yours to publish. Until you do, those links go to <code class="doc-inline-code">/privacy</code> and <code class="doc-inline-code">/terms-of-service</code> on your <code class="doc-inline-code">APP_MARKETING_URL</code>, and with that variable left on its default they open eventschedule.com's documents, which name our company and not yours.</p>
-        <p class="text-gray-600 dark:text-gray-300 mb-4">Open <strong>System &rarr; Legal Pages</strong> in the admin panel (<code class="doc-inline-code">/admin/legal</code>). Each of the three documents takes either an <strong>External URL</strong>, for a policy hosted elsewhere, or a <strong>Document</strong> written there in Markdown, which the app then serves on your <code class="doc-inline-code">app</code> subdomain. Saving one replaces the link everywhere it appears, including the sign-up page, the ticket checkout and the cookie banner. While the privacy policy is still the built-in one, the admin dashboard shows <strong>Publish your own privacy policy</strong> under <strong>Needs attention</strong>. The <a href="{{ route('marketing.docs.selfhost.admin') }}#system-legal-pages" class="doc-link">Admin Panel guide</a> covers the page.</p>
+        <p class="text-gray-600 dark:text-gray-300 mb-4">Open <strong>System &rarr; Legal Pages</strong> in the platform admin panel (<code class="doc-inline-code">/admin/legal</code>). Each of the three documents takes either an <strong>External URL</strong>, for a policy hosted elsewhere, or a <strong>Document</strong> written there in Markdown, which the app then serves on your <code class="doc-inline-code">app</code> subdomain. Saving one replaces the link everywhere it appears, including the sign-up page, the ticket checkout and the cookie banner. While the privacy policy is still the built-in one, the admin dashboard shows <strong>Publish your own privacy policy</strong> under <strong>Needs attention</strong>. The <a href="{{ route('marketing.docs.selfhost.admin') }}#system-legal-pages" class="doc-link">Admin Panel guide</a> covers the page.</p>
 
         <h3 id="support-email" class="doc-subheading">Support Configuration</h3>
         <div class="doc-code-block">
@@ -300,38 +324,15 @@
             </table>
         </div>
 
-        <p class="text-gray-600 dark:text-gray-300 mb-4">A new schedule starts on the <strong>Free</strong> plan. Nothing grants it Pro automatically, so the free tier is what every customer sees first. Two different trials read <code class="doc-inline-code">TRIAL_DAYS</code>:</p>
+        <p class="text-gray-600 dark:text-gray-300 mb-4">A new schedule starts on the <strong>Free</strong> plan. Nothing grants it Pro automatically, so the free tier is what every customer sees first. <code class="doc-inline-code">TRIAL_DAYS</code> sets the length of the one free trial, which starts when the owner subscribes, from <strong>Upgrade to Pro</strong> on the <strong>Plan</strong> tab, the event form's <strong>Save and start free trial</strong>, or any upgrade prompt. A card is entered, nothing is charged, and Stripe takes the first payment when the trial ends.</p>
 
-        <div class="doc-table-wrap">
-            <table class="doc-table">
-                <thead>
-                    <tr>
-                        <th>Trial</th>
-                        <th>Where it starts</th>
-                        <th>What it opens</th>
-                        <th>Who gets it</th>
-                    </tr>
-                </thead>
-                <tbody>
-                    <tr>
-                        <td><strong>Subscription trial</strong></td>
-                        <td>When the owner subscribes, from <strong>Upgrade to Pro</strong> on the <strong>Plan</strong> tab or any upgrade prompt. A card is entered, and Stripe takes the first payment when the trial ends.</td>
-                        <td>The whole plan they subscribed to</td>
-                        <td>A schedule that has never had a plan or a subscription. A schedule that still has days left on a plan with an expiry date, such as one you granted by hand, gets those remaining days as its trial instead.</td>
-                    </tr>
-                    <tr>
-                        <td><strong>Selling trial</strong></td>
-                        <td><strong>Sell tickets free for <em>N</em> days</strong>, on the event form's <strong>Tickets</strong> tab and on the <strong>Plan</strong> tab. No card is asked for, and it is offered whether or not your Stripe keys are set.</td>
-                        <td>Selling tickets that carry a price, and nothing else. The schedule stays on Free, and other Pro features stay locked.</td>
-                        <td>An owner once, across all their schedules, and never one who has had a subscription. A reminder email goes out three days before it ends and again one day before.</td>
-                    </tr>
-                </tbody>
-            </table>
-        </div>
+        <ul class="doc-list mb-6">
+            <li><strong>Once per account.</strong> An owner who has had a trial, or paid for a plan, on any schedule is charged at checkout on the next one, and checkout says so before the card is entered. It is recorded on the account, so deleting the schedule that had it gives nothing back.</li>
+            <li><strong>A schedule with a dated plan</strong>, such as one you granted by hand, gets the days it has left as its trial instead.</li>
+            <li><strong>The card-free selling trial</strong> that opened priced tickets alone was retired on 2026-10-20. A schedule still on one when it subscribes keeps that trial's end date as the first charge, rather than a new trial on top.</li>
+        </ul>
 
-        <p class="text-gray-600 dark:text-gray-300 mb-4">A schedule that qualifies for the subscription trial sees a free-trial notice beside <strong>Upgrade to Pro</strong> and at the top of the subscribe page, with the date of the first charge. The notice's label is fixed at "7-day free trial" whatever <code class="doc-inline-code">TRIAL_DAYS</code> holds, so if you use another length, change that string (<code class="doc-inline-code">free_trial_badge</code>) with <a href="#translations" class="doc-link">custom translations</a>.</p>
-
-        <p class="text-gray-600 dark:text-gray-300 mb-4">What a subscriber is charged after a trial comes from the Price objects in your Stripe dashboard. The app only stores the Price IDs, plus separate display amounts (see <a href="#stripe" class="doc-link">Stripe Subscription Setup</a>). The customer's side of the selling trial is in <a href="{{ route('marketing.docs.tickets') }}#selling-trial" class="doc-link">Selling Tickets</a>.</p>
+        <p class="text-gray-600 dark:text-gray-300 mb-4">The trial's notice (<code class="doc-inline-code">free_trial_badge</code>) and the line beside the checkout button name the length and the date of the first charge from <code class="doc-inline-code">TRIAL_DAYS</code> itself. What a subscriber is charged after a trial comes from the Price objects in your Stripe dashboard. The app only stores the Price IDs, plus separate display amounts (see <a href="#stripe" class="doc-link">Stripe Subscription Setup</a>). The customer's side is in <a href="{{ route('marketing.docs.tickets') }}#selling-trial" class="doc-link">Selling Tickets</a>.</p>
 
         <h3 id="push-notifications" class="doc-subheading">Push Notifications (Optional)</h3>
         <p class="text-gray-600 dark:text-gray-300 mb-4">Event Schedule can send web push notifications that mirror its email notifications using <a href="https://onesignal.com" target="_blank" rel="noopener noreferrer" class="doc-link">OneSignal</a>. This is a Pro feature and is <strong>off by default</strong>: with no configuration, no push SDK loads and no calls are made to OneSignal. To enable it platform-wide, create a OneSignal app (Web platform) and set:</p>
@@ -531,7 +532,7 @@ yourdomain.com.    CNAME    your-server.hosting.com.
                     <tr>
                         <td><code class="doc-inline-code">STRIPE_PRICE_MONTHLY_AMOUNT</code><br><code class="doc-inline-code">STRIPE_PRICE_YEARLY_AMOUNT</code></td>
                         <td><code class="doc-inline-code">5</code> / <code class="doc-inline-code">50</code></td>
-                        <td>Display-only Pro amounts shown on the subscribe page, the Plan tab and upgrade prompts. An administrator can change them in the <strong>Plan pricing</strong> card under <strong>System &rarr; Settings</strong> in the admin panel (<code class="doc-inline-code">/admin/settings</code>), which overrides these for everything the site displays</td>
+                        <td>Display-only Pro amounts shown on the subscribe page, the Plan tab and upgrade prompts. An administrator can change them in the <strong>Plan pricing</strong> card under <strong>System &rarr; Settings</strong> in the platform admin panel (<code class="doc-inline-code">/admin/settings</code>), which overrides these for everything the site displays</td>
                     </tr>
                     <tr>
                         <td><code class="doc-inline-code">STRIPE_ENTERPRISE_PRICE_MONTHLY_AMOUNT</code><br><code class="doc-inline-code">STRIPE_ENTERPRISE_PRICE_YEARLY_AMOUNT</code></td>
@@ -548,7 +549,7 @@ yourdomain.com.    CNAME    your-server.hosting.com.
         </div>
 
         <p class="text-gray-600 dark:text-gray-300 mb-4">The <code class="doc-inline-code">*_AMOUNT</code> variables and <code class="doc-inline-code">PLATFORM_CURRENCY</code> are labels, not prices. What a customer is charged comes from the Stripe Price the matching Price ID points at, including its currency, and nothing reconciles the two. Set them all, and keep them in step, or your platform will advertise one figure and bill another.</p>
-        <p class="text-gray-600 dark:text-gray-300 mb-4">Keep the <code class="doc-inline-code">*_AMOUNT</code> variables set even once you are editing the numbers in the admin panel. Revenue reporting and renewal emails read the variables, not the <strong>Plan pricing</strong> card, so that an amount changed to run a promotion cannot restate revenue you have already booked or quote an existing subscriber a figure their card will never be charged. One thing does turn the advertised amount into money: a <a href="{{ route('marketing.docs.referral_program') }}" class="doc-link">referral</a> credit applied to a subscribed schedule is posted to its Stripe balance at the advertised monthly amount.</p>
+        <p class="text-gray-600 dark:text-gray-300 mb-4">Keep the <code class="doc-inline-code">*_AMOUNT</code> variables set even once you are editing the numbers in the platform admin panel. Revenue reporting reads the variables, not the <strong>Plan pricing</strong> card, and renewal reminder emails quote the amount Stripe reports for the subscription's Price, falling back to the variables only when Stripe does not answer, so that an amount changed to run a promotion cannot restate revenue you have already booked or quote an existing subscriber a figure their card will never be charged. One thing does turn the advertised amount into money: a <a href="{{ route('marketing.docs.referral_program') }}" class="doc-link">referral</a> credit applied to a subscribed schedule is posted to its Stripe balance at the advertised monthly amount.</p>
 
         <div class="doc-callout doc-callout-warning">
             <div class="doc-callout-title">Do not repoint a Price ID that still has subscribers on it</div>
@@ -569,12 +570,12 @@ yourdomain.com.    CNAME    your-server.hosting.com.
         <ol class="doc-list doc-list-numbered">
             <li>A customer creates a schedule. It starts on the Free plan</li>
             <li>They open the schedule and select its <strong>Plan</strong> tab, the last of the schedule's tabs, which shows the current plan, its status, and how much of the newsletter email and photo allowances is used</li>
-            <li>The schedule's owner clicks <strong>Upgrade to Pro</strong> and pays. The button only appears once <code class="doc-inline-code">STRIPE_PLATFORM_KEY</code> is set, and only for the owner: other team members see the plan but none of its actions</li>
-            <li>Pro features unlock for that schedule, and the free-tier footer strip and ad slot come off its public pages</li>
+            <li>The schedule's owner clicks <strong>Upgrade to Pro</strong> and pays. The button only appears once <code class="doc-inline-code">STRIPE_PLATFORM_KEY</code> is set, and only for the owner: an admin of the schedule sees the plan but none of its actions, and a viewer does not see the <strong>Plan</strong> tab at all</li>
+            <li>Pro features unlock for that schedule, and the free-tier <strong>Create your own</strong> card and ad slot come off its public pages</li>
             <li>An active Pro subscriber can then use <strong>Upgrade to Enterprise</strong>, or <strong>Switch to Yearly</strong> and <strong>Switch to Monthly</strong>, from the same tab. <strong>Manage Subscription</strong> opens the Stripe billing portal, and <strong>Cancel Subscription</strong> asks for an optional reason and keeps the plan until the end of the paid period</li>
             <li>Subscriptions are per schedule, not per user: a customer with three schedules pays for each one they upgrade</li>
         </ol>
-        <p class="text-gray-600 dark:text-gray-300 mb-4">To put a schedule on a plan without a subscription, open <strong>Manage &rarr; Schedules</strong> in the admin panel, press <strong>Edit</strong> on its row, and under <strong>Plan</strong> set <strong>Plan Type</strong> and a <strong>Plan Expires</strong> date. The plan holds until that date, so a plan type saved with no date grants nothing. See <a href="{{ route('marketing.docs.selfhost.admin') }}#manage-plans" class="doc-link">Schedules</a> in the Admin Panel guide.</p>
+        <p class="text-gray-600 dark:text-gray-300 mb-4">To put a schedule on a plan without a subscription, open <strong>Manage &rarr; Schedules</strong> in the platform admin panel, press <strong>Edit</strong> on its row, and under <strong>Plan</strong> set <strong>Plan Type</strong> and a <strong>Plan Expires</strong> date. The plan holds until that date, so a plan type saved with no date grants nothing. See <a href="{{ route('marketing.docs.selfhost.admin') }}#manage-plans" class="doc-link">Schedules</a> in the Admin Panel guide.</p>
     </section>
 
     {{-- Complete Example Configuration --}}
@@ -681,7 +682,7 @@ yourdomain.com.    CNAME    your-server.hosting.com.
             <li>Signed in as the schedule's owner, open the schedule and select its <strong>Plan</strong> tab</li>
             <li>Click <strong>Upgrade to Pro</strong>. If the button is missing, <code class="doc-inline-code">STRIPE_PLATFORM_KEY</code> is not set</li>
             <li>Complete checkout with the test card <code class="doc-inline-code">4242 4242 4242 4242</code>, which only works while your keys are the <code class="doc-inline-code">sk_test_</code> / <code class="doc-inline-code">pk_test_</code> pair</li>
-            <li>Confirm the Plan tab now reports Pro, and that the free-tier footer strip has gone from the schedule's public page</li>
+            <li>Confirm the Plan tab now reports Pro, and that the free-tier <strong>Create your own</strong> card has gone from the schedule's event pages</li>
             <li>Cancel from the Stripe dashboard and confirm the Plan tab picks it up, which proves the subscription webhook is wired correctly</li>
         </ol>
     </section>
@@ -725,7 +726,7 @@ yourdomain.com.    CNAME    your-server.hosting.com.
             <p>The demo account always has the address <code class="doc-inline-code">contact@eventschedule.com</code>, and its curator schedule is always <code class="doc-inline-code">simpsons</code>. If a real account already holds that address, or a real schedule that subdomain, the scheduler adopts it as the demo: every visitor to the demo host is signed in to that account, and each hourly reset deletes that schedule's events and sub-schedules. Once the demo exists both names are taken.</p>
         </div>
 
-        <p class="text-gray-600 dark:text-gray-300 mb-4">The demo schedule is created on the Free plan like any other, so Pro-only screens stay locked and its public pages carry your free-tier footer. To show off paid features, open <strong>Manage &rarr; Schedules</strong> in the admin panel, press <strong>Edit</strong> on the <code class="doc-inline-code">simpsons</code> row, and under <strong>Plan</strong> set <strong>Plan Type</strong> and a <strong>Plan Expires</strong> date. Whatever its plan, it never shows ads or the accommodation map. Its description ends with a line that sends visitors to eventschedule.com.</p>
+        <p class="text-gray-600 dark:text-gray-300 mb-4">The demo schedule is created on the Free plan like any other, so Pro-only screens stay locked and its public pages carry your free-tier footer. To show off paid features, open <strong>Manage &rarr; Schedules</strong> in the platform admin panel, press <strong>Edit</strong> on the <code class="doc-inline-code">simpsons</code> row, and under <strong>Plan</strong> set <strong>Plan Type</strong> and a <strong>Plan Expires</strong> date. Whatever its plan, it never shows ads or the accommodation map. Its description ends with a line that sends visitors to eventschedule.com.</p>
     </section>
 
     {{-- Scheduler and queue --}}
@@ -777,7 +778,7 @@ yourdomain.com.    CNAME    your-server.hosting.com.
         <p class="text-gray-600 dark:text-gray-300 mb-4">If you need lower latency than a minute, run a resident <code class="doc-inline-code">php artisan queue:work</code> as well.</p>
 
         <h3 id="scheduler-health" class="doc-subheading">Knowing that it stopped</h3>
-        <p class="text-gray-600 dark:text-gray-300 mb-4">Every scheduler tick stamps a heartbeat. When it goes stale the admin panel shows <strong>Scheduled tasks are not running</strong> under <strong>Needs attention</strong> on the dashboard, puts a badge on the <strong>System</strong> tab, and says so at the top of <strong>System &rarr; Queue</strong>. Tune the threshold with <code class="doc-inline-code">SCHEDULER_STALE_MINUTES</code> (default 20, and never less than 16). Take it seriously: while the scheduler is down nothing sends email, syncs a calendar or charges an installment.</p>
+        <p class="text-gray-600 dark:text-gray-300 mb-4">Every scheduler tick stamps a heartbeat. When it goes stale the platform admin panel shows <strong>Scheduled tasks are not running</strong> under <strong>Needs attention</strong> on the dashboard, puts a badge on the <strong>System</strong> tab, and says so at the top of <strong>System &rarr; Queue</strong>. Tune the threshold with <code class="doc-inline-code">SCHEDULER_STALE_MINUTES</code> (default 20, and never less than 16). Take it seriously: while the scheduler is down nothing sends email, syncs a calendar or charges an installment.</p>
         <p class="text-gray-600 dark:text-gray-300 mb-4">The <strong>Scheduler</strong> card on <strong>System &rarr; Queue</strong> is where to look first. It shows when the last tick was, each rail that has ticked and how long ago, how many scheduled tasks are reporting, any task that failed, and which cache store holds the heartbeat and whether every server can read it. An install driven only by the HTTP endpoint reports the heartbeat alone, since that rail records no per-task results.</p>
         <p class="text-gray-600 dark:text-gray-300 mb-4">If the scheduler is a container of its own beside the web server, two more variables make a dead one visible:</p>
 
@@ -874,7 +875,7 @@ yourdomain.com.    CNAME    your-server.hosting.com.
         <div class="doc-fields doc-fields--grouped">
             <div class="doc-field">
                 <h4>Inbox</h4>
-                <p>Manage conversations from <strong>System &rarr; Support</strong> in the admin panel (<code class="doc-inline-code">/admin/support</code>). Every conversation is listed with its unread count, and the <strong>System</strong> tab and its <strong>Support</strong> entry carry a matching badge.</p>
+                <p>Manage conversations from <strong>System &rarr; Support</strong> in the platform admin panel (<code class="doc-inline-code">/admin/support</code>). Every conversation is listed with its unread count, and the <strong>System</strong> tab and its <strong>Support</strong> entry carry a matching badge.</p>
             </div>
             <div class="doc-field">
                 <h4>Availability switch</h4>
@@ -933,7 +934,7 @@ yourdomain.com.    CNAME    your-server.hosting.com.
         <p class="text-gray-600 dark:text-gray-300 mb-4">Rename built-in UI terms to match your customers' vocabulary (for example "Talent" to "Artist", or "Curator" to "Event Planner") without your changes being wiped out by <code class="doc-inline-code">php artisan app:update</code>. Overrides apply globally across every tenant on your platform.</p>
 
         <h3 id="translations-manager" class="doc-subheading">The Easy Way: The Translation Manager</h3>
-        <p class="text-gray-600 dark:text-gray-300 mb-4">Sign in as a platform admin and open <strong>System &rarr; Translations</strong> in the admin panel (<code class="doc-inline-code">/admin/translations</code>). Search for a phrase, edit it for the locale you want, and save. The database is the source of truth: each save is stored as an override and republished to a file on disk, so nothing is lost on the next upgrade. Reverting an override restores the bundled string. The <a href="{{ route('marketing.docs.selfhost.admin') }}#system-translations" class="doc-link">Admin Panel guide</a> covers the page, including sharing your improvements with the community.</p>
+        <p class="text-gray-600 dark:text-gray-300 mb-4">Sign in as a platform admin and open <strong>System &rarr; Translations</strong> in the platform admin panel (<code class="doc-inline-code">/admin/translations</code>). Search for a phrase, edit it for the locale you want, and save. The database is the source of truth: each save is stored as an override and republished to a file on disk, so nothing is lost on the next upgrade. Reverting an override restores the bundled string. The <a href="{{ route('marketing.docs.selfhost.admin') }}#system-translations" class="doc-link">Admin Panel guide</a> covers the page, including sharing your improvements with the community.</p>
 
         <h3 id="translations-files" class="doc-subheading">The Manual Way: Override Files</h3>
         <p class="text-gray-600 dark:text-gray-300 mb-4">You can also drop a PHP file in:</p>
@@ -961,7 +962,7 @@ return [
         </div>
         <p class="text-gray-600 dark:text-gray-300 mb-4">Create one directory per locale you want to override (<code class="doc-inline-code">en</code>, <code class="doc-inline-code">es</code>, <code class="doc-inline-code">fr</code>, &hellip;). The full list of supported locales lives in <code class="doc-inline-code">config/app.php</code> under <code class="doc-inline-code">supported_languages</code>.</p>
 
-        <p class="text-gray-600 dark:text-gray-300 mb-4">A hand-written file for one of those three managed groups is adopted into the database the next time the overrides are republished, after which the file is regenerated from the database. Keep that in mind if you edit both by hand and through the admin panel, and keep nested array values in their own group file (<code class="doc-inline-code">validation.php</code>, <code class="doc-inline-code">auth.php</code> or a custom group), which the loader honours and never rewrites.</p>
+        <p class="text-gray-600 dark:text-gray-300 mb-4">A hand-written file for one of those three managed groups is adopted into the database the next time the overrides are republished, after which the file is regenerated from the database. Keep that in mind if you edit both by hand and through the platform admin panel, and keep nested array values in their own group file (<code class="doc-inline-code">validation.php</code>, <code class="doc-inline-code">auth.php</code> or a custom group), which the loader honours and never rewrites.</p>
 
         <h3 id="translations-publish" class="doc-subheading">Rebuilding and Moving Servers</h3>
         <p class="text-gray-600 dark:text-gray-300 mb-4">The files are server-local derived state, so rebuild them from the database after restoring a backup or cloning the app to a new machine:</p>
@@ -1025,7 +1026,7 @@ return [
             <li><strong>API Keys:</strong> Keep all API keys and secrets secure</li>
             <li><strong>Database:</strong> Use strong database passwords and restrict access</li>
             <li><strong>File Permissions:</strong> Ensure proper file permissions on the server</li>
-            <li><strong>Admin Accounts:</strong> The admin panel at <code class="doc-inline-code">/admin</code> reaches every tenant's data. Flag as few accounts as possible as platform admins, and protect them with two-factor authentication (<strong>Settings &rarr; Security</strong> in each account). The panel also asks for the password again before it opens, and again after a day without use: see <a href="{{ route('marketing.docs.selfhost.admin') }}#accessing" class="doc-link">Accessing /admin</a></li>
+            <li><strong>Admin Accounts:</strong> The platform admin panel at <code class="doc-inline-code">/admin</code> reaches every tenant's data. Flag as few accounts as possible as platform admins, and protect them with two-factor authentication (<strong>Settings &rarr; Security</strong> in each account). The panel also asks for the password again before it opens, and again after a day without use: see <a href="{{ route('marketing.docs.selfhost.admin') }}#accessing" class="doc-link">Accessing /admin</a></li>
             <li><strong>Proxy Trust:</strong> Only widen <code class="doc-inline-code">TRUSTED_PROXIES</code> to <code class="doc-inline-code">*</code> when the origin server cannot be reached except through your proxy. Otherwise list the proxy IPs, so a visitor cannot spoof their own address</li>
         </ul>
     </section>
@@ -1056,7 +1057,7 @@ return [
                 <h4>A schedule's page loads for its owner and is not found for everyone else</h4>
                 <ul class="doc-list text-sm">
                     <li>Nobody has verified the schedule's email address or phone number yet. Until one is verified only its own team and administrators can open its public pages</li>
-                    <li>Have the owner verify the address, or open <strong>Manage &rarr; Schedules</strong> in the admin panel, press <strong>Edit</strong> on the schedule and use <strong>Mark Email as Verified</strong> under <strong>Verification</strong></li>
+                    <li>Have the owner verify the address, or open <strong>Manage &rarr; Schedules</strong> in the platform admin panel, press <strong>Edit</strong> on the schedule and use <strong>Mark Email as Verified</strong> (or <strong>Mark Phone as Verified</strong>, for a schedule with a phone number) under <strong>Verification</strong></li>
                 </ul>
             </div>
 

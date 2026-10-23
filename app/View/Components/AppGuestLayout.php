@@ -107,6 +107,12 @@ class AppGuestLayout extends Component
          * when it shows none, and the event's own image stands in.
          */
         public ?string $galleryImage = null,
+        /**
+         * Whether the page draws the schedule's background on its own layer
+         * (partials/guest-background). False for a page whose ground must stay see-through: the
+         * subscribe embed sets html and body transparent, which a layer of its own would ignore.
+         */
+        public bool $paintBackground = true,
     ) {}
 
     /**
@@ -114,7 +120,7 @@ class AppGuestLayout extends Component
      *
      * Deliberately carries no platform suffix. On a custom domain the schedule is the site, and the
      * string is not a link, so it earns no link equity anywhere - attribution lives on the credit
-     * chip and the free-tier footer strip instead. See docs/BRANDING_MATRIX.md.
+     * chip instead. See docs/BRANDING_MATRIX.md.
      *
      * Follows the language the page is rendered in, matching og:title, twitter:title and the
      * JSON-LD. Both hreflang variants are indexed, so each needs a title in its own language.

@@ -12,6 +12,7 @@ use App\Models\User;
 use App\Repos\EventRepo;
 use App\Services\AuditService;
 use App\Services\EventChangeNotifier;
+use App\Utils\CalendarPrivacy;
 use App\Utils\GeminiUtils;
 use App\Utils\RemoteImage;
 use App\Utils\UrlUtils;
@@ -109,7 +110,11 @@ class FeedEventWriter
             // $asDraft: an event coming back after it went (deleted by the feed and listed again)
             // is for the owner to look at, and is made a draft, not published and then hidden:
             // a publish is a push to calendars, a webhook and a line in the digest to followers.
-            'is_draft' => $asDraft || ! $feed->publishes(),
+            // And one that carries a meeting's passcode or an email thread waits for the owner
+            // even on a feed that publishes: a private calendar's address read as a feed
+            // published one person's meetings that way (CalendarPrivacy).
+            'is_draft' => $asDraft || ! $feed->publishes()
+                || CalendarPrivacy::holdReason(CalendarPrivacy::findings($wanted['name'], $wanted['description'], null)) !== null,
             'is_private' => false,
             'is_internal' => false,
             // The schedule's own place on its own event, as the API and the form give it.
@@ -132,6 +137,9 @@ class FeedEventWriter
         } finally {
             $before ? Auth::setUser($before) : Auth::forgetUser();
         }
+
+        // What the operator's page looks for, read once as the event is made (CalendarExposureWatch).
+        \App\Services\CalendarExposureWatch::record($event);
 
         // The picture is not there yet: what the source says about it is recorded when it is.
         $this->remember($item, $event, ['flyer' => null] + $wanted, null);
@@ -462,6 +470,11 @@ class FeedEventWriter
 
     private function apply(EventFeed $feed, Event $event, array $values): void
     {
+        // A feed's events are its schedule's own, and the start below is read in its timezone.
+        if ((int) $event->creator_role_id === (int) $feed->role_id) {
+            $event->setRelation('creatorRole', $feed->loadMissing('role')->role);
+        }
+
         foreach ($values as $field => $value) {
             match ($field) {
                 'name' => $event->name = $value,

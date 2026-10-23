@@ -2,6 +2,7 @@
 
 namespace Tests\Feature;
 
+use App\Models\BoostCampaign;
 use App\Models\Event;
 use App\Models\Role;
 use App\Models\Setting;
@@ -20,9 +21,9 @@ use Tests\Feature\Concerns\CreatesScheduleData;
 use Tests\TestCase;
 
 /**
- * Once an account is blocked, /admin/dashboard and /admin/realtime leave out everything that is
- * its (App\Services\BlockedAccounts): the account, the schedules it owns, and the events it made
- * or those schedules own.
+ * Once an account is blocked, /admin/dashboard (its cards and its live part) leaves out everything
+ * that is its (App\Services\BlockedAccounts): the account, the schedules it owns, and the events it
+ * made or those schedules own.
  *
  * The block takes the schedules down, which the pages already honoured; what they did not was
  * the rest. The sign-up stayed in the counts and the newest organizers, an event the account had
@@ -112,7 +113,7 @@ class BlockedAccountsHiddenTest extends TestCase
     // ---------------------------------------------------------------- /admin/dashboard
 
     /** Mutation: drop the blocked line from signups(), or from the previous window. */
-    public function test_a_blocked_sign_up_leaves_the_dashboards_counts_and_its_newest_organizers(): void
+    public function test_a_blocked_sign_up_leaves_the_dashboards_counts(): void
     {
         $this->seedSpammer();
 
@@ -127,8 +128,6 @@ class BlockedAccountsHiddenTest extends TestCase
 
         $signups = (new AdminDashboard)->signups();
 
-        $this->assertNotContains('Sam Spammer', array_column($signups['latest'], 'name'));
-        $this->assertContains('Hana Honest', array_column($signups['latest'], 'name'));
         // The admin, Hana and the team member; not Sam.
         $this->assertSame(3, $signups['organizers']['last_30d']);
         $this->assertSame(1, $signups['organizers']['previous_30d'], 'the window it is compared with leaves its blocked accounts out too');
@@ -193,9 +192,22 @@ class BlockedAccountsHiddenTest extends TestCase
         ]);
         AuditService::log(AuditService::GIFT_CARD_PAID, null, 'GiftCard', $card, ['status' => 'unpaid'], ['status' => 'active']);
 
+        // More of the team member's doings there: the plan resumed and switched, the schedule
+        // claimed and taken down, an event boosted.
+        AuditService::log(AuditService::SUBSCRIPTION_RESUME, $this->member->id, 'Role', $this->spamSchedule->id);
+        AuditService::log(AuditService::SUBSCRIPTION_SWAP, $this->member->id, 'Role', $this->spamSchedule->id, null, ['plan_type' => 'enterprise', 'plan_term' => 'monthly']);
+        AuditService::log(AuditService::SCHEDULE_CLAIM, $this->member->id, 'Role', $this->spamSchedule->id);
+        AuditService::log(AuditService::SCHEDULE_TAKEDOWN, $this->member->id, Role::class, $this->spamSchedule->id, ['is_deleted' => false], ['is_deleted' => true]);
+        $boost = BoostCampaign::create([
+            'event_id' => $this->spamEvent->id, 'role_id' => $this->spamSchedule->id, 'user_id' => $this->member->id,
+            'channel' => 'meta', 'name' => 'Boost', 'status' => 'active', 'billing_status' => 'charged',
+            'user_budget' => 20, 'total_charged' => 24,
+        ]);
+        AuditService::log(AuditService::BOOST_CREATE, $this->member->id, 'BoostCampaign', $boost->id);
+
         $before = (new RealtimeDashboard)->payload()['activity'];
-        $this->assertSame(['signup' => 2, 'schedule' => 1, 'events' => 2, 'order' => 2, 'upgrade' => 1], collect($before['stats'])->pluck('count', 'type')->all());
-        foreach (['trial', 'upgrade', 'cancel', 'gift_card'] as $type) {
+        $this->assertSame(['signup' => 2, 'schedule' => 1, 'events' => 2, 'order' => 2, 'upgrade' => 1, 'deleted' => 1], collect($before['stats'])->pluck('count', 'type')->all());
+        foreach (['trial', 'upgrade', 'cancel', 'gift_card', 'resume', 'plan_change', 'claim', 'schedule_deleted', 'boost'] as $type) {
             $this->assertContains($type, array_column($before['items'], 'type'));
         }
 
@@ -208,7 +220,7 @@ class BlockedAccountsHiddenTest extends TestCase
             collect($activity['stats'])->pluck('count', 'type')->all(),
         );
         $this->assertEqualsCanonicalizing(['signup', 'order'], array_column($activity['items'], 'type'),
-            'the honest sign-up and order; not the team member\'s event, trial or plan, nor the gift card, on the spammer\'s schedule');
+            'the honest sign-up and order; not the team member\'s event, trial, plan, claim, takedown or boost, nor the gift card, on the spammer\'s schedule');
         $this->assertStringContainsString('Jazz Night', collect($activity['items'])->firstWhere('type', 'order')['text']);
         $this->assertSame(['Hana Honest'], array_column($activity['signups']['rows'], 'name'));
         $this->assertSame(1, $activity['signups']['total']);
@@ -247,7 +259,7 @@ class BlockedAccountsHiddenTest extends TestCase
 
     /**
      * Mutation: drop any of the three tests in BlockedAccounts::withoutTheirHits(), its call in
-     * fetchRows(), expanded() or recentViews(), or the blocked keys in people() or expanded().
+     * fetchRows() or expanded(), or the blocked keys in people() or expanded().
      */
     public function test_a_blocked_account_and_the_views_of_its_pages_leave_the_visitors_and_the_figures(): void
     {
@@ -291,8 +303,6 @@ class BlockedAccountsHiddenTest extends TestCase
         DB::table('role_user')->where('role_id', $placed->id)->update(['level' => 'follower']);
         $this->hit(['visitor_key' => '6666666666666666', 'surface' => 'gp', 'role_id' => $placed->id]);
 
-        $this->assertSame(6, RealtimeDashboard::recentViews(), 'the six schedule pages of the last five minutes');
-
         $this->block();
 
         $payload = (new RealtimeDashboard)->payload();
@@ -328,7 +338,6 @@ class BlockedAccountsHiddenTest extends TestCase
         $this->assertSame(['Pricing'], $pages('v:'.$visitorKey));
 
         $this->assertSame(['Later home'], $pages($laterId));
-        $this->assertSame(2, RealtimeDashboard::recentViews(), 'the dashboard\'s line leaves out the views of the account\'s pages too');
     }
 
     /**

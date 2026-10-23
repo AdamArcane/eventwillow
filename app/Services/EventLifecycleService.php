@@ -102,7 +102,10 @@ class EventLifecycleService
         $event->forceFill($fields)->save();
 
         if ($pushToCalendars) {
-            $event->dispatchCalendarSync('delete');
+            // 'cancel', not 'delete': an entry this app pushed out comes off the calendar, but the
+            // owner's own entry a sync read this event in from stays (a cancel can be undone,
+            // deleting a calendar entry cannot).
+            $event->dispatchCalendarSync('cancel');
         }
 
         if ($webhook && ! $event->is_draft) {
@@ -171,8 +174,18 @@ class EventLifecycleService
             return self::NOT_PUBLISHABLE;
         }
 
-        $event->setVisibilityState('public');
+        // A draft a calendar sync took off the page while it was Unlisted goes back to Unlisted,
+        // password and all (CalendarArrival::hide() kept it).
+        $state = CalendarArrival::publishedState($event);
+        $password = $event->event_password;
+        $event->setVisibilityState($state);
+        if ($state === 'unlisted') {
+            $event->event_password = $password;
+        }
         $event->save();
+
+        // A draft a calendar sync was holding: the owner's decision (CalendarArrival).
+        CalendarArrival::decide($event, $actorUserId, CalendarArrival::DECISION_PUBLISHED);
 
         if ($through) {
             if ($through->syncsToGoogle()) {

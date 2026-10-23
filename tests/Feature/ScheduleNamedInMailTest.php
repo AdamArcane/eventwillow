@@ -32,6 +32,7 @@ class ScheduleNamedInMailTest extends TestCase
         'email_settings_failed_email_subject',
         'gift_card_sale_notification_subject', 'gift_card_sale_notification_intro',
         'ticket_trial_ending_subject', 'ticket_trial_ending_body',
+        'subscription_trial_ending_subject', 'subscription_trial_ending_subject_no_card',
         'activation_nudge_subject_no_event', 'activation_nudge_body_no_event',
         'activation_nudge_subject_no_ticket_type', 'activation_nudge_body_no_ticket_type',
         'activation_nudge_subject_no_ticket_type_free', 'activation_nudge_body_no_ticket_type_free',
@@ -48,6 +49,7 @@ class ScheduleNamedInMailTest extends TestCase
         'appointment_host_released_subject', 'appointment_host_released_intro',
         'boost_partner_mail_request_received_subject', 'boost_partner_mail_request_received_body',
         'boost_partner_mail_request_resent_subject', 'boost_partner_mail_request_resent_body',
+        'calendar_privacy_mail_subject', 'calendar_privacy_mail_intro',
     ];
 
     public function test_a_deleted_schedule_is_named_as_a_schedule_and_not_by_its_type(): void

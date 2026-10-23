@@ -5,9 +5,15 @@ namespace Tests\Feature;
 use App\Models\User;
 use App\Services\AdminAlertService;
 use App\Services\AppUpdateService;
+use Codedge\Updater\Contracts\SourceRepositoryTypeContract;
+use Codedge\Updater\Models\Release;
+use Codedge\Updater\UpdaterManager;
 use Illuminate\Foundation\Testing\RefreshDatabase;
+use Illuminate\Support\Facades\Artisan;
 use Illuminate\Support\Facades\Cache;
+use Illuminate\Support\Facades\File;
 use Illuminate\Support\Facades\Http;
+use Mockery;
 use Tests\Feature\Concerns\CreatesScheduleData;
 use Tests\TestCase;
 
@@ -185,6 +191,127 @@ class AdminAppUpdateTest extends TestCase
         // fatals the first Artisan::call() of any request. Nothing in the package calls
         // postUpdateArtisanCommands() anyway.
         $this->assertSame([], config('self-update.artisan_commands.post_update'));
+    }
+
+    public function test_an_update_that_could_not_replace_the_files_is_not_reported_as_installed(): void
+    {
+        // UpdateExecutor::run() copies nothing unless every file under base_path() is writable,
+        // and says so only by returning false. An install that gave the web user storage,
+        // bootstrap and public, as the docs say, was told "App updated successfully!", had its
+        // migrations run against the old code, and was offered the same update again.
+        $this->selfhost();
+        Cache::put(AppUpdateService::CACHE_KEY, 'v9.9.9', 600);
+
+        // fetch() has already extracted the release beside its archive. The next fetch() reuses
+        // a folder it finds there without downloading, so a refused update must take it away.
+        $downloads = $this->downloadFolder();
+        mkdir($downloads.'/eventschedule/app', 0755, true);
+        file_put_contents($downloads.'/eventschedule.zip', 'zip');
+
+        $result = app(AppUpdateService::class)->performUpdate($this->updaterThatCannotCopy($this->fetched($downloads, 'eventschedule.zip')), forConsole: true);
+
+        $this->assertSame('error', $result['status']);
+        $this->assertSame(__('messages.app_update_files_not_writable'), $result['message']);
+        $this->assertStringContainsString(base_path(), $result['detail']);
+        $this->assertStringContainsString('as root', $result['detail']);
+        $this->assertSame('v9.9.9', Cache::get(AppUpdateService::CACHE_KEY), 'the update is still waiting');
+        $this->assertFileDoesNotExist($downloads.'/eventschedule.zip');
+        $this->assertDirectoryDoesNotExist($downloads.'/eventschedule');
+        $this->assertDirectoryExists($downloads);
+    }
+
+    /**
+     * createFolderFromFile('/tmp/') is '/tmp/': a release whose path is not its own archive must
+     * leave the download folder alone. Each case gets past every guard but the one it names.
+     */
+    public static function releasesThatAreNotTheirOwnArchive(): array
+    {
+        return [
+            'no release name' => [fn (string $downloads) => (new Release)->setStoragePath($downloads)],
+            'a name, and the path never given it' => [fn (string $downloads) => (new Release)->setStoragePath($downloads.'/')->setRelease('eventschedule.zip')],
+            'a name with no extension' => [fn (string $downloads) => (new Release)->setStoragePath($downloads.'/')->setRelease('keep')->updateStoragePath()],
+            'a name that is all extension' => [fn (string $downloads) => (new Release)->setStoragePath($downloads.'/')->setRelease('.zip')->updateStoragePath()],
+        ];
+    }
+
+    #[\PHPUnit\Framework\Attributes\DataProvider('releasesThatAreNotTheirOwnArchive')]
+    public function test_a_refused_update_never_deletes_the_download_folder_itself(\Closure $release): void
+    {
+        $this->selfhost();
+        $downloads = $this->downloadFolder();
+        mkdir($downloads.'/keep');
+        file_put_contents($downloads.'/keep/file', 'x');
+
+        app(AppUpdateService::class)->performUpdate($this->updaterThatCannotCopy($release($downloads)));
+
+        $this->assertFileExists($downloads.'/keep/file');
+    }
+
+    /**
+     * SELF_UPDATER_DOWNLOAD_PATH=/var/www beside an install at /var/www/eventschedule names the
+     * install as the release's folder, and fetch() reuses it because it exists. Storage stands in
+     * for the install here: a test must never be one guard away from deleting the repository.
+     */
+    public function test_a_refused_update_never_deletes_the_app_it_runs_in(): void
+    {
+        $this->selfhost();
+        $downloads = $this->downloadFolder();
+
+        foreach (['', '/storage'] as $below) {
+            $this->app->useStoragePath($downloads.'/eventschedule'.$below);
+            File::ensureDirectoryExists(storage_path());
+            file_put_contents(storage_path('upload'), 'x');
+
+            app(AppUpdateService::class)->performUpdate($this->updaterThatCannotCopy($this->fetched($downloads, 'eventschedule.zip')));
+
+            $this->assertFileExists(storage_path('upload'), $below === '' ? 'the folder is the storage folder' : 'the folder holds the storage folder');
+        }
+    }
+
+    public function test_a_refused_update_never_follows_a_link_where_its_folder_would_be(): void
+    {
+        // /tmp is shared, so anybody on the machine can put a link where the release would go.
+        $this->selfhost();
+        $downloads = $this->downloadFolder();
+        mkdir($downloads.'/elsewhere');
+        file_put_contents($downloads.'/elsewhere/upload', 'x');
+        symlink($downloads.'/elsewhere', $downloads.'/eventschedule');
+
+        app(AppUpdateService::class)->performUpdate($this->updaterThatCannotCopy($this->fetched($downloads, 'eventschedule.zip')));
+
+        $this->assertFileExists($downloads.'/elsewhere/upload');
+    }
+
+    /** A release the way the GitHub source builds it: the download folder, then the archive's name. */
+    private function fetched(string $downloads, string $name): Release
+    {
+        return (new Release)->setStoragePath($downloads.'/')->setRelease($name)->updateStoragePath();
+    }
+
+    private function downloadFolder(): string
+    {
+        $dir = sys_get_temp_dir().'/app-update-test-'.bin2hex(random_bytes(6));
+        mkdir($dir);
+        $this->beforeApplicationDestroyed(fn () => File::deleteDirectory($dir));
+
+        return $dir;
+    }
+
+    private function updaterThatCannotCopy(Release $release): UpdaterManager
+    {
+        $source = Mockery::mock(SourceRepositoryTypeContract::class);
+        $source->shouldReceive('isNewVersionAvailable')->andReturn(true);
+        $source->shouldReceive('getVersionAvailable')->andReturn('v9.9.9');
+        $source->shouldReceive('fetch')->andReturn($release);
+        $source->shouldReceive('update')->once()->andReturn(false);
+
+        // UpdaterManager is final, so the fake source goes where source() looks first.
+        $updater = app(UpdaterManager::class);
+        (new \ReflectionProperty(UpdaterManager::class, 'sources'))->setValue($updater, ['github' => $source]);
+
+        Artisan::shouldReceive('call')->never();
+
+        return $updater;
     }
 
     public function test_make_admin_promotes_a_user_who_is_not_id_1(): void

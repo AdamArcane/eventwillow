@@ -1,5 +1,5 @@
 {{-- Cinematic poster card for the homepage events rail. Mirrors the logic of
-     event-card.blade.php (guest URL guard, hidden state, admin discovery toggle)
+     event-card.blade.php (guest URL guard; an admin's discovery pills are put in by the page)
      with a tall poster layout: the event image fills the card and a bottom scrim
      carries the details. The picture and its dark scrim are the whole card, so the
      styling is fixed (no dark: variants) although the band around it follows the theme. --}}
@@ -11,11 +11,9 @@
     // derivatives at all) so nothing regresses for a row the pipeline has not reached.
     $imageUrl = $event->getImageUrl(480);
     $imageSrcset = $event->imageSrcset();
-    $isHidden = $event->is_hidden_from_discovery;
-    $isAdmin = auth()->check() && auth()->user()->isAdmin();
 @endphp
 @if($eventUrl)
-<figure class="es-shot group relative w-[72vw] shrink-0 overflow-hidden rounded-2xl bg-gray-100 shadow-xl shadow-gray-900/10 ring-1 ring-gray-200 sm:w-[320px] {{ $isHidden ? 'opacity-60' : '' }}" data-tilt="3">
+<figure class="es-shot group relative w-[72vw] shrink-0 overflow-hidden rounded-2xl bg-gray-100 shadow-xl shadow-gray-900/10 ring-1 ring-gray-200 sm:w-[320px]" data-tilt="3" data-discovery-event="{{ $event->hashedId() }}">
     <div class="relative aspect-[3/4]">
         @if($imageUrl)
             <img src="{{ $imageUrl }}"@if($imageSrcset) srcset="{{ $imageSrcset }}" sizes="(min-width: 640px) 320px, 72vw"@endif alt="{{ $event->name }}" class="h-full w-full object-cover transition-transform duration-500 group-hover:scale-105" width="320" height="427" loading="lazy" decoding="async">
@@ -50,32 +48,8 @@
     {{-- Full-card clickable overlay (stretched link) --}}
     <a href="{{ $eventUrl }}" target="_blank" rel="noopener" class="absolute inset-0 z-10 rounded-2xl focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#4E81FA] focus-visible:ring-offset-2" aria-label="{{ $event->name }}"></a>
 
-    {{-- Hidden badge (admin-only context) --}}
-    @if($isHidden)
-        <span class="absolute top-2 z-20 rounded-full bg-amber-500/90 px-2 py-0.5 text-xs font-semibold text-white shadow-sm ltr:left-2 rtl:right-2">Hidden</span>
-    @endif
-
-    {{-- Admin discovery toggle, above the overlay --}}
-    @if($isAdmin)
-        <form method="POST" action="{{ route('marketing.discovery.toggle', $event->hashedId()) }}" class="absolute top-2 z-20 ltr:right-2 rtl:left-2">
-            @csrf
-            <button type="submit"
-                aria-label="{{ $isHidden ? 'Restore event to discovery' : 'Hide event from discovery' }}"
-                class="inline-flex items-center gap-1 rounded-full px-2.5 py-1 text-xs font-semibold shadow-sm backdrop-blur-md transition-all {{ $isHidden ? 'bg-green-600/90 text-white hover:bg-green-600' : 'bg-black/60 text-white hover:bg-black/80' }}">
-                @if($isHidden)
-                    <svg aria-hidden="true" class="h-3.5 w-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
-                        <path stroke-linecap="round" stroke-linejoin="round" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
-                        <path stroke-linecap="round" stroke-linejoin="round" d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z" />
-                    </svg>
-                    Unhide
-                @else
-                    <svg aria-hidden="true" class="h-3.5 w-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
-                        <path stroke-linecap="round" stroke-linejoin="round" d="M13.875 18.825A10.05 10.05 0 0112 19c-4.478 0-8.268-2.943-9.543-7a9.97 9.97 0 011.563-3.029m5.858.908a3 3 0 114.243 4.243M9.878 9.878l4.242 4.242M9.88 9.88l-3.29-3.29m7.532 7.532l3.29 3.29M3 3l18 18" />
-                    </svg>
-                    Hide
-                @endif
-            </button>
-        </form>
-    @endif
+    {{-- A platform admin's pills and Hidden badge go here, put in by the page's script from
+         MarketingController::discoveryControls(): the page is the edge's anonymous copy, so
+         nothing drawn for an admin here would reach one (docs/CACHING.md). --}}
 </figure>
 @endif

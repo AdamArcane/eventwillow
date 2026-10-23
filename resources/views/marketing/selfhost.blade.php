@@ -1568,8 +1568,8 @@
                             <div class="sh-browser-body">
                                 <p class="sh-wait" dir="ltr" aria-hidden="true">next: sign in at <b class="sh-dom" data-sh-domain>{{ $placeDomain }}</b></p>
                                 <div class="sh-shot">
-                                    <img class="is-day" src="{{ url('/images/docs/selfhost-admin--dashboard.webp') }}" width="1280" height="757" loading="lazy" decoding="async" alt="The admin dashboard of a selfhosted install: new organizers, active users, events added, upcoming events, recent schedules and recent events.">
-                                    <img class="is-night" src="{{ url('/images/docs/selfhost-admin--dashboard-dark.webp') }}" width="1280" height="757" loading="lazy" decoding="async" alt="The admin dashboard of a selfhosted install: new organizers, active users, events added, upcoming events, recent schedules and recent events.">
+                                    <img class="is-day" src="{{ url('/images/docs/selfhost-admin--dashboard.webp') }}" width="1280" height="757" loading="lazy" decoding="async" alt="The admin dashboard of a selfhosted install: the newest schedules and events, sign-ups, active users and upcoming events.">
+                                    <img class="is-night" src="{{ url('/images/docs/selfhost-admin--dashboard-dark.webp') }}" width="1280" height="757" loading="lazy" decoding="async" alt="The admin dashboard of a selfhosted install: the newest schedules and events, sign-ups, active users and upcoming events.">
                                 </div>
                             </div>
                         </div>
@@ -1879,14 +1879,14 @@
             <div class="sh-only-grid" data-reveal-group="110">
                 {{-- ImportCuratorEvents reads the configured URLs only, once a day from the
                      scheduler. Configured cities are a filter on what those pages return, not a
-                     search. The panel's labels are the schedule form's own (Auto Import). --}}
+                     search. The panel's labels are the schedule form's own (Auto import). --}}
                 <article class="sh-only" data-reveal="panel">
                     <span class="sh-only-tag">Selfhost only</span>
                     <h3 class="hp-h3">Auto import from the web</h3>
                     <p>Point Event Schedule at a list of URLs and AI pulls the events in once a day, keeping only the cities you name. It checks each site's robots.txt first.</p>
                     <div class="sh-app-push"></div>
                     <div class="sh-app" data-sh-import-box>
-                        <div class="sh-app-top"><strong>Auto Import</strong><button type="button" class="sh-app-btn" data-sh-import>Test Import</button></div>
+                        <div class="sh-app-top"><strong>Auto import</strong><button type="button" class="sh-app-btn" data-sh-import>Test Import</button></div>
                         <div class="sh-app-body">
                             <div class="sh-app-cap">Import URLs</div>
                             <div class="sh-app-rows" dir="ltr">
@@ -1902,7 +1902,7 @@
                             </ul>
                         </div>
                     </div>
-                    <p class="sh-cap">The Auto Import panel of the schedule form, with example addresses and an example result in it.</p>
+                    <p class="sh-cap">The Auto import row of the schedule form's Integrations tab, with example addresses and an example result in it.</p>
                 </article>
 
                 {{-- The real screen at /admin/app-update: its three figures, its mark, its
@@ -1953,15 +1953,16 @@
     @php
         // Real screens from the user guide (public/images/docs, light and dark). Each line is
         // the screen's own lead, so the page says what the app says. Only screens that show the
-        // thing working are here (the guide's Logs screen is an empty log), and the dashboard is
-        // left out because the install stage above ends on it.
+        // thing working are here (the guide's Logs screen is an empty log), and the dashboard's
+        // cards are left out because the install stage above ends on the dashboard; its live view,
+        // which was a page of its own (Realtime), is the third screen.
         // The last three numbers are for a phone, where the frame shows 496px of the 1280px
         // picture: where that cut starts (x, y), and which edge it is cut on mid-content and so
         // fades. Queue is cut from the right so that "last tick" is in it.
         $roomScreens = [
             ['queue', 'Queue', '/admin/queue', 'Whether the scheduler is running, how much work it still has to get through, and the jobs in the queue. This is where you see your cron entry tick.', 'The Queue screen: a Scheduler card reading last tick 1 minute ago, and the work waiting.', 768, 272, 'left'],
             ['audit-log', 'Audit log', '/admin/audit-log', 'Sign-ins, changes and payments across the installation, and who made them, newest first.', 'The Audit Log screen: totals, filters and a table of sign-ins by time, user, action and IP address.', 304, 250, 'right'],
-            ['realtime', 'Realtime', '/admin/realtime', 'Who is on your install right now and the page views by the minute. Off until you switch it on in Settings.', 'The Realtime screen: visitors right now, where they are, and page views per minute.', 304, 200, 'right'],
+            ['realtime', 'Live view', '/admin/dashboard', 'The top of the dashboard: who is on your install right now and the page views by the minute. Off until you switch it on in Settings.', 'The live view at the top of the dashboard: visitors right now, where they are, and page views per minute.', 304, 200, 'right'],
         ];
     @endphp
     <section id="demo" class="hp-sec hp-alt">
@@ -2404,7 +2405,7 @@
             ['q' => 'Which payment methods work on a selfhosted install?', 'a' => 'Stripe, PayPal, Payfast (for rand), Razorpay (for Indian rupees), Invoice Ninja, a payment link and cash, with no platform fee on any of them. Stripe runs on the platform keys in your .env, which is the only Stripe rail a selfhost has. PayPal and Razorpay can each be one account for the whole install, set with PAYPAL_CLIENT_ID and PAYPAL_CLIENT_SECRET or RAZORPAY_KEY_ID and RAZORPAY_KEY_SECRET, or each schedule owner can connect their own in Settings > Payment Methods. Neither has to call your server for an ordinary sale, so only their optional webhooks need a public address. A Stripe, PayPal or Razorpay sale can be refunded from the Sales page, in full or in part, and the money goes back through the provider.'],
             ['q' => 'Which features need my own accounts or keys?', 'a' => 'Anything that talks to another service needs your own account with it, and that part does nothing until you add the credentials: an SMTP service for email, Stripe or PayPal for payments, a Google or Microsoft app for calendar sync, a Gemini or OpenAI key for the AI features, a Google Wallet issuer account for the Add to Google Wallet button on tickets, and a OneSignal app for push notifications.'],
             ['q' => 'Does a selfhosted install send anything back to Event Schedule?', 'a' => 'Not unless an admin switches something on. There is no telemetry and no phone-home. Two optional features do send data to eventschedule.com, and both start off. Federation shares only your public events into the eventschedule.com listings, with every listing linking back to your own site, and a schedule is only listed once someone who manages it says yes. Translation sharing sends wording you corrected in the translation manager, when an admin presses Share or, with automatic sharing on, as it is saved.'],
-            ['q' => 'Can I run it as a white-label SaaS for my own customers?', 'a' => 'Yes. Set IS_HOSTED=true and the same install runs multi-tenant, with a subdomain per customer, Stripe subscription billing and your own prices on the Pro and Enterprise tiers. You set the prices and keep the revenue. One thing to know before you price it: the licence credit stays on the public pages of every customer you charge. It is a small chip in the corner, a free schedule carries your own footer strip in its place, and it is the whole of what the software costs you.'],
+            ['q' => 'Can I run it as a white-label SaaS for my own customers?', 'a' => 'Yes. Set IS_HOSTED=true and the same install runs multi-tenant, with a subdomain per customer, Stripe subscription billing and your own prices on the Pro and Enterprise tiers. You set the prices and keep the revenue. One thing to know before you price it: the licence credit stays on the public pages of every customer you charge. It is a small chip in the corner, it sits on your free tier too, and it is the whole of what the software costs you.'],
             ['q' => 'Can I move from the hosted version to selfhosted?', 'a' => 'Yes. Backup and restore is built in, so you can export your schedule data, with images if you want them, and import it into your own install.'],
         ];
     @endphp

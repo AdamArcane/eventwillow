@@ -6,6 +6,7 @@ use App\Models\Event;
 use App\Models\Role;
 use App\Repos\EventRepo;
 use App\Services\Concerns\ConvertsLocationToVenue;
+use App\Utils\CalendarPrivacy;
 use App\Utils\EventTextGenerator;
 use App\Utils\MarkdownUtils;
 use App\Utils\SlugPatternUtils;
@@ -23,6 +24,21 @@ class CalDAVService
     use ConvertsLocationToVenue;
 
     protected $eventRepo;
+
+    /** Whether the inbound read under way is this calendar's very first (CalendarArrival). */
+    protected bool $inboundFirstPull = false;
+
+    /** What creating one entry held back, by reason, for the read's counts. */
+    protected array $inboundCounts = [];
+
+    /** The last REPORT got no answer it could read (getEventsFromCalDAV() then returns none). */
+    protected bool $reportFailed = false;
+
+    /**
+     * Set by the sync command for the schedules it may give their one full read this run
+     * (CalendarArrival::needsReread()): every entry is reconciled, unchanged etag or not.
+     */
+    public bool $rereadAllowed = false;
 
     public function __construct(EventRepo $eventRepo)
     {
@@ -342,8 +358,29 @@ class CalDAVService
                 return $results;
             }
 
+            // The very first read of this calendar, which the owner is told about.
+            $this->inboundFirstPull = ! $role->caldav_last_sync_at && empty(CalendarArrival::settings($role)->caldav_first_pull);
+            // Owed only by a sync that has read before: a first read reads everything anyway. It
+            // only judges: a changed entry (its etag) is still applied, as on any read, but an
+            // entry with no event here is left for the next ordinary read, which the server's
+            // change marker (hasChanges()) still sends, so one the owner deleted is not made again.
+            $rereading = $this->rereadAllowed && $role->caldav_last_sync_at && CalendarArrival::needsReread($role, CalendarArrival::CALDAV);
+            CalendarArrival::bindCarriedOver($role, CalendarArrival::CALDAV);
+
             // Get events from CalDAV
+            $this->reportFailed = false;
             $events = $this->getEventsFromCalDAV($settings);
+
+            // A server that did not answer is not an empty calendar: nothing is recorded, and the
+            // full read is not marked done.
+            if ($this->reportFailed) {
+                // hasChanges() stored the server's change marker before asking; forgotten, the
+                // next run reads again instead of finding "no changes".
+                $role->writeOperationalColumns(['caldav_sync_token' => null]);
+                $results['errors']++;
+
+                return $results;
+            }
 
             // Batch fetch existing UIDs to avoid N+1 queries
             $eventUids = collect($events)
@@ -387,6 +424,15 @@ class CalDAVService
                         continue;
                     }
 
+                    // One occurrence moved or cancelled (RECURRENCE-ID) is the first of its UID
+                    // when the resource holds only overrides, and stands for the whole entry. Its
+                    // CLASS is the entry's; its STATUS and the owner's answer are about that one
+                    // date, so they do not keep the other dates out.
+                    $sourceReason = CalendarArrival::calDavReason(
+                        empty($eventData['recurrence_id']) ? $eventData : ['status' => null, 'attendees' => []] + $eventData,
+                        $settings['username'] ?? null
+                    );
+
                     // Check if event already exists by UID using the pre-fetched etag map.
                     // Use array_key_exists (not isset) because a stored etag can be null.
                     if (array_key_exists($eventData['uid'], $existingEtags)) {
@@ -394,14 +440,47 @@ class CalDAVService
                         $incomingEtag = $eventData['etag'] ?? null;
 
                         // Fast path: etag present and unchanged means nothing changed, skip.
-                        if ($incomingEtag !== null && $incomingEtag === $storedEtag) {
+                        // Not on the one full read, which is for entries read in before the filters.
+                        if (! $rereading && $incomingEtag !== null && $incomingEtag === $storedEtag) {
+                            continue;
+                        }
+
+                        $existing = $this->eventForUid($role, $eventData['uid']);
+
+                        // Cancelled on the server: what the schedule does with a deleted entry,
+                        // and under "keep it" still not on the page (reconsider() below).
+                        if ($existing && ! $existing->is_cancelled && $sourceReason === CalendarArrival::SOURCE_CANCELLED && $role->calendarDeleteAction() !== 'ignore') {
+                            $eventId = $existing->id;
+                            $eventName = $existing->name;
+                            $outcome = $existing->applyInboundDeletion($role->calendarDeleteAction(), $role);
+                            if ($outcome === 'deleted') {
+                                AuditService::log(AuditService::EVENT_DELETE, $role->user_id, 'Event', $eventId, null, null, $eventName);
+                            } elseif (in_array($outcome, ['cancelled', 'guarded_cancelled', 'detached'], true)) {
+                                AuditService::log(AuditService::EVENT_CANCEL, $role->user_id, 'Event', $eventId, null, null, $eventName);
+                            }
+                            CalendarArrival::count($results, CalendarArrival::SOURCE_CANCELLED);
+                            $processedUids[$eventData['uid']] = true;
+
                             continue;
                         }
 
                         // Etag changed, or the server provides no etag, so reconcile the
                         // fields. updateEventFromCalDAV guards its write with isDirty(), so
                         // etag-less servers don't churn when nothing actually changed.
-                        if ($this->updateEventFromCalDAV($eventData, $role)) {
+                        // The one full read reaches entries whose etag did not change: it re-judges
+                        // them and does not rewrite them, which would undo the owner's edits here.
+                        $unchanged = $incomingEtag !== null && $incomingEtag === $storedEtag;
+                        $changed = $rereading && $unchanged ? false : $this->updateEventFromCalDAV($eventData, $role);
+
+                        // The calendar may now say it is private, or its text now carry a passcode.
+                        if ($existing && CalendarArrival::reconsider($existing->fresh() ?? $existing, $role, CalendarArrival::CALDAV, $sourceReason, true)) {
+                            $changed = true;
+                        }
+                        if ($existing) {
+                            CalendarExposureWatch::record($existing->fresh() ?? $existing);
+                        }
+
+                        if ($changed) {
                             $results['updated']++;
                             UsageTrackingService::track(UsageTrackingService::CALDAV_SYNC, $role->id);
                         }
@@ -432,9 +511,26 @@ class CalDAVService
                         }
                     }
 
+                    if ($rereading) {
+                        continue;
+                    }
+
+                    // Marked private, declined or cancelled: not read in.
+                    if ($sourceReason !== null) {
+                        CalendarArrival::count($results, $sourceReason);
+                        $processedUids[$eventData['uid']] = true;
+
+                        continue;
+                    }
+
                     // Create new event
-                    $this->createEventFromCalDAV($eventData, $role);
+                    $this->inboundCounts = [];
+                    $created = $this->createEventFromCalDAV($eventData, $role);
+                    CalendarExposureWatch::record($created);
                     $results['created']++;
+                    foreach ($this->inboundCounts as $key => $n) {
+                        $results[$key] = ($results[$key] ?? 0) + $n;
+                    }
                     UsageTrackingService::track(UsageTrackingService::CALDAV_SYNC, $role->id);
 
                     // Track within the same sync batch to prevent duplicate handling
@@ -453,6 +549,11 @@ class CalDAVService
             // Update last sync timestamp. A targeted write, not save(): see
             // Role::writeOperationalColumns().
             $role->writeOperationalColumns(['caldav_last_sync_at' => now()]);
+            CalendarArrival::recordPull($role, CalendarArrival::CALDAV, $results, $this->inboundFirstPull);
+
+            if ($rereading || $this->inboundFirstPull) {
+                CalendarArrival::finishReread($role, CalendarArrival::CALDAV);
+            }
         } catch (\Exception $e) {
             Log::error('CalDAV sync from calendar failed', [
                 'role_id' => $role->id,
@@ -597,7 +698,21 @@ class CalDAVService
             'end' => null,
             'duration' => 2, // Default
             'etag' => null, // Will be populated from CalDAV response
+            // What the calendar says about publishing it (CalendarArrival::calDavReason()).
+            'class' => isset($vevent->CLASS) ? (string) $vevent->CLASS : null,
+            'status' => isset($vevent->STATUS) ? (string) $vevent->STATUS : null,
+            'attendees' => [],
+            // An override of one occurrence of a series: its STATUS and the owner's answer are about
+            // that date, never the series; its CLASS is the entry's (syncFromCalDAV()).
+            'recurrence_id' => isset($vevent->{'RECURRENCE-ID'}),
         ];
+
+        foreach ($vevent->ATTENDEE ?? [] as $attendee) {
+            $email = preg_replace('~^mailto:~i', '', trim((string) $attendee));
+            if ($email !== '' && isset($attendee['PARTSTAT'])) {
+                $data['attendees'][$email] = (string) $attendee['PARTSTAT'];
+            }
+        }
 
         // Parse start time
         if (isset($vevent->DTSTART)) {
@@ -656,6 +771,7 @@ class CalDAVService
         );
 
         if (! $response->successful() && $response->status() !== 207) {
+            $this->reportFailed = true;
             Log::error('CalDAV REPORT request failed', [
                 'status' => $response->status(),
                 'body' => $this->sanitizeResponseBody($response->body()),
@@ -743,6 +859,9 @@ class CalDAVService
                 $event->category_id = $defaultCategoryId;
             }
 
+            $arrival = CalendarArrival::arrival($role, CalendarArrival::CALDAV, CalendarPrivacy::findings($event->name, $event->description, $eventData['location'] ?? null));
+            $event->setVisibilityState($arrival['state']);
+
             $event->save();
 
             // Attach to role with CalDAV UID and etag for conflict detection
@@ -752,11 +871,25 @@ class CalDAVService
                 'caldav_event_etag' => $eventData['etag'] ?? null,
             ]);
 
+            CalendarArrival::holdOnArrival($event, $role, $arrival, $this->inboundFirstPull);
+            CalendarArrival::count($this->inboundCounts, $arrival['hold'] === CalendarArrival::HOLD_REVIEW ? null : $arrival['hold']);
+
             // Handle location if present
             $this->attachLocationVenue($event, $role, $eventData['location']);
 
             return $event;
         });
+    }
+
+    /** The event this schedule holds for a calendar entry's UID, if any. */
+    protected function eventForUid(Role $role, string $uid): ?Event
+    {
+        $eventId = DB::table('event_role')
+            ->where('role_id', $role->id)
+            ->where('caldav_event_uid', $uid)
+            ->value('event_id');
+
+        return $eventId ? Event::find($eventId) : null;
     }
 
     /**

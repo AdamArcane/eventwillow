@@ -23,8 +23,11 @@ pre-flight, P9 to P11 are v1.0.132's, and steps 1 to 9 are v1.0.130's runbook.
 
 | Version | Tagged | What it needs from you |
 |---|---|---|
-| [Unreleased](#unreleased-boost-partners-appointment-hosts-and-the-appointment-api-2026-10-15) | not yet | Confirm the Meta token is a system user's, add `META_BUSINESS_ID` and `META_SYSTEM_USER_ID`, check the Stripe platform webhook; after: the scheduler entry, then the pilot partner's setup |
-| [v1.0.134](#v10134) | not yet (partly live since 2026-09-30) | A last `/admin/growth` download, a Stripe portal setting, an `audit_logs` size check, a `cache` table purge, a privacy-notice decision, then `GROWTH_DATA_TOKEN`; [GDPR](#gdpr-2026-10-04): 2FA on every admin first, then the policy-change notice |
+| [Unreleased](#unreleased-a-custom-domains-main-address-2026-10-22) | not yet | One migration (in the start command); after: one Direct domain set to its subdomain |
+| [Unreleased](#unreleased-backgrounds-on-a-window-sized-layer-and-aurora-2026-10-22) | not yet | Two migrations (in the start command); after: optionally the background backfill in batches, then look at three schedule pages |
+| [Unreleased](#unreleased-the-admin-dashboard-is-the-live-view-2026-10-22) | not yet | Nothing; open `/admin` and scroll |
+| [Unreleased](#unreleased-boost-partners-appointment-hosts-and-the-appointment-api-2026-10-15) | not yet | Confirm the Meta token is a system user's, add `META_BUSINESS_ID`, `META_SYSTEM_USER_ID` and `APP_COMMIT`, check the Stripe platform webhook; after: the scheduler entry, then the pilot partner's setup |
+| [v1.0.134](#v10134) | live (as v1.0.135 from 2026-10-08; past `b9777e3d9` by 2026-10-17) | A last `/admin/growth` download, a Stripe portal setting, an `audit_logs` size check, a `cache` table purge, a privacy-notice decision, then `GROWTH_DATA_TOKEN`; [GDPR](#gdpr-2026-10-04): 2FA on every admin first, then the policy-change notice |
 | [v1.0.133](#v10133) | 2026-09-25 | Four read-only queries, the image backfill, a sitemap cache key, a Cloudflare purge |
 | [v1.0.132](#v10132) | 2026-09-23 | The ticket amnesty migration by hand, a `SESSION_LIFETIME` decision, a MySQL check, the federation welcome order |
 | [v1.0.131](#v10131) | 2026-09-10 | Nothing; four optional features |
@@ -95,6 +98,209 @@ included.
 A new secret goes in the console as an **encrypted, app-level** variable, never in a stored spec
 file.
 
+## Unreleased: a custom domain's main address (2026-10-22)
+
+**What ships:**
+- In Direct mode an owner picks the main address (Schedule > Settings, the custom domain block,
+  Enterprise only): the domain, which is every schedule's choice until it is changed, or the
+  subdomain. The custom domain keeps serving every page either way.
+- With the subdomain as main, the canonical, og:url, hreflang, breadcrumb and structured data
+  name it on both hosts, the global sitemap lists the schedule and its events, the custom host's
+  robots.txt points at the global sitemap (its own `/sitemap.xml` stays a 404), and mail, shared
+  links, the QR code, generated text, graphics and the admin's copy link use it.
+- The subdomain field shows in Direct mode once the subdomain is main, so a rename there is an
+  ordinary save. It forgets the custom host's cached lookup (`custom_domain:{host}`), or the
+  domain would route to the old name for ten minutes.
+
+**Migration** (the start command runs it):
+- `2026_10_22_000002_create_custom_domain_settings_table`: a new table, one row per schedule
+  whose owner chose. No row reads as the domain, so nothing changes until somebody chooses.
+
+While the web container migrates, the scheduler worker already runs the new code: a mail or
+graphic job for a Direct schedule in those seconds can report a missing `custom_domain_settings`
+table to Sentry once and is retried. Noise only.
+
+**After the deploy:** set one Direct schedule's main address to its subdomain. View-source on
+the custom domain: the canonical names `{subdomain}.eventschedule.com`, and the page and its
+links still answer on the custom domain. Then set it back if it was a test.
+
+**Undo:** a rollback leaves the table unread; every Direct domain is its own main address again.
+
+## Unreleased: backgrounds on a window-sized layer, and Aurora (2026-10-22)
+
+**What ships:**
+- A schedule's gradient or picture background is drawn on a layer fixed to the window
+  (`.gp-bg`, `partials/guest-background`) instead of on `body`, so the calendar no longer enlarges
+  a picture to the length of the page; the background stays put while events scroll, in the
+  calendar as in the list. A Pro schedule whose custom CSS styles the page background on `html`,
+  `body` or `:root` keeps the old rule on `body` (`Role::customCssStylesPageBackground()`).
+- Uploaded backgrounds gain a 3840 derivative (`ImageUtils::PAGE_VARIANT_WIDTHS`), used from a
+  1280px window on a retina screen when the original is wider than 1920. Never the original.
+- A new background type, Aurora (`App\Utils\Aurora`, table `aurora_settings`): lights drawn by
+  the browser from the schedule's colours. New schedules (the form and the API) start on it with
+  a random palette and that palette's accent; existing schedules are unchanged. A partner that
+  creates schedules through the API now gets that too, a random accent instead of `#007bff`.
+- The schedule form's Style tab samples the header picture on the server for Match header
+  (cached a month per picture), so the first open of each schedule's form after the deploy reads
+  its header once.
+
+**Migrations** (the start command runs them):
+- `2026_10_22_000000_add_aurora_to_roles_background` appends `aurora` to `roles.background`
+  (metadata only, waits at most 10 seconds for its lock, safe to re-run). Its `down()` does
+  nothing on purpose.
+- `2026_10_22_000001_create_aurora_settings_table` (waits at most 10 seconds, safe to re-run).
+  Its `down()` drops the table; Aurora schedules then draw from their accent.
+
+While the web container migrates, the scheduler worker already runs the new code: a header
+variants job or a backup export in those seconds can report a missing `aurora_settings` table to
+Sentry once and is retried. Noise only.
+
+**After the deploy:**
+1. Optional, any time: `php artisan images:backfill-variants --roles --slot=background --limit=50`
+   in batches on the console container until it reports nothing left. Every uploaded background
+   is selected (each lacks `w3840`), and each row re-encodes 960, 1920 and 3840. Until a row is
+   done its page uses the 1920 file, so nothing waits on this.
+2. Look at three schedule pages: one on a built-in picture in the calendar view (the picture
+   holds still and is far less enlarged), one on an uploaded picture, and a new schedule (Aurora,
+   in light and in dark mode).
+
+**Undo:** a rollback in the console leaves Aurora schedules on the layout's plain ground (old
+code has no `aurora` branch) until they are switched back to another type; nothing errors.
+
+**Selfhost:** a backup taken after this release that holds an Aurora schedule cannot be restored
+on an older install (the enum value is missing). Update first.
+
+## Unreleased: the admin Dashboard is the live view (2026-10-22)
+
+**What ships:**
+- `/admin/dashboard` is what `/admin/realtime` was (the live view), with a short Revenue card in
+  its top corner (MRR, ARR, paying, in trial, at risk) and the old dashboard's cards under it:
+  newest schedules and events, sign-ups, active users, sources, upcoming events, federation and
+  the system line. The headline tiles, Latest sign-ups, the five-minute views line and the full
+  revenue card are gone from the dashboard: the MRR by plan and the "Outside Stripe" line are on
+  `/admin/revenue` (`#mrr-by-plan`), beside the boost markup. The Realtime tab is gone; `/admin/realtime` redirects to the dashboard
+  with its query string, filters included.
+- The page sends nothing that takes time: the live part polls `/admin/realtime/data` as before,
+  Revenue is `/admin/dashboard/revenue`, and the cards are three panels
+  (`/admin/dashboard/panels/{recent,growth,platform}`) fetched as they near the screen. Each
+  panel and Revenue sends a `Server-Timing` header for its own cards.
+- A schedule's page on the board, in Top pages and in a visitor's timeline has a link to the
+  schedule in the admin beside the arrow to its public page; a recent schedule's name opens it in
+  the admin.
+
+**After the deploy:**
+1. Open `/admin` (password confirmation first): the page should draw at once, the live view a
+   moment later, and Revenue in the corner. Scroll: each group of cards fills as it comes up.
+2. In the network panel, the three `panels/*` requests and `revenue` each carry `Server-Timing`.
+
+No migration, no env var.
+
+## Unreleased: homepage pass, one headline (2026-10-22)
+
+**What ships:**
+- **One headline.** The homepage test serves `promote_sell` ("Promote and sell / from your event
+  calendar") alone. `plan_sell` and `plan_sell_short` are retired; their counts stay under their
+  keys. A single headline never becomes a candidate or a winner, so the picker, the beacons and
+  the `?hero=` sign-up credit keep running, and `/admin/growth` and the growth pull show the phase
+  `baseline`.
+- **The page under it changed too:** shorter act bands and night, the money section retitled
+  ("Event ticketing with zero platform fees") with Pro's price beside it, comparison links, a
+  "Switching from Eventbrite?" line, two new FAQ answers, the poster wall in more of its colour
+  with a "Coming up on Event Schedule" label once most of its 25 posters are real events, and on phones a bar at
+  the foot of the screen with the sign-up button.
+- **Homepage quotes** at `/admin/settings#home-quotes` (nexus only). Nothing shows until a quote
+  is saved. Each is credited to a schedule (its picture and page) and, optionally, to the person
+  who said it. Names live in the setting only, never in the repo.
+
+**After the deploy:**
+1. **Do not reset the headline stats.** `promote_sell` keeps its counts. But the page under the
+   headline and the phone bar both change the click rate from the deploy day, so read
+   `hero_test.daily` split at that date, never the totals across it.
+2. The homepage's social card (`public/images/social/home.jpg`) was regenerated with the new
+   headline and ships in this change (`php artisan app:generate-social-images --page=home --force`
+   stamps the default). Its URL carries no version, so re-scrape it in the Facebook debugger and
+   the LinkedIn inspector.
+3. Enter the first quote at `/admin/settings#home-quotes`: the schedule's subdomain, the quote as
+   the customer wrote it, their role, and their name only with their permission. The section
+   appears on the homepage within the edge's 10 minutes.
+4. View-source on the signed-out homepage after the edge copy expires (about 20 minutes, up to 2
+   hours, `docs/CACHING.md`): the picker's `var variants` should hold `promote_sell` alone.
+
+## Unreleased: calendar syncs that published a private calendar (2026-10-18)
+
+A standing Google, Outlook or CalDAV sync put everything it read straight onto a schedule's
+public page, and one schedule published somebody's whole work calendar that way (dial-in codes,
+Zoom links with the password, an email thread about a child's doctor).
+
+**What ships:**
+- **New syncs arrive as drafts.** The owner publishes from the review page
+  (`/{schedule}/calendar-review`) or turns on "Publish new events automatically" for that
+  calendar. Starting to read a calendar needs one the owner chose (the main calendar was the
+  silent fallback).
+- **Syncs that publish today keep publishing.** The first migration backfills their consent. The
+  filters below apply to them as well.
+- **Filters.** Entries the calendar marks private or confidential, invitations the owner declined,
+  out-of-office blocks and cancelled meetings are not read in; one already public is taken off
+  when the calendar starts saying so. Meeting details (a passcode, a dial-in code, a link with the
+  meeting's password) or an email made into an entry wait for the owner even with publishing on.
+  A meeting link is never a venue. Nothing people hold tickets to is ever taken off.
+- **`/admin/private-calendars`**, with an amber alert row: schedules whose imported events look
+  like a private calendar, and four audited steps (Hide, Pause, Tell the owner, Mark reviewed).
+- **Publishing a synced draft** no longer duplicates it in the owner's calendar, and hiding or
+  deleting one no longer deletes the owner's own entry.
+
+### Migrations
+
+Four new tables, none touching `roles` or `events`. Each waits at most 10 seconds for its locks
+and is guarded, so a run that stopped half way can be run again.
+
+| Migration | What it does |
+|---|---|
+| `2026_10_18_000000_create_calendar_sync_settings_table` | Per-schedule sync settings. Backfills `{provider}_publishes = 1` for every live `from`/`both` sync, 500 schedules a batch |
+| `2026_10_18_000001_create_calendar_import_holds_table` | The events a sync is keeping off the page, and why |
+| `2026_10_18_000002_create_calendar_exposures_table` | What the private-calendar sweep found, per event |
+| `2026_10_18_000003_create_calendar_exposure_reviews_table` | What the operator did, per schedule |
+
+### Scheduled entries
+
+- **New: `calendar-exposure-scan`, every 15 minutes, both rails, every install.** It reads 2,000
+  event ids a run (a full pass of 1M ids takes about five days, so the admin page fills over the
+  first week) and takes down venue placeholders an import made out of meeting links.
+- **Changed: the three syncs.** Each schedule's sync gets one full read of its window, so the
+  filters reach events read in before them: at most 10 a run per provider, none started after two
+  minutes, and in a `/translate_data` request one in the whole request, saving its place after 20
+  seconds. The catch-up takes a few runs on the hosted install. Before it, the sync reads what
+  changed through its stored token as on any run; the full read only judges, creates nothing and
+  keeps no token of its own.
+
+### What the first runs do to existing schedules
+
+- An existing publishing sync whose public events now show meeting details or an email thread has
+  those events taken off its page (drafts, never deleted), and the owner gets ONE mail saying so.
+- A cancelled meeting follows the schedule's "when an event is deleted" setting; under the default
+  (keep it) it is hidden, not deleted.
+- Nothing an owner edited here is rewritten by the full read: it re-judges entries, it does not
+  copy them over again. An event the owner deleted here is not brought back.
+- **Events read in before 2026-10-04** carry no source, and a push writes the same mapping row a
+  pull does, so the full read takes them off only for what the calendar says (private, declined,
+  out of office), never for their text. Meeting details in those are for
+  `/admin/private-calendars`, whose sweep does list them: the schedule that started this is
+  likely among them, so hide its events from there rather than waiting for the sync.
+
+### After the deploy
+
+1. `/admin/queue`: the Scheduler card lists `calendar-exposure-scan`.
+2. `/admin/private-calendars` opens. The schedule that started this should appear within the
+   first pass, and is dealt with through its four steps.
+3. Connect a test schedule to a Google calendar with a Zoom invite in it: the event arrives as a
+   draft, no venue is made from the link, and the Schedule tab says it is waiting.
+
+**Watch for** the `calendar_exposures` row on `/admin`, and on `/admin/logs` any "Failed to sync"
+lines that started with this release.
+
+**Undo:** a console rollback restores the code; the tables can stay. Events already hidden stay
+drafts (the review page is gone with the rollback, so publish them from their own form).
+
 ## Unreleased: boost partners, appointment hosts and the appointment API (2026-10-15)
 
 Everything on `main` from 2026-10-15 for one partner network (its name stays out of this repo),
@@ -123,8 +329,10 @@ enables a boost partner, or an owner gives an appointment type a host.
 - **API rate limits.** These now count per account for a key that works, and per visitor address
   (`Blocklist::address()`, not the proxy's) for a missing or wrong key. Every client gets the same
   or more room; nothing is tighter for anyone.
-- **Growth data.** The payload is now `schema_version` 20: `boost.partner_fees` is new. Nothing
-  else changed shape.
+- **Growth data.** The payload is now `schema_version` 21. Schema 20 added
+  `boost.partner_fees`. Schema 21 (2026-10-18) adds the deploy's commit, and where each schedule
+  stands now: its subscription, trial and plan end, what it has on sale, unpaid orders, and its
+  Google sync. All of it is additive; `docs/GROWTH_DATA.md` has the fields.
 
 ### Before the deploy
 
@@ -163,7 +371,21 @@ enables a boost partner, or an owner gives an appointment type a host.
      through while our call timed out is recorded, rather than charged again the next day.
    - If the platform account has no endpoint for that address, add one with that event, and put
      its signing secret in `STRIPE_PLATFORM_WEBHOOK_SECRET`.
-5. **Production's `META_API_VERSION`.** The default is `v21.0`. Meta retires a version about two
+5. **Add `APP_COMMIT` to the web service AND the worker, as a component-level variable whose
+   value is `${_self.COMMIT_HASH}`** (an App Platform bindable variable: the commit each build was
+   made from).
+   - It is what lets the growth pull say which commit is live and since when. Without it
+     `meta.releases` only moves at an "Update version" commit, and every deploy in between is
+     invisible.
+   - Not a secret: the repository is public. Plain, not encrypted.
+   - The worker's value is the one that dates deploys: the scheduler heartbeat records each new
+     commit, and it runs on the worker. The web container's fills `meta.app_commit`.
+   - After the deploy, open each component's Console tab and run `echo $APP_COMMIT`: it must print
+     a hash. If the worker prints nothing, set its value to the web service's instead,
+     `${<web component name>.COMMIT_HASH}`, and check again; without it the pull still names the
+     live commit but cannot say since when.
+   - Check it from a dev machine: `php artisan app:pull-growth` prints "Production runs <hash>".
+6. **Production's `META_API_VERSION`.** The default is `v21.0`. Meta retires a version about two
    years after release, and a newer one wants `is_adset_budget_sharing_enabled` and
    `targeting_automation.advantage_audience` on an ad set.
    - Before the pilot's first real boost, launch one test boost through a test ad account shared
@@ -228,15 +450,21 @@ Five. None irreversible; all are new tables or nullable columns.
 
 ## v1.0.134
 
-**Partly deployed.** Everything on `main` after v1.0.133. The version was bumped on 2026-09-28;
-commits since then ship under the same number. Production has run `dcf7bd8b6` since the
-2026-09-30 deploy, so everything committed up to then is **already live**: the conversion, churn
+**Deployed.** Everything on `main` after v1.0.133. The version was bumped on 2026-09-28; commits
+since then ship under the same number. The growth pull's `meta.releases` has production on v1.0.135
+from 2026-10-08, so everything up to that version bump was live by then. A growth pull on
+2026-10-17 reported schema 18, which only the commits from `b9777e3d9` (2026-10-09) to the one
+before `e87e13e4f` (2026-10-15) carry, so every commit up to `b9777e3d9` is live too. The one part
+of this section committed after it is the examples page (from `94c7e56d4`), live only if production
+is past that commit. Which commit exactly is unknown until `APP_COMMIT` is set (see Unreleased); the
+first pull after that says. It went live in steps. From the 2026-09-30 deploy
+production ran `dcf7bd8b6`, so this was **live first**: the conversion, churn
 and owner-email batch (its emails have been sending since 2026-09-28), the photo gallery, the
 homepage headline test, guest support chat, list animations on schedule pages, per-schedule custom
 field values on shared events, and 14 of this version's 32 migrations. Their "before the deploy"
 steps below are now overdue rather than ahead.
 
-Still to ship: realtime, the growth data pull, the get-started and email-design rework of
+Then, by the 2026-10-17 pull: realtime, the growth data pull, the get-started and email-design rework of
 2026-10-02, the cache pruning of 2026-10-03, and round three of the homepage headline test of
 2026-10-04 with the Reset stats button it needs, the homepage's search title and description
 going back to their own strings on 2026-10-08 (they read from the headline test from 2026-10-04,
@@ -251,7 +479,8 @@ checklist:
 - [Event import](#event-import-2026-10-05) (a link, a list to choose from, Undo, and Google
   Calendar as a read-only source; nothing to do before the deploy, three checks after)
 - [The examples page](#the-examples-page-2026-10-09) (nothing before the deploy; a look and a
-  re-scrape after, and a command to run whenever the guest page's look changes)
+  re-scrape after, and a command to run whenever the guest page's look changes; may not be live
+  yet, see above)
 
 ### Checklist
 
@@ -683,13 +912,17 @@ stops on it with 1118, that is this limit and nothing else. Before the NEXT colu
 move a long `varchar` to `TEXT` (the four `varchar(500)` columns `slug_pattern`,
 `ai_style_instructions`, `ai_content_instructions` and `agenda_ai_prompt` hold 2,002 bytes each).
 
-**To switch the map on for eventschedule.com**, add to the app spec (both components, web and
-worker, since the worker asks the address search):
+**To switch the map on for eventschedule.com**, add as **app-level** variables (the web
+service and the worker both read them, and the worker is what asks the address search):
 
 ```
 MAP_GEOCODER_URL=https://nominatim.openstreetmap.org/search
-MAP_TILE_URL=https://tile.openstreetmap.org/{z}/{x}/{y}.png
+MAP_TILE_URL=https://tile.openstreetmap.org/%7Bz%7D/%7Bx%7D/%7By%7D.png
 ```
+
+The tile address is written with its braces percent-encoded because the console refuses a brace
+in a value (it reads `{...}` as its own template syntax: "Unexpected '}'"). `map_tiles()` turns them
+back into `{z}`, `{x}`, `{y}`.
 
 Both services are OpenStreetMap's own and free, and both have a usage policy:
 - the address search allows one request a second at the very most, four a minute for a script on
@@ -707,7 +940,7 @@ Leave them unset and nothing about this ships to anyone: the feature stays dark.
 
 **After the deploy (with the vars set):**
 - `/admin/queue`'s Scheduler card lists `app-place-venues` with a recent run.
-- On a curator schedule, Engagement > Venue map is there. Switch it on and save: the schedule's
+- On a curator schedule, Page content > Venue map is there. Switch it on and save: the schedule's
   admin page shows "Your venue map is being prepared" with a count that moves, then "Your venue map
   is on your page". In a private window the schedule page shows the band, and the Network tab
   shows NO request to `tile.openstreetmap.org` until Show map is pressed.
@@ -930,7 +1163,9 @@ and a retention row for this record: it joins the notice of changes listed under
   invitation (Reply-To `support_email`) and a sign-off. Replies to stages 2 and 3 land in the
   support inbox;
 - the paid-ticket paywall shown as a price is typed, and counted (`hit_ticket_paywall`);
-- a card-free 7-day selling trial (`roles.ticket_trial_ends_at`, paid selling only, not Pro);
+- a card-free 7-day selling trial (`roles.ticket_trial_ends_at`, paid selling only, not Pro). Retired
+  on 2026-10-20 for one trial per account at checkout (`users.trial_used_at`, migration
+  `2026_10_20_000000`, which backfills it from started subscriptions);
 - cancellation reasons (`subscription_cancellations`), from the plan tab and the Stripe webhooks;
 - two owner emails that start sending on their own: the activation nudges and the weekly digest.
 

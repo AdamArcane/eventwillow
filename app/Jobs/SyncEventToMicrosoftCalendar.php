@@ -19,7 +19,7 @@ class SyncEventToMicrosoftCalendar implements ShouldQueue
 
     protected $role;
 
-    protected $action; // 'create', 'update', 'delete'
+    protected $action; // 'create', 'update', 'delete', 'cancel' (a delete that leaves the owner's original)
 
     protected $user; // Optional: specific user (defaults to role owner)
 
@@ -90,6 +90,7 @@ class SyncEventToMicrosoftCalendar implements ShouldQueue
                     $this->updateEvent($microsoftCalendarService);
                     break;
                 case 'delete':
+                case 'cancel':
                     $this->deleteEvent($microsoftCalendarService);
                     break;
             }
@@ -141,6 +142,14 @@ class SyncEventToMicrosoftCalendar implements ShouldQueue
     private function createEvent(MicrosoftCalendarService $microsoftCalendarService): void
     {
         $calendarId = $this->getSyncCalendarId();
+
+        // Already in that calendar: read in from it by the sync, or pushed there before. Publishing
+        // a draft the sync brought in used to make a second copy beside the owner's own entry,
+        // and with Teams meetings on, a new Teams meeting for it.
+        $sync = $this->getCalendarSync();
+        if ($sync?->microsoft_event_id && (! $sync->microsoft_calendar_id || $sync->microsoft_calendar_id === $calendarId)) {
+            return;
+        }
         $microsoftEvent = $microsoftCalendarService->createEvent($this->event, $this->role, $calendarId);
 
         if ($microsoftEvent && ! empty($microsoftEvent['id'])) {
@@ -182,7 +191,7 @@ class SyncEventToMicrosoftCalendar implements ShouldQueue
         $sync = $this->getCalendarSync();
         $microsoftEventId = $sync?->microsoft_event_id;
 
-        if (! $microsoftEventId) {
+        if (! $microsoftEventId || $this->isOwnersOriginal()) {
             return;
         }
 
@@ -193,5 +202,21 @@ class SyncEventToMicrosoftCalendar implements ShouldQueue
         if ($success) {
             $sync->delete();
         }
+    }
+
+    /**
+     * Whether the entry this would delete is the owner's own, which the sync read this event in
+     * from, and must stay. The original belongs to the owner's calendar: hiding the event here (a
+     * draft) or cancelling it (which can be undone) never deletes it, and deleting the event takes
+     * it out only while the schedule pushes its changes to that calendar.
+     */
+    private function isOwnersOriginal(): bool
+    {
+        if ((int) $this->getSyncUser()->id !== (int) $this->role->user_id
+            || ! $this->event->cameFromCalendarSync(Event::IMPORT_MICROSOFT, $this->role)) {
+            return false;
+        }
+
+        return $this->event->is_draft || $this->action === 'cancel' || ! $this->role->syncsToMicrosoft();
     }
 }

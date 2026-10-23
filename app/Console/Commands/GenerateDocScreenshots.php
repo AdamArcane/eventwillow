@@ -28,6 +28,12 @@ class GenerateDocScreenshots extends Command
 
     private const OUTPUT_DIR = 'public/images/docs';
 
+    // An account with no schedule, for the screens only a first-timer sees (an entry marked
+    // 'new_user'): the first-run new schedule form. Made for the run and deleted after it.
+    private const TEMP_NEW_EMAIL = 'screenshots-new@temp.local';
+
+    private ?User $newUser = null;
+
     private array $serverPipes = [];
 
     public function handle(): int
@@ -227,6 +233,20 @@ class GenerateDocScreenshots extends Command
             $this->line('Created appointment demo data.');
         }
 
+        if (collect($pages)->flatten(1)->contains(fn ($s) => $s['new_user'] ?? false)) {
+            User::where('email', self::TEMP_NEW_EMAIL)->delete();
+            $this->newUser = User::create([
+                'name' => 'Alex Morgan',
+                'email' => self::TEMP_NEW_EMAIL,
+                'password' => Hash::make(self::TEMP_PASSWORD),
+            ]);
+            // Same clock as the browser, which takes the demo account's (see generate()).
+            $this->newUser->timezone = $user->timezone;
+            $this->newUser->language_code = $user->language_code;
+            $this->newUser->email_verified_at = now();
+            $this->newUser->saveQuietly();
+        }
+
         // Realtime with nobody on the site is an empty page. realtime:simulate invents visitors and
         // refuses to run anywhere but a local or testing environment; its --purge takes them away,
         // along with every other row of realtime_hits (which holds about an hour of visits).
@@ -249,6 +269,8 @@ class GenerateDocScreenshots extends Command
                     $this->warn('Could not remove the simulated realtime traffic: '.$e->getMessage());
                 }
             }
+
+            $this->newUser?->delete();
 
             foreach ($appointmentRecords as $appointmentType) {
                 $appointmentType->delete();
@@ -345,7 +367,9 @@ class GenerateDocScreenshots extends Command
         $pages = [
             'getting-started' => [
                 ['id' => 'getting-started--dashboard', 'route' => '/dashboard'],
-                ['id' => 'getting-started--create-form', 'route' => '/new/venue'],
+                // The first-run form (the setup guide's ring, "Save and continue", "Choose a
+                // different type"), which only an account with no schedule is shown.
+                ['id' => 'getting-started--create-form', 'route' => '/new/venue', 'new_user' => true],
             ],
             'schedule-styling' => [
                 ['id' => 'schedule-styling--section-style', 'route' => '/simpsons/edit', 'section' => 'section-style'],
@@ -363,12 +387,18 @@ class GenerateDocScreenshots extends Command
             'creating-schedules' => [
                 ['id' => 'creating-schedules--section-details', 'route' => '/simpsons/edit', 'section' => 'section-details'],
                 ['id' => 'creating-schedules--section-address', 'route' => $venueRole ? '/demo-moestavern/edit' : null, 'section' => 'section-address'],
+                // The row scripts below scroll a row to the top and then 90px more: the schedule form
+                // already keeps a scrolled-to row 5rem below its sticky bar (scroll-margin-top in
+                // role/edit), so the row lands about 170px down, under its tab's previous row.
                 ['id' => 'creating-schedules--section-contact-info', 'route' => '/simpsons/edit', 'script' => "document.querySelector('a[data-section=\"section-details\"]').click(); var row = document.querySelector('.details-tab[data-tab=\"contact\"]'); row.click(); row.scrollIntoView({ block: 'start' }); window.scrollBy(0, -90);"],
+                ['id' => 'creating-schedules--section-page', 'route' => '/simpsons/edit', 'section' => 'section-page'],
                 ['id' => 'creating-schedules--section-subschedules', 'route' => '/simpsons/edit', 'section' => 'section-subschedules'],
                 ['id' => 'creating-schedules--section-settings', 'route' => '/simpsons/edit', 'section' => 'section-settings'],
                 ['id' => 'creating-schedules--section-engagement', 'route' => '/simpsons/edit', 'section' => 'section-engagement'],
+                ['id' => 'creating-schedules--section-tickets', 'route' => '/simpsons/edit', 'section' => 'section-tickets'],
                 ['id' => 'creating-schedules--section-sources', 'route' => '/simpsons/edit', 'section' => 'section-sources'],
-                ['id' => 'creating-schedules--section-auto-import', 'route' => '/simpsons/edit', 'section' => 'section-auto-import'],
+                // Auto import is a row of Integrations (selfhost, which is how this command runs).
+                ['id' => 'creating-schedules--section-auto-import', 'route' => '/simpsons/edit', 'script' => "document.querySelector('a[data-section=\"section-integrations\"]').click(); var row = document.querySelector('.integration-tab[data-tab=\"auto-import\"]'); if (row) { row.click(); row.scrollIntoView({ block: 'start' }); window.scrollBy(0, -90); }"],
                 ['id' => 'creating-schedules--section-integrations', 'route' => '/simpsons/edit', 'section' => 'section-integrations'],
                 // No picture of the Email Settings row: it exists only on a hosted install, and this
                 // command's server runs with IS_HOSTED=false. The entry that used to be here clicked
@@ -377,8 +407,9 @@ class GenerateDocScreenshots extends Command
             'creating-events' => [
                 ['id' => 'creating-events--schedule-tab', 'route' => '/simpsons/schedule'],
                 ['id' => 'creating-events--add-event', 'route' => '/simpsons/add-event'],
-                // A new event's Tickets tab: the three tiles, nothing chosen yet.
-                ['id' => 'creating-events--tickets-tab', 'route' => '/simpsons/add-event', 'section' => 'section-tickets'],
+                // A new event's Tickets tab with Sell tickets pressed, as its alt text says: the first
+                // ticket type with + Add Sales Dates, and the rows under it.
+                ['id' => 'creating-events--tickets-tab', 'route' => '/simpsons/add-event', 'section' => 'section-tickets', 'script' => "document.getElementById('ticket_choice_tickets').click();"],
                 ['id' => 'creating-events--listing', 'route' => '/simpsons/add-event', 'section' => 'section-listing'],
                 ['id' => 'creating-events--import', 'route' => '/simpsons/import/ai'],
             ],
@@ -391,10 +422,10 @@ class GenerateDocScreenshots extends Command
                 ['id' => 'sharing--embed-dialog', 'route' => '/simpsons/schedule', 'script' => "document.getElementById('embed-schedule-link').click();"],
             ],
             'event-graphics' => [
-                ['id' => 'event-graphics--graphic-page', 'route' => '/simpsons/events-graphic', 'pause' => 3000],
+                ['id' => 'event-graphics--graphic-page', 'route' => '/simpsons/events-graphic', 'pause' => 6000],
                 // The second one is the Caption row open (the page's rows carry aria-controls,
                 // which is also what the Help link follows).
-                ['id' => 'event-graphics--settings', 'route' => '/simpsons/events-graphic', 'pause' => 3000, 'script' => "document.querySelector('[aria-controls=\"graphic-pane-caption\"]').click()"],
+                ['id' => 'event-graphics--settings', 'route' => '/simpsons/events-graphic', 'pause' => 6000, 'script' => "document.querySelector('[aria-controls=\"graphic-pane-caption\"]').click()"],
             ],
             'newsletters' => [
                 ['id' => 'newsletters--list', 'route' => '/newsletters?role_id='.$encodedRoleId],
@@ -406,7 +437,8 @@ class GenerateDocScreenshots extends Command
                 ['id' => 'tickets--checkin', 'route' => $checkinRoute, 'pause' => 2500],
             ],
             'gift-cards' => [
-                ['id' => 'gift-cards--settings', 'route' => $venueRole ? '/demo-moestavern/edit' : null, 'section' => 'section-gift-cards'],
+                // Gift cards is a row of the Tickets tab: the tab alone shows both rows closed.
+                ['id' => 'gift-cards--settings', 'route' => $venueRole ? '/demo-moestavern/edit' : null, 'script' => "document.querySelector('a[data-section=\"section-tickets\"]').click(); var row = document.querySelector('.tickets-tab[data-tab=\"gift-cards\"]'); row.click(); row.scrollIntoView({ block: 'start' }); window.scrollBy(0, -90);"],
                 ['id' => 'gift-cards--sales-tab', 'route' => '/sales?tab=gift-cards'],
             ],
             // Three appointment types are made for the pictures and removed (see handle()).
@@ -448,14 +480,18 @@ class GenerateDocScreenshots extends Command
             'referral-program' => [
                 ['id' => 'referral-link', 'route' => '/referrals'],
                 ['id' => 'referral-dashboard', 'route' => '/referrals', 'script' => "document.getElementById('referral-dashboard').scrollIntoView({block: 'start'})"],
-                ['id' => 'referral-credits', 'route' => '/referrals', 'script' => "(document.getElementById('referral-credits') || document.getElementById('referral-how-it-works')).scrollIntoView({block: 'start'})"],
-                ['id' => 'referral-history', 'route' => '/referrals', 'script' => "(document.getElementById('referral-history') || document.getElementById('referral-how-it-works')).scrollIntoView({block: 'start'})"],
+                ['id' => 'referral-credits', 'route' => '/referrals', 'script' => "(document.getElementById('referral-credits') || document.getElementById('referral-dashboard')).scrollIntoView({block: 'start'})"],
+                ['id' => 'referral-history', 'route' => '/referrals', 'script' => "(document.getElementById('referral-history') || document.getElementById('referral-dashboard')).scrollIntoView({block: 'start'})"],
             ],
             'selfhost-admin' => [
-                // ?sample=1: invented data (AdminDashboardSample). The real page lists people,
-                // schedules and events by name, and leaves demo content out.
-                ['id' => 'selfhost-admin--dashboard', 'route' => '/admin/dashboard?sample=1', 'pause' => 3000],
-                ['id' => 'selfhost-admin--realtime', 'route' => '/admin/realtime', 'pause' => 4000],
+                // The cards under the live part. ?sample=1: invented data (AdminDashboardSample),
+                // which the page passes on to each panel it fetches as it nears the screen. The real
+                // cards list people, schedules and events by name, and leave demo content out.
+                ['id' => 'selfhost-admin--dashboard', 'route' => '/admin/dashboard?sample=1', 'pause' => 4000, 'script' => "document.getElementById('admin-dashboard').scrollIntoView({block: 'start'})"],
+                // The top of the same page, the live part (Realtime until 2026-10), over invented
+                // traffic (realtime:simulate, see handle()). This server runs as a selfhost, so
+                // there is no Revenue card in the corner.
+                ['id' => 'selfhost-admin--realtime', 'route' => '/admin/dashboard?sample=1', 'pause' => 4000],
                 ['id' => 'selfhost-admin--users', 'route' => '/admin/users', 'pause' => 2000],
                 ['id' => 'selfhost-admin--revenue', 'route' => '/admin/revenue', 'pause' => 2000],
                 ['id' => 'selfhost-admin--analytics', 'route' => '/admin/analytics', 'pause' => 2000],
@@ -615,6 +651,11 @@ class GenerateDocScreenshots extends Command
 
                     $this->line("  Generating {$id}...");
 
+                    $asNewUser = ($screenshot['new_user'] ?? false) && $this->newUser;
+                    if ($asNewUser) {
+                        $this->signInAs($browser, self::TEMP_NEW_EMAIL);
+                    }
+
                     $browser->visit($route);
                     $browser->pause($pause);
 
@@ -649,7 +690,9 @@ class GenerateDocScreenshots extends Command
                     // A checkout form opens filled in with whoever is signed in, which here is
                     // this command's own temporary address; the new-schedule form and the settings
                     // page print it as text.
-                    $browser->script("(function () { var temp = '".self::TEMP_EMAIL."'; document.querySelectorAll('input').forEach(function (el) { if (el.value === temp) { el.value = 'alex@example.com'; } }); var walker = document.createTreeWalker(document.body, NodeFilter.SHOW_TEXT); var nodes = []; while (walker.nextNode()) { nodes.push(walker.currentNode); } nodes.forEach(function (n) { if (n.nodeValue.indexOf(temp) !== -1 && ! n.parentElement.closest('script, style')) { n.nodeValue = n.nodeValue.split(temp).join('alex@example.com'); } }); })();");
+                    foreach ([self::TEMP_EMAIL, self::TEMP_NEW_EMAIL] as $tempEmail) {
+                        $browser->script("(function () { var temp = '".$tempEmail."'; document.querySelectorAll('input').forEach(function (el) { if (el.value === temp) { el.value = 'alex@example.com'; } }); var walker = document.createTreeWalker(document.body, NodeFilter.SHOW_TEXT); var nodes = []; while (walker.nextNode()) { nodes.push(walker.currentNode); } nodes.forEach(function (n) { if (n.nodeValue.indexOf(temp) !== -1 && ! n.parentElement.closest('script, style')) { n.nodeValue = n.nodeValue.split(temp).join('alex@example.com'); } }); })();");
+                    }
 
                     // Take light screenshot (Browser stores as PNG in the storeScreenshotsAt dir)
                     $browser->screenshot($id);
@@ -678,6 +721,18 @@ class GenerateDocScreenshots extends Command
                     // Restore light mode for next screenshot
                     $browser->script('window.setTheme("light")');
                     $browser->pause(300);
+
+                    if ($asNewUser) {
+                        // Back to the demo account (and, for the admin pages, its confirmed password).
+                        $this->signInAs($browser, $user->email);
+                        if (isset($pages['selfhost-admin']) && config('app.is_testing')) {
+                            $browser->visit('/admin/confirm-password')->waitFor('#password', 10)->pause(500)->type('password', self::TEMP_PASSWORD);
+                            $browser->script("document.querySelector('form[method=\"POST\"]').requestSubmit()");
+                            $browser->waitForLocation('/admin/dashboard', 15);
+                        }
+                        $browser->script('window.setTheme("light")');
+                        $browser->pause(300);
+                    }
                 }
             }
 
@@ -690,6 +745,24 @@ class GenerateDocScreenshots extends Command
             $chromeProcess->stop();
             $this->stopServer($serverProcess);
         }
+    }
+
+    /**
+     * Sign out whoever is signed in and sign in as another of this run's accounts. Where the
+     * login lands differs (a new account goes on to /getting-started), so it waits only to leave
+     * the login page.
+     */
+    private function signInAs(Browser $browser, string $email): void
+    {
+        $browser->driver->manage()->deleteAllCookies();
+        $browser->visit('/login')
+            ->waitFor('#email', 10)
+            ->pause(500)
+            ->type('email', $email)
+            ->type('password', self::TEMP_PASSWORD);
+        $browser->script("document.querySelector('form[method=\"POST\"]').requestSubmit()");
+        $browser->waitUntil("window.location.pathname !== '/login'", 15);
+        $browser->pause(500);
     }
 
     private function findAvailablePort(): int

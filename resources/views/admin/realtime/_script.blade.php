@@ -3,12 +3,25 @@
     .realtime-fresh { animation: realtime-fresh 2s ease-out 1; }
     @media (prefers-reduced-motion: reduce) { .realtime-fresh { animation: none; } }
 
-    /* The Activity count buttons: a recessed cell, pressed while it filters the feed. On the --ap-*
+    /* The Trends tiles: a recessed cell, pressed while it is the one the chart draws. On the --ap-*
        tokens, so every palette gets its own shade. */
     .realtime-stat { background: var(--ap-tint-sunken); }
     .realtime-stat:not(:disabled):hover { background: var(--ap-tint-2); }
     .realtime-stat:disabled { cursor: default; }
     .realtime-stat-on, .realtime-stat-on:not(:disabled):hover { background: var(--brand-blue-a10); box-shadow: var(--ap-inset-pressed); }
+    /* The Activity counts: one row of chips, pressed while one filters the feed. Plain CSS, like
+       every new look here: a utility the built stylesheet lacks draws nothing. */
+    .realtime-chip {
+        display: inline-flex; align-items: center; gap: 0.375rem;
+        padding: 0.25rem 0.625rem; border-radius: 9999px;
+        font-size: 0.875rem; line-height: 1.25rem; font-weight: 500;
+        color: rgb(var(--ap-ink-2)); background: var(--ap-tint-sunken);
+        transition: background-color 0.2s, box-shadow 0.2s;
+    }
+    .realtime-chip:not(:disabled):hover { background: var(--ap-tint-2); }
+    .realtime-chip:disabled { cursor: default; opacity: 0.55; }
+    .realtime-chip:focus-visible { outline: 2px solid var(--brand-blue); outline-offset: 1px; }
+    .realtime-chip-on, .realtime-chip-on:not(:disabled):hover { color: rgb(var(--ap-ink)); background: var(--brand-blue-a10); box-shadow: var(--ap-inset-pressed); }
     /* One short pulse when a count grows, never a loop. */
     @keyframes realtime-bump { 0% { transform: scale(1); } 35% { transform: scale(1.04); } 100% { transform: scale(1); } }
     .realtime-bump { animation: realtime-bump 0.5s ease-out 1; }
@@ -20,6 +33,9 @@
     .realtime-area-on { background: var(--brand-blue-a10); box-shadow: var(--ap-inset-pressed); }
     .realtime-area-head:hover { background: var(--ap-tint-2); }
     .realtime-area-on .realtime-area-head:hover { background: transparent; }
+    /* While one part of the site is the filter, the others stay on the board, quieter. */
+    .realtime-area-dim { opacity: 0.55; transition: opacity 0.2s; }
+    .realtime-area-dim:hover, .realtime-area-dim:focus-within { opacity: 1; }
     .realtime-board-row { transition: background-color 0.2s; }
     .realtime-board-row:hover { background: var(--ap-tint-2); }
     .realtime-board-row-on, .realtime-board-row-on:hover { background: var(--brand-blue-a10); }
@@ -33,15 +49,102 @@
         box-shadow: 0 0 0 2px rgb(var(--ap-surface));
     }
     .realtime-face + .realtime-face { margin-inline-start: -0.375rem; }
+    /* Initials need their letters: beside a face that carries them, the overlap is a sliver. */
+    .realtime-face-user + .realtime-face, .realtime-face + .realtime-face-user { margin-inline-start: -0.125rem; }
     .realtime-face-user { color: var(--brand-blue); background: linear-gradient(var(--brand-blue-a10), var(--brand-blue-a10)), rgb(var(--ap-surface)); }
     button.realtime-face { cursor: pointer; transition: box-shadow 0.2s; }
     button.realtime-face:hover, button.realtime-face:focus-visible { position: relative; z-index: 1; outline: none; box-shadow: 0 0 0 2px var(--brand-blue); }
-    /* The board's columns, and the Trends tiles: one line of them only where each still has room
-       for a page's name or a figure and its change (at 1280 four columns cut every name short). */
+    /* The board's columns (boardColumns: Sign up & log in stacks under the app, never a column of
+       its own), and the Trends tiles: one line of them only where each still has room for a page's
+       name or a figure and its change. In a column of two, the lower one takes what is left, so
+       the column ends where the others do. */
     .realtime-board { grid-template-columns: minmax(0, 1fr); }
     @media (min-width: 640px) { .realtime-board { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
     @media (min-width: 1024px) { .realtime-board.is-3 { grid-template-columns: repeat(3, minmax(0, 1fr)); } }
-    @media (min-width: 1440px) { .realtime-board.is-4 { grid-template-columns: repeat(4, minmax(0, 1fr)); } }
+    .realtime-board.is-1 { grid-template-columns: minmax(0, 1fr); }
+    .realtime-board-col > .realtime-area:last-child { flex: 1 1 auto; }
+    /* Three columns in a grid of two would leave the bottom right empty: there the last one runs
+       across, its areas side by side. */
+    @media (min-width: 640px) and (max-width: 1023.98px) {
+        .realtime-board.is-3 > .realtime-board-col:last-child { grid-column: span 2 / span 2; flex-direction: row; }
+        .realtime-board.is-3 > .realtime-board-col:last-child > .realtime-area { flex: 1 1 0; }
+    }
+    /* The Now card's head: the number, page views per minute, and what the number leaves out. One
+       row where there is room; stacked below that, the consent split before the chart. */
+    .realtime-now-head { display: grid; gap: 1rem 1.5rem; grid-template-columns: minmax(0, 1fr); align-items: center; }
+    .realtime-now-consent { order: 1; }
+    .realtime-now-chart { order: 2; }
+    @media (min-width: 1024px) {
+        .realtime-now-head { grid-template-columns: auto minmax(0, 1fr) minmax(0, 18rem); }
+        .realtime-now-head.is-quiet { grid-template-columns: auto minmax(0, 1fr); }
+        .realtime-now-consent { order: 2; }
+        .realtime-now-chart { order: 1; }
+    }
+    /* The top: the Now card, and on hosted the Revenue card in the corner. From xl they take the
+       Today grid's three columns, so the corner card stands over the Activity rail; below xl the
+       corner card follows the Now card. */
+    @media (min-width: 1280px) {
+        .realtime-top[data-corner] { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+        .realtime-top[data-corner] > :not(.realtime-corner) { grid-column: 1 / span 2; grid-row: 1; }
+        .realtime-top[data-corner] > .realtime-corner { grid-column: 3; grid-row: 1; }
+    }
+    /* In those two thirds the Now card's head has room for its three parts only once the frame is
+       near its full width: below that the chart was squeezed to a sliver between the number and
+       the consent line, which goes under the two instead. */
+    @media (min-width: 1280px) and (max-width: 1599.98px) {
+        .realtime-top[data-corner] .realtime-now-head { grid-template-columns: auto minmax(0, 1fr); }
+        .realtime-top[data-corner] .realtime-now-consent { grid-column: 1 / -1; }
+    }
+    /* What stands in a card's place until its numbers arrive. */
+    .realtime-skeleton { background: var(--ap-tint-sunken); }
+    .realtime-skeleton-card { min-height: 100%; }
+    @media (prefers-reduced-motion: no-preference) {
+        .realtime-skeleton, .realtime-skeleton-card { animation: realtime-wait 1.6s ease-in-out infinite; }
+    }
+    @keyframes realtime-wait { 50% { opacity: 0.55; } }
+    /* A first poll that was refused never fills the skeleton: the banner above says why, and the
+       skeleton stops saying it is on its way. */
+    .realtime-now-skeleton.is-still .realtime-skeleton { animation: none; }
+    /* Today: Activity first in one column; from xl, Sign-ups over two columns and Activity the
+       rail beside it, as tall as Sign-ups. */
+    @media (min-width: 1280px) {
+        .realtime-today { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+        .realtime-today > .realtime-signups { grid-column: 1 / span 2; grid-row: 1; }
+        .realtime-today > .realtime-rail { grid-column: 3; grid-row: 1; }
+        /* The whole feed open: Sign-ups keeps its own height rather than stretching empty beside it. */
+        .realtime-today.is-open > .realtime-signups { align-self: start; }
+    }
+    /* At xl both lists keep their height; what does not fit fades out over "N more". */
+    @media (min-width: 1280px) {
+        .realtime-clip { overflow: hidden; }
+        .realtime-capped { max-height: 26rem; overflow: hidden; }
+    }
+    .realtime-fade {
+        position: absolute; inset-inline: 0; bottom: 0; height: 3.5rem; pointer-events: none;
+        background: linear-gradient(to bottom, rgb(var(--ap-card-to) / 0), rgb(var(--ap-card-to)));
+    }
+    /* Three breakdowns: one column, then Top pages over two with Sources and Countries under it,
+       then three in a row, so the grid never has a hole. Three only from 1440: beside the sidebar
+       at 1280 a card of three cut every page name short. */
+    .realtime-breakdowns { grid-template-columns: minmax(0, 1fr); }
+    @media (min-width: 768px) {
+        .realtime-breakdowns { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+        .realtime-breakdowns > :first-child { grid-column: span 2 / span 2; }
+    }
+    @media (min-width: 1440px) {
+        .realtime-breakdowns { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+        .realtime-breakdowns > :first-child { grid-column: auto; }
+    }
+    .realtime-now-pill { padding: 0 0.375rem; border-radius: 9999px; background: rgb(var(--ap-surface) / 0.85); }
+    /* The Visitors list's columns: who, page, came from, active. */
+    .realtime-row { grid-template-columns: minmax(0, 1fr) auto; }
+    @media (min-width: 768px) { .realtime-row { grid-template-columns: minmax(0, 1.3fr) minmax(0, 1fr) 8rem; } }
+    @media (min-width: 1280px) { .realtime-row { grid-template-columns: minmax(0, 1.4fr) minmax(0, 1fr) 11rem 8rem; } }
+    /* A name cut short keeps its own start: dir="auto" on the element decides which end is cut,
+       and this keeps it on the page's side. With a <bdi> inside a right-to-left box, "Lisa
+       Simpson Quartet" was cut to "... Simpson Quartet". */
+    .realtime-cut { text-align: left; }
+    [dir="rtl"] .realtime-cut { text-align: right; }
     .realtime-tiles { grid-template-columns: repeat(2, minmax(0, 1fr)); }
     @media (min-width: 640px) { .realtime-tiles { grid-template-columns: repeat(3, minmax(0, 1fr)); } }
     @media (min-width: 1440px) { .realtime-tiles { grid-template-columns: repeat(6, minmax(0, 1fr)); } }
@@ -53,7 +156,6 @@
         var MSG = @json($realtimeMsg);
         var CONFIG = @json($realtimeConfig);
         var INITIAL = @json($payload);
-        var TRENDS = @json($trends);
         var BASE_TITLE = document.title;
         var LOCALE = CONFIG.locale;
 
@@ -66,7 +168,10 @@
         // "Left now" reads like a contradiction, so a phrase that already says when uses a number.
         try { relativeExact = new Intl.RelativeTimeFormat(LOCALE, { numeric: 'always', style: 'short' }); } catch (e) {}
         try { regionNames = new Intl.DisplayNames([LOCALE], { type: 'region' }); } catch (e) {}
-        try { clockFormat = new Intl.DateTimeFormat(LOCALE + '-u-nu-latn', { hour: 'numeric', minute: '2-digit' }); } catch (e) {}
+        // In the zone Trends uses (CONFIG.timezone), so the page reads one clock.
+        try { clockFormat = new Intl.DateTimeFormat(LOCALE + '-u-nu-latn', { hour: 'numeric', minute: '2-digit', timeZone: CONFIG.timezone }); } catch (e) {
+            try { clockFormat = new Intl.DateTimeFormat(LOCALE + '-u-nu-latn', { hour: 'numeric', minute: '2-digit' }); } catch (e2) {}
+        }
 
         function unit(value, name) {
             try {
@@ -118,10 +223,12 @@
                     chartTries: 0,
                     freshTimer: null,
                     activityAll: false,
-                    feed: (INITIAL.activity && INITIAL.activity.feed) || null,
+                    feed: (INITIAL.activity && INITIAL.activity.feed) || INITIAL.feed || null,
                     signupsAll: false,
                     bumped: {},
-                    expandedCards: { pages: false, sources: false, countries: false, surfaces: false },
+                    expandedCards: { pages: false, sources: false, countries: false },
+                    // How many rows of each list are out of sight at xl (measureOverflow).
+                    hiddenBelow: { feed: 0, signups: 0 },
                     fresh: {},
                     lastOk: Date.now(),
                     nowMs: Date.now(),
@@ -133,8 +240,14 @@
                     debounce: null,
                     titleDot: false,
                     seenCursor: INITIAL.activity ? INITIAL.activity.cursor : null,
-                    trends: TRENDS,
-                    trendRange: (TRENDS && TRENDS.range) || '24h',
+                    // Asked the first time the card nears the screen (watchTrends), never with the page.
+                    trends: null,
+                    trendRange: CONFIG.trend || '24h',
+                    trendsWatched: false,
+                    // The card has come near the screen and been asked for (watchTrends).
+                    trendsAsked: false,
+                    // The corner card's figures (hosted): null until they arrive.
+                    revenue: null,
                     trendMetric: 'views',
                     trendsLoading: false,
                     trendTries: 0,
@@ -202,13 +315,32 @@
                     return person && (person.id === data.person_id || person.aliases.indexOf(data.person_id) >= 0) ? data : null;
                 },
                 cards: function () {
-                    var b = this.p.breakdowns || { pages: [], sources: [], countries: [], surfaces: [] };
+                    var b = this.p.breakdowns || { pages: [], sources: [], countries: [] };
                     return [
-                        { id: 'pages', title: this.msg.topPages, unit: this.msg.views, filter: 'page', rows: b.pages },
-                        { id: 'sources', title: this.msg.sources, unit: this.msg.visits, filter: 'source', rows: b.sources },
-                        { id: 'countries', title: this.msg.countries, unit: this.msg.views, filter: 'country', rows: b.countries },
-                        { id: 'surfaces', title: this.msg.surfaces, unit: this.msg.views, filter: 'surface', rows: b.surfaces },
+                        { id: 'pages', title: this.msg.topPages, unit: this.msg.unitViews30, filter: 'page', rows: b.pages || [] },
+                        { id: 'sources', title: this.msg.sources, unit: this.msg.unitVisits30, filter: 'source', rows: b.sources || [] },
+                        { id: 'countries', title: this.msg.countries, unit: this.msg.unitViews30, filter: 'country', rows: b.countries || [] },
                     ];
+                },
+                // The board's columns: one per part of the site, except Sign up & log in, a doorway
+                // with a row or two, which stacks under the app. A fixed rule, never "the shortest",
+                // so a column does not move between polls.
+                boardColumns: function () {
+                    var areas = (this.p.overview && this.p.overview.now_by_surface) || [], columns = [], door = null;
+                    areas.forEach(function (area) {
+                        if (area.key === 'auth') door = area; else columns.push([area]);
+                    });
+                    if (door) {
+                        var app = columns.find(function (column) { return column[0].key === 'ap'; });
+                        if (app) app.push(door); else columns.push([door]);
+                    }
+                    return columns;
+                },
+                boardHasAnyone: function () {
+                    return ((this.p.overview && this.p.overview.now_by_surface) || []).some(function (area) { return area.count > 0; });
+                },
+                hasSignupMarks: function () {
+                    return (this.p.minutes || []).some(function (minute) { return minute.signups && minute.signups.length; });
                 },
                 hasAnyone: function () {
                     return this.cards.some(function (card) { return card.rows.length > 0; }) || this.filterChips.length > 0;
@@ -221,11 +353,6 @@
                 feedItems: function () {
                     var feed = this.feed, items = (this.p.activity && this.p.activity.items) || [];
                     return feed ? items.filter(function (item) { return item.type === feed; }) : items;
-                },
-                feedLabel: function () {
-                    var feed = this.feed;
-                    var stat = ((this.p.activity && this.p.activity.stats) || []).find(function (s) { return s.type === feed; });
-                    return stat ? stat.label : '';
                 },
                 splitTotal: function () {
                     var o = this.p.overview || {};
@@ -261,13 +388,19 @@
                     var t = this.trends, self = this;
                     if (!t) return [];
                     var labels = { views: this.msg.views, visits: this.msg.visits, signup: this.msg.tileSignups, schedule: this.msg.tileSchedules, events: this.msg.tileEvents, order: this.msg.tileOrders };
+                    // In the 24 hours, the four activity figures are the live counts the Activity
+                    // chips show: the same rolling day, polled every ten seconds. This card is asked
+                    // every five minutes, and its number ran a sign-up behind the chips beside it.
+                    var live = {};
+                    if (t.range === '24h') ((this.p.activity && this.p.activity.stats) || []).forEach(function (stat) { live[stat.type] = stat.count; });
                     return ['views', 'visits', 'signup', 'schedule', 'events', 'order'].map(function (key) {
-                        var before = t.previous[key];
+                        var before = t.previous[key], fresh = live[key] !== undefined;
+                        var value = fresh ? live[key] : t.totals[key];
                         return {
                             key: key,
                             label: labels[key],
-                            value: t.totals[key],
-                            change: t.change[key],
+                            value: value,
+                            change: fresh ? (before ? Math.round(100 * (value - before) / before) : null) : t.change[key],
                             before: before === null ? self.msg.noComparison : self.msg.before[t.range].replace(':count', self.fmt(before)),
                         };
                     });
@@ -287,14 +420,18 @@
 
             methods: {
                 fmt: function (n) { return numberFormat.format(n || 0); },
+                nMore: function (n) { return this.msg.nMore.replace(':count', this.fmt(n)); },
                 ago: function (secs, exact) {
                     secs = Math.max(0, secs || 0);
                     var format = exact ? relativeExact : relative;
                     if (!format) return this.duration(secs);
-                    if (secs < 45) return exact ? format.format(-Math.max(1, secs), 'second') : format.format(0, 'second');
-                    if (secs < 3600) return format.format(-Math.round(secs / 60), 'minute');
-                    if (secs < 86400) return format.format(-Math.round(secs / 3600), 'hour');
-                    return format.format(-Math.round(secs / 86400), 'day');
+                    var text;
+                    if (secs < 45) text = exact ? format.format(-Math.max(1, secs), 'second') : format.format(0, 'second');
+                    else if (secs < 3600) text = format.format(-Math.round(secs / 60), 'minute');
+                    else if (secs < 86400) text = format.format(-Math.round(secs / 3600), 'hour');
+                    else text = format.format(-Math.round(secs / 86400), 'day');
+                    // Hebrew's short forms carry the number again in brackets ("לפני שע׳ (1)").
+                    return text.replace(/\s*[\u200e\u200f]?\(\d+\)[\u200e\u200f]?\s*$/, '');
                 },
                 duration: function (secs) {
                     secs = Math.max(0, secs || 0);
@@ -323,8 +460,8 @@
                         amber: { bg: 'bg-amber-50 dark:bg-amber-500/10', text: 'text-amber-600 dark:text-amber-400' },
                         gray: { bg: 'bg-gray-100 dark:bg-gray-700', text: 'text-gray-500 dark:text-gray-400' },
                     };
-                    if (['order', 'gift_card', 'upgrade'].indexOf(type) >= 0) return tones.green;
-                    if (type === 'cancel') return tones.gray;
+                    if (['order', 'gift_card', 'upgrade', 'resume', 'boost'].indexOf(type) >= 0) return tones.green;
+                    if (['cancel', 'deleted', 'schedule_deleted', 'account_deleted'].indexOf(type) >= 0) return tones.gray;
                     if (type === 'support') return tones.amber;
                     return tones.blue;
                 },
@@ -392,6 +529,32 @@
                     var section = document.getElementById('realtime-visitors'), still = false;
                     try { still = window.matchMedia('(prefers-reduced-motion: reduce)').matches; } catch (e) {}
                     if (section) section.scrollIntoView({ behavior: still ? 'auto' : 'smooth', block: 'start' });
+                },
+                setFeed: function (type) {
+                    if (this.feed === type) return;
+                    this.toggleFeed(type === null ? this.feed : type);
+                },
+                // At xl the feed and the sign-ups keep their height: count the rows out of sight, for
+                // the fade and "N more". Measured again once when the count changes, because the
+                // button it brings takes room from the list.
+                measureOverflow: function (again) {
+                    var wide = false;
+                    try { wide = window.matchMedia('(min-width: 1280px)').matches; } catch (e) {}
+                    var below = function (list) {
+                        if (!wide || !list || list.offsetParent === null) return 0;
+                        var bottom = list.getBoundingClientRect().bottom + 1, n = 0;
+                        Array.prototype.forEach.call(list.children, function (child) {
+                            if (child.offsetParent !== null && child.getBoundingClientRect().bottom > bottom) n++;
+                        });
+                        return n;
+                    };
+                    var next = {
+                        feed: this.activityAll ? 0 : below(this.$refs.feedList),
+                        signups: this.signupsAll ? 0 : below(this.$refs.signupList),
+                    };
+                    if (next.feed === this.hiddenBelow.feed && next.signups === this.hiddenBelow.signups) return;
+                    this.hiddenBelow = next;
+                    if (!again) this.$nextTick(function () { this.measureOverflow(true); });
                 },
                 // Unlike changed(), this leaves an open visitor row alone: the feed is another card.
                 toggleFeed: function (type) {
@@ -629,11 +792,15 @@
                         }
                     }
 
+                    var first = this.p.state === 'loading';
                     this.p = data;
                     this.fresh = fresh;
                     clearTimeout(this.freshTimer);
                     this.freshTimer = setTimeout(function () { self.fresh = {}; }, 2100);
                     this.$nextTick(function () {
+                        self.measureOverflow();
+                        self.watchTrends();
+                        if (first) self.announceDrawn();
                         if (self.$refs.trendChart && (!self.trendChart || self.trendChart.canvas !== self.$refs.trendChart)) self.initTrendChart();
                         // The canvas exists only while tracking is on: build the chart the first time
                         // it appears, and again if switching off and on replaced the element.
@@ -682,6 +849,46 @@
                         // has lost its connection.
                     }).finally(function () {
                         if (range === self.trendRange) self.trendsLoading = false;
+                    });
+                },
+                // The cards under the live part wait for it to be drawn (admin/dashboard/_cards-script):
+                // while it is a skeleton the page is short, and every panel looked near the screen.
+                announceDrawn: function () {
+                    window.adminDashboardLiveDrawn = true;
+                    window.dispatchEvent(new CustomEvent('admin-dashboard:live-drawn'));
+                },
+                // Trends is asked the first time its card comes near the viewport,
+                // not with the page: the card exists once the first poll has answered, so this
+                // runs after each one until it has an observer to hand the card to.
+                watchTrends: function () {
+                    var self = this, card = this.$refs.trendsCard;
+                    if (this.trendsWatched || !card) return;
+                    this.trendsWatched = true;
+                    if (!('IntersectionObserver' in window)) { this.trendsAsked = true; this.fetchTrends(); return; }
+                    var observer = new IntersectionObserver(function (entries) {
+                        if (!entries.some(function (entry) { return entry.isIntersecting; })) return;
+                        observer.disconnect();
+                        self.trendsAsked = true;
+                        self.fetchTrends();
+                    }, { rootMargin: '0px 0px 200px 0px' });
+                    observer.observe(card);
+                },
+                // The corner card (hosted). A failure keeps what it had, or says so if it had nothing.
+                fetchRevenue: function () {
+                    var self = this;
+                    if (!CONFIG.revenueUrl) return;
+                    fetch(CONFIG.revenueUrl, {
+                        headers: { 'X-Requested-With': 'XMLHttpRequest', 'Accept': 'application/json' },
+                        credentials: 'same-origin',
+                    }).then(function (r) {
+                        if (!r.ok) throw r;
+                        return r.json();
+                    }).then(function (data) {
+                        // A refresh that could not be read keeps the figures already shown.
+                        if (data && data.failed && self.revenue && !self.revenue.failed) return;
+                        self.revenue = data;
+                    }).catch(function () {
+                        if (!self.revenue) self.revenue = { failed: true };
                     });
                 },
                 trendColors: function () {
@@ -810,7 +1017,8 @@
                     var self = this;
                     if (typeof Chart === 'undefined' || !this.$refs.chart) {
                         // Bounded: if chart.min.js never loads, stop asking after five seconds.
-                        if (this.p.state !== 'off' && this.chartTries++ < 100) setTimeout(this.initChart, 50);
+                        // While the first poll is out there is no canvas yet; apply() builds it.
+                        if (this.p.state !== 'off' && this.p.state !== 'loading' && this.chartTries++ < 100) setTimeout(this.initChart, 50);
                         return;
                     }
                     var colors = chartColors();
@@ -930,13 +1138,23 @@
             mounted: function () {
                 var self = this;
                 this.initChart();
-                this.initTrendChart();
                 this.updateTitle();
-                this.schedule();
+                this.fetchRevenue();
+                // The live part is not in the page: ask for it at once, then every ten seconds.
+                // With tracking off there is nothing to ask, and the page is drawn already.
+                if (this.p.state === 'loading') this.poll(); else { this.schedule(); this.$nextTick(this.announceDrawn); }
+                this.$nextTick(function () { self.measureOverflow(); });
+                window.addEventListener('resize', function () { self.measureOverflow(); });
+                this.$watch('activityAll', function () { self.$nextTick(function () { self.measureOverflow(); }); });
+                this.$watch('signupsAll', function () { self.$nextTick(function () { self.measureOverflow(); }); });
 
                 setInterval(function () { self.nowMs = Date.now(); }, 5000);
                 setInterval(function () {
-                    if (!document.hidden && self.status === 'live' && self.trends) self.fetchTrends(true);
+                    if (document.hidden || self.status !== 'live') return;
+                    // A card asked once and refused (a 429, a blip) is asked again here, or it would
+                    // stay a skeleton until somebody pressed a range.
+                    if (self.trends || self.trendsAsked) self.fetchTrends(!!self.trends);
+                    self.fetchRevenue();
                 }, 300000);
 
                 document.addEventListener('visibilitychange', function () {

@@ -17,6 +17,15 @@
     // store() sends a first own schedule, and every guest-submit one, on to the event form. The
     // button says so, because nothing else on this page does.
     $leadsToEventForm = session('pending_request') || $ownsNoSchedule;
+
+    // A plan covers one schedule, and nothing here said so: an owner who made a second schedule
+    // for an event at another venue was asked to pay again and could not see why. Said only to
+    // an owner who already has a plan, and only where plans are sold.
+    $paidSchedules = config('app.hosted') && ! is_demo_mode() && ! $ownsNoSchedule
+        ? auth()->user()->createdRoles()->where('is_deleted', false)->wherePro()->orderBy('name')->get(['id', 'name', 'type', 'subdomain'])
+        : collect();
+    // A talent or curator schedule can take an event at any venue; a venue pins its events to itself.
+    $paidMovable = $paidSchedules->first(fn ($schedule) => in_array($schedule->type, ['talent', 'curator'], true));
 @endphp
 
     <div class="flex flex-col items-center px-4 pt-8 pb-12 sm:px-6 lg:px-8">
@@ -69,6 +78,13 @@
                     <input type="hidden" name="background_colors" value="{{ $role->background_colors }}">
                     <input type="hidden" name="background_image" value="{{ $role->background_image }}">
                     <input type="hidden" name="background_rotation" value="{{ $role->background_rotation }}">
+                    {{-- The Aurora create() chose: its palette and arrangement, and the palette's
+                         accent, which the buttons take so the two match. --}}
+                    <input type="hidden" name="accent_color" value="{{ $role->accent_color }}">
+                    <input type="hidden" name="aurora_submitted" value="1">
+                    <input type="hidden" name="aurora_palette" value="{{ $role->auroraSetting->palette }}">
+                    <input type="hidden" name="aurora_seed" value="{{ $role->auroraSetting->seed }}">
+                    <input type="hidden" name="aurora_motion" value="1">
 
                     @if ($errors->any())
                     <div role="alert" class="mb-4 rounded-lg bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-700 p-3">
@@ -189,6 +205,14 @@
                     <p class="mt-4 text-sm text-gray-500 dark:text-gray-400">
                         {{ __('messages.note_all_schedules_are_publicly_listed') }}
                     </p>
+
+                    @if ($paidSchedules->isNotEmpty())
+                    <p class="mt-2 text-sm text-gray-500 dark:text-gray-400" data-plan-note v-pre>
+                        {{ $paidMovable
+                            ? __('messages.new_schedule_plan_note', ['name' => $paidMovable->name])
+                            : __('messages.new_schedule_plan_note_venue') }}
+                    </p>
+                    @endif
 
                     <div class="mt-6 flex items-center justify-end gap-3">
                         {{-- Always an exit. It used to be gated on being new, so a returning user

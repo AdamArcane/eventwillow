@@ -14,7 +14,9 @@
         <x-doc-nav-link href="#header-images">Header Image</x-doc-nav-link>
         <x-doc-nav-link href="#backgrounds">Background</x-doc-nav-link>
         <x-doc-nav-link href="#event-layout">Default Layout</x-doc-nav-link>
+        <x-doc-nav-link href="#hide-past-events">Hide Past Events</x-doc-nav-link>
         <x-doc-nav-link href="#list-animation">Event Animation</x-doc-nav-link>
+        <x-doc-nav-link href="#list-wording">Event List Wording</x-doc-nav-link>
         <x-doc-nav-link href="#custom-css">Custom CSS</x-doc-nav-link>
         <x-doc-nav-link href="#hiding-sections">Hiding Sections</x-doc-nav-link>
         <x-doc-nav-link href="#live-preview">Live Preview</x-doc-nav-link>
@@ -40,7 +42,7 @@
             <li>Click <strong class="text-gray-900 dark:text-white">Save</strong>, in the bar at the bottom of the page. Nothing is applied to your public page until you do.</li>
         </ol>
 
-        <x-doc-screenshot id="schedule-styling--section-style" alt="The Style section of the schedule form: Square Profile Image, Accent Color and Font Family, the Header, Background, Events and Custom CSS rows under them, and the Preview of the page beside them" loading="eager" />
+        <x-doc-screenshot id="schedule-styling--section-style" alt="The Style section of the schedule form on an Aurora background: Square Profile Image, Accent Color and Font Family, with the Preview of the page beside them" loading="eager" />
 
         <p class="text-gray-600 dark:text-gray-300 mb-4">The Style section opens on its branding fields, with four rows under them that open in place. Each row says its current choice, so most never need opening. The rows follow your page from top to bottom, and this guide follows the rows:</p>
         <div class="doc-table-wrap">
@@ -62,11 +64,11 @@
                     </tr>
                     <tr>
                         <td><span class="font-semibold text-gray-900 dark:text-white">Background</span></td>
-                        <td><a href="#backgrounds" class="doc-link">Background Type</a> (Gradient, Solid or Image) and the controls for whichever you pick: gradient colors and rotation, a solid color, or a background image</td>
+                        <td><a href="#backgrounds" class="doc-link">Background Type</a> (Aurora, Gradient, Solid or Image) and the controls for whichever you pick: Aurora's palette and arrangement, gradient colors and rotation, a solid color, or a background image</td>
                     </tr>
                     <tr>
                         <td><span class="font-semibold text-gray-900 dark:text-white">Events</span></td>
-                        <td><a href="#event-layout" class="doc-link">Default Layout</a>, and <a href="#list-animation" class="doc-link">how event cards arrive</a> as visitors scroll your schedule</td>
+                        <td><a href="#event-layout" class="doc-link">Default Layout</a>, <a href="#hide-past-events" class="doc-link">Hide Past Events</a>, <a href="#list-animation" class="doc-link">how event cards arrive</a> as visitors scroll your schedule, and <a href="#list-wording" class="doc-link">how each event is worded</a> on your list</td>
                     </tr>
                     <tr>
                         <td><span class="font-semibold text-gray-900 dark:text-white">Custom CSS</span></td>
@@ -122,7 +124,7 @@
             </svg>
             Accent Color
         </h2>
-        <p class="text-gray-600 dark:text-gray-300 mb-4">One <strong class="text-gray-900 dark:text-white">Accent Color</strong> at the top of the Style section drives every highlighted element on your public pages. Click the square to open your system's color picker, type a hex code into the box beside it (three or six digits, with or without the #), or start from one of the ten colors under it. New schedules start on a standard blue.</p>
+        <p class="text-gray-600 dark:text-gray-300 mb-4">One <strong class="text-gray-900 dark:text-white">Accent Color</strong> at the top of the Style section drives every highlighted element on your public pages. Click the square to open your system's color picker, type a hex code into the box beside it (three or six digits, with or without the #), or start from one of the ten colors under it. A new schedule starts on the accent of its <a href="#aurora" class="doc-link">Aurora</a> palette, which is picked at random, so it can be teal, blue, purple, pink, orange, red, yellow, green or near-black.</p>
         <div class="doc-fields">
             <div class="doc-field">
                 <h3 class="font-semibold text-gray-900 dark:text-white mb-2">Where it appears</h3>
@@ -215,7 +217,7 @@
             </div>
             <div class="doc-field">
                 <h4 class="font-semibold text-gray-900 dark:text-white mb-2">Upload Image</h4>
-                <p class="text-sm text-gray-500 dark:text-gray-400">Your own header. Click the tile to choose a file. Once a picture is there the tile shows it and reads <strong class="text-gray-900 dark:text-white">Custom</strong>, with <strong class="text-gray-900 dark:text-white">Change</strong> and <strong class="text-gray-900 dark:text-white">Remove</strong> under the tiles. Use a wide image, around 1200x400 pixels or a similar aspect ratio. PNG or JPG, under 2.5 MB. It is also the picture a shared link to your schedule shows, ahead of your profile image.</p>
+                <p class="text-sm text-gray-500 dark:text-gray-400">Your own header. Click the tile to choose a file. Once a picture is there the tile shows it and reads <strong class="text-gray-900 dark:text-white">Custom</strong>, with <strong class="text-gray-900 dark:text-white">Change</strong> and <strong class="text-gray-900 dark:text-white">Remove</strong> under the tiles. Use a wide image, around 1200x400 pixels or a similar aspect ratio. PNG, JPG, WebP or GIF, under 2.5 MB. It is also the picture a shared link to your schedule shows, ahead of your profile image.</p>
             </div>
             <div class="doc-field">
                 <h4 class="font-semibold text-gray-900 dark:text-white mb-2">31 preset headers</h4>
@@ -236,7 +238,29 @@
             </svg>
             Background
         </h2>
-        <p class="text-gray-600 dark:text-gray-300 mb-4">The <strong class="text-gray-900 dark:text-white">Background</strong> row starts with a <strong class="text-gray-900 dark:text-white">Background Type</strong> choice of Gradient, Solid or Image. Picking one shows its own controls and puts the others away. The row's line names your choice beside a small swatch of it, so you can see it with the row closed.</p>
+        <p class="text-gray-600 dark:text-gray-300 mb-4">The <strong class="text-gray-900 dark:text-white">Background</strong> row starts with a <strong class="text-gray-900 dark:text-white">Background Type</strong> choice of Aurora, Gradient, Solid or Image. Picking one shows its own controls and puts the others away. The row's line names your choice beside a small swatch of it, so you can see it with the row closed.</p>
+        <p class="text-gray-600 dark:text-gray-300 mb-4">Whichever you pick, the background fills the visitor's window and stays in place while your events scroll over it, in the calendar as well as the list, so a picture is never stretched to the length of the page. One exception: with an Image background, a phone shows the picture behind your header only.</p>
+
+        <h3 id="aurora" class="doc-subheading">Aurora</h3>
+        <p class="text-gray-600 dark:text-gray-300 mb-4">Soft lights in your schedule's colors that drift slowly behind your page, with a fine grain. Aurora is drawn by the visitor's browser rather than being a picture, so it is sharp on any screen, from a phone to a large monitor, and adds almost nothing to the page's weight. It follows each visitor's light or dark mode: pale lights on a bright page in light mode, glowing color on a deep one in dark mode. Schedules you create start on Aurora, with a palette picked at random and an accent color to match it.</p>
+        <div class="doc-fields">
+            <div class="doc-field">
+                <h4 class="font-semibold text-gray-900 dark:text-white mb-2">Palette</h4>
+                <p class="text-sm text-gray-500 dark:text-gray-400">Each palette is a swatch drawn as your page would look, in light or dark as the preview is. <strong class="text-gray-900 dark:text-white">From accent</strong> builds the lights from your accent color and two colors beside it. <strong class="text-gray-900 dark:text-white">Match header</strong> takes its colors from your header picture, and follows it when you change the picture; it is offered while the Banner header shows a picture. While a palette brought your accent color, picking another palette brings that palette's accent too; an accent you chose yourself is left alone. Ten ready-made palettes follow, from Lagoon to Graphite, and <strong class="text-gray-900 dark:text-white">Custom</strong> takes three colors of your own.</p>
+            </div>
+            <div class="doc-field">
+                <h4 class="font-semibold text-gray-900 dark:text-white mb-2">Shuffle</h4>
+                <p class="text-sm text-gray-500 dark:text-gray-400">Arranges the lights differently, and each press looks different from the last. <strong class="text-gray-900 dark:text-white">Back</strong> returns to the last ten arrangements you tried, until you leave the page.</p>
+            </div>
+            <div class="doc-field">
+                <h4 class="font-semibold text-gray-900 dark:text-white mb-2">Slow drift</h4>
+                <p class="text-sm text-gray-500 dark:text-gray-400">The lights drift slowly, each one taking about a minute to cross its path. Turn it off for a still background. Visitors who ask their device for less motion, or use the accessibility widget's reduce motion, always see it still, and so does a schedule embedded on another website or turned into a picture.</p>
+            </div>
+            <div class="doc-field">
+                <h4 class="font-semibold text-gray-900 dark:text-white mb-2">Light and dark</h4>
+                <p class="text-sm text-gray-500 dark:text-gray-400">Use the sun and moon above the preview to see both. Text that sits straight on the page, such as the dates in your event list, stays easy to read on every palette.</p>
+            </div>
+        </div>
 
         <h3 class="doc-subheading">Gradient</h3>
         <p class="text-gray-600 dark:text-gray-300 mb-4">Every gradient is a swatch under <strong class="text-gray-900 dark:text-white">Colors</strong>: click one and the preview takes it. The first swatch, marked with a plus, is <strong class="text-gray-900 dark:text-white">Custom</strong>, for two colors of your own.</p>
@@ -262,11 +286,11 @@
         <div class="doc-fields">
             <div class="doc-field">
                 <h4 class="font-semibold text-gray-900 dark:text-white mb-2">37 preset backgrounds</h4>
-                <p class="text-sm text-gray-500 dark:text-gray-400">Ready-made backgrounds shown as thumbnails, including Abstract Sunrise, Bookshelf, Desert Retreat, Flower Field, Greyscale, River of Dreams and Stormy Night. Click one to choose it. The first two lines are on the page and <strong class="text-gray-900 dark:text-white">Show All</strong> opens the rest.</p>
+                <p class="text-sm text-gray-500 dark:text-gray-400">Ready-made backgrounds shown as thumbnails, including Abstract Sunrise, Bookshelf, Desert Retreat, Flower Field, Greyscale, River of Dreams and Stormy Night. Click one to choose it. The first two lines are on the page and <strong class="text-gray-900 dark:text-white">Show All</strong> opens the rest. They are sized for phones, so on a large screen they can look soft; <a href="#aurora" class="doc-link">Aurora</a> stays sharp at any size. While a ready-made picture is chosen, a note in the row says so, with a <strong class="text-gray-900 dark:text-white">Try Aurora</strong> button that switches the background type.</p>
             </div>
             <div class="doc-field">
                 <h4 class="font-semibold text-gray-900 dark:text-white mb-2">Custom upload</h4>
-                <p class="text-sm text-gray-500 dark:text-gray-400">Click <strong class="text-gray-900 dark:text-white">Upload Image</strong>, above the thumbnails, to use your own. Once a picture is there the tile shows it, with <strong class="text-gray-900 dark:text-white">Change</strong> and <strong class="text-gray-900 dark:text-white">Remove</strong> under it. PNG or JPG, under 2.5 MB. Dark, low-contrast images work best, because your event cards and text sit on top of them.</p>
+                <p class="text-sm text-gray-500 dark:text-gray-400">Click <strong class="text-gray-900 dark:text-white">Upload Image</strong>, above the thumbnails, to use your own. Once a picture is there the tile shows it, with <strong class="text-gray-900 dark:text-white">Change</strong> and <strong class="text-gray-900 dark:text-white">Remove</strong> under it. PNG, JPG, WebP or GIF, under 2.5 MB. For a sharp background on a large screen, use a picture at least 1920 pixels wide, and wider than it is tall; the form tells you when yours is smaller. Your page sends a phone a smaller copy, and a high-resolution screen a larger one when your picture is wider than 1920 pixels. Dark, low-contrast images work best, because your event cards and text sit on top of them.</p>
             </div>
         </div>
     </section>
@@ -297,6 +321,17 @@
         </div>
     </section>
 
+    <!-- Hide Past Events -->
+    <section id="hide-past-events" class="doc-section">
+        <h2 class="doc-heading">
+            <svg aria-hidden="true" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" class="w-5 h-5 text-gray-500 dark:text-gray-400 flex-shrink-0">
+                <path stroke-linecap="round" stroke-linejoin="round" d="M12 6v6h4.5m4.5 0a9 9 0 11-18 0 9 9 0 0118 0z" />
+            </svg>
+            Hide Past Events
+        </h2>
+        <p class="text-gray-600 dark:text-gray-300">Under Default Layout in the same <strong class="text-gray-900 dark:text-white">Events</strong> row, <strong class="text-gray-900 dark:text-white">Hide Past Events</strong> keeps past events off your public schedule, so visitors only ever see what is still to come. It is off until you turn it on, it is free on every plan, and while it is on the closed row says so. Your own admin views are unaffected, so nothing is lost: the events are still there when you need them.</p>
+    </section>
+
     <!-- Event Animation -->
     <section id="list-animation" class="doc-section">
         <h2 class="doc-heading">
@@ -305,7 +340,7 @@
             </svg>
             Event Animation
         </h2>
-        <p class="text-gray-600 dark:text-gray-300 mb-4">The <strong class="text-gray-900 dark:text-white">Event animation</strong> setting, under Default Layout in the <strong class="text-gray-900 dark:text-white">Events</strong> row of the Style section, brings your events to life as visitors scroll your schedule: each event card animates into place as it comes into view, then its details follow one after another: the title, the date (which flips down like a tear-off calendar page), the venue, the price and the performers. The first screen plays as an entrance when someone opens your link. It is off (<strong class="text-gray-900 dark:text-white">None</strong>) until you pick a style, and it is available on every plan.</p>
+        <p class="text-gray-600 dark:text-gray-300 mb-4">The <strong class="text-gray-900 dark:text-white">Event animation</strong> setting, under Hide Past Events in the <strong class="text-gray-900 dark:text-white">Events</strong> row of the Style section, brings your events to life as visitors scroll your schedule: each event card animates into place as it comes into view, then its details follow one after another: the title, the date (which flips down like a tear-off calendar page), the venue, the price and the performers. The first screen plays as an entrance when someone opens your link. It is off (<strong class="text-gray-900 dark:text-white">None</strong>) until you pick a style, and it is available on every plan.</p>
         <div class="doc-table-wrap">
             <table class="doc-table">
                 <thead>
@@ -366,6 +401,18 @@
         </div>
     </section>
 
+    <!-- Event List Wording -->
+    <section id="list-wording" class="doc-section">
+        <h2 class="doc-heading">
+            <svg aria-hidden="true" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" class="w-5 h-5 text-gray-500 dark:text-gray-400 flex-shrink-0">
+                <path stroke-linecap="round" stroke-linejoin="round" d="M7.5 8.25h9m-9 3H12m-9.75 1.51c0 1.6 1.123 2.994 2.707 3.227 1.129.166 2.27.293 3.423.379.35.026.67.21.865.501L12 21l2.755-4.133a1.14 1.14 0 01.865-.501 48.172 48.172 0 003.423-.379c1.584-.233 2.707-1.626 2.707-3.228V6.741c0-1.602-1.123-2.995-2.707-3.228A48.394 48.394 0 0012 3c-2.392 0-4.744.175-7.043.513C3.373 3.746 2.25 5.14 2.25 6.741v6.018z" />
+            </svg>
+            Event List Wording
+        </h2>
+        <p class="text-gray-600 dark:text-gray-300 mb-4">The last setting of the <strong class="text-gray-900 dark:text-white">Events</strong> row, under <strong class="text-gray-900 dark:text-white">Edit Schedule &rarr; Style &rarr; Events &rarr; Event list wording</strong>, decides how each event is worded on your schedule's list, from three choices. <strong class="text-gray-900 dark:text-white">Standard</strong> is the list's own card, and what every schedule starts with. <strong class="text-gray-900 dark:text-white">Same as the Events graphic caption</strong> words each card the way your <a href="{{ route('marketing.docs.event_graphics') }}#text-template" class="doc-link">caption</a> does, so the list says what you post to WhatsApp, and follows the caption when you change it. <strong class="text-gray-900 dark:text-white">My own wording</strong> is a template for the list alone, written with the same <a href="{{ route('marketing.docs.event_graphics') }}#variables" class="doc-link">variables</a>; it starts from your caption.</p>
+        <p class="text-gray-600 dark:text-gray-300">The line with <code class="doc-inline-code">{event_name}</code> becomes the card's title and the next three lines go under it. The list keeps its day headings, each card's time, the price and Sold out labels and the picture, so the date, time, price and link variables are left out on the list, together with the words around them (<code class="doc-inline-code">🕗 {time} | 📍 {venue}</code> reads <em>📍 Blue Room</em>), and so is any line above the title. A custom field shows only where it is set to show on the event page. <code class="doc-inline-code">*bold*</code>, <code class="doc-inline-code">_italic_</code> and <code class="doc-inline-code">~strike~</code> work as they do in WhatsApp. A preview under the field shows your next three events before you save. Visitors who read your schedule in its other language see the standard cards, because your own words cannot be translated. Free on every plan.</p>
+    </section>
+
     <!-- Custom CSS -->
     <section id="custom-css" class="doc-section">
         <h2 class="doc-heading">
@@ -376,7 +423,7 @@
         </h2>
         <div class="doc-callout doc-callout-plan">
             <div class="doc-callout-title">Pro feature</div>
-            <p><x-doc-badge plan="pro" /> The Custom CSS box is editable on <strong class="text-gray-900 dark:text-white">Pro</strong> and <strong class="text-gray-900 dark:text-white">Enterprise</strong>, and on <a href="{{ route('marketing.docs.selfhost') }}" class="doc-link">selfhosted</a> installs, which count as Enterprise. Below Pro the row carries a Pro badge and the box is shown read-only: CSS you saved earlier is kept, not deleted, but it is not applied to your pages until the schedule is back on Pro, when it also becomes editable again.</p>
+            <p><x-doc-badge plan="pro" /> The Custom CSS box is editable on <strong class="text-gray-900 dark:text-white">Pro</strong> and <strong class="text-gray-900 dark:text-white">Enterprise</strong>, and on <a href="{{ route('marketing.docs.selfhost') }}" class="doc-link">selfhosted</a> installs, which count as Enterprise. Below Pro the row carries a Pro badge. With no CSS saved it shows an upgrade line instead of the box. If you saved CSS before, the box is shown read-only: that CSS is kept, not deleted, but it is not applied to your pages until the schedule is back on Pro, when it also becomes editable again.</p>
         </div>
         <p class="text-gray-600 dark:text-gray-300 mb-4">When the built-in controls do not reach far enough, write your own CSS under <strong class="text-gray-900 dark:text-white">Edit Schedule &rarr; Style &rarr; Custom CSS</strong>, the last row of the Style section. The row shows the first line of what you have written, so you can tell with it closed that some is set. It is added to every public page drawn in your schedule's own style: your schedule page, event pages, embeds, and the pages visitors reach from them such as booking, event requests and gift cards. Ticket, order and installment payment pages use the app's standard layout, so your CSS does not reach them.</p>
         <ul class="doc-list mb-6">
@@ -385,6 +432,7 @@
             <li>Add your own animations and effects</li>
             <li>Up to 10,000 characters per schedule</li>
         </ul>
+        <p class="text-gray-600 dark:text-gray-300 mb-6">To change the page's background with CSS, aim at <code class="doc-inline-code">.gp-bg</code>, the layer the background is drawn on, and at <code class="doc-inline-code">.gp-aurora</code> inside it for Aurora. For example, <code class="doc-inline-code">.gp-bg { background-position: top; }</code> moves a picture up. If your CSS already styles the background on <code class="doc-inline-code">body</code> or <code class="doc-inline-code">html</code>, a gradient or picture background is still drawn on <code class="doc-inline-code">body</code> for you, so those rules keep working; Aurora is drawn over them.</p>
         <div class="doc-callout doc-callout-warning">
             <div class="doc-callout-title">What the sanitizer strips</div>
             <p>Saved CSS is cleaned before it is stored, so a few constructs are silently removed rather than rejected with an error. Do not rely on <code class="doc-inline-code">@import</code>, <code class="doc-inline-code">@font-face</code>, <code class="doc-inline-code">@charset</code>, <code class="doc-inline-code">expression()</code>, <code class="doc-inline-code">javascript:</code> URLs, <code class="doc-inline-code">behavior</code> or <code class="doc-inline-code">binding</code>, or any <code class="doc-inline-code">url()</code> pointing at an <code class="doc-inline-code">http:</code>, <code class="doc-inline-code">https:</code> or <code class="doc-inline-code">data:</code> address. Everything else, including modern layout and animation properties, is kept as written. If a rule seems to vanish after saving, check it against that list first.</p>
@@ -410,7 +458,7 @@
 
         <div class="doc-callout doc-callout-tip">
             <div class="doc-callout-title">Two panels have their own switch</div>
-            <p>The <strong>&ldquo;Notify me when tickets go on sale&rdquo;</strong> card is off unless you turn it on, and the <strong>Stay up to date</strong> sign-up panel can be turned off. Both switches are under <a href="{{ route('marketing.docs.creating_schedules') }}#settings-advanced" class="doc-link">Settings &rarr; Advanced</a> and work on every plan, so neither needs CSS.</p>
+            <p>The <strong>&ldquo;Notify me when tickets go on sale&rdquo;</strong> card is off unless you turn it on, and the <strong>Stay up to date</strong> sign-up panel can be turned off. Both switches are in the <a href="{{ route('marketing.docs.creating_schedules') }}#engagement-mailing-list" class="doc-link">Mailing list</a> row of the schedule form's Engagement section and work on every plan, so neither needs CSS.</p>
         </div>
 
         <h3 class="doc-subheading">A common example</h3>
@@ -584,7 +632,7 @@
         </div>
         <div class="doc-callout doc-callout-info">
             <div class="doc-callout-title">Selfhosted API keys</div>
-            <p>Selfhosted installs supply their own keys. The accent color and font need a <a href="https://ai.google.dev/" target="_blank" rel="noopener" class="doc-link">Gemini API key</a>. Image generation uses an <a href="https://platform.openai.com/" target="_blank" rel="noopener" class="doc-link">OpenAI API key</a> when one is set and falls back to Gemini when it is not, so a Gemini key alone is enough to use every part of the generator. The button does not appear at all until at least one key is configured. On the hosted platform, a schedule below Enterprise sees the button greyed out.</p>
+            <p>Selfhosted installs supply their own keys, and either a <a href="https://ai.google.dev/" target="_blank" rel="noopener" class="doc-link">Gemini API key</a> or an <a href="https://platform.openai.com/" target="_blank" rel="noopener" class="doc-link">OpenAI API key</a> is enough to use every part of the generator. The accent color and font use Gemini when its key is set and OpenAI when it is not, unless the operator chose OpenAI for AI text. Image generation uses OpenAI when its key is set, and Gemini otherwise. The button does not appear at all until at least one key is configured. On the hosted platform, a schedule below Enterprise sees the button greyed out.</p>
         </div>
     </section>
 
@@ -607,8 +655,8 @@
                 <p class="text-sm text-gray-500 dark:text-gray-400">With those gone, a hosted schedule reads entirely as your own to visitors. Pair it with a <a href="{{ route('marketing.docs.creating_schedules') }}#custom-domain" class="doc-link">custom domain</a> on Enterprise and nothing on the page points back at Event Schedule. <a href="{{ route('marketing.docs.event_graphics') }}" class="doc-link">Event graphics</a> are the exception: an image generated on the hosted platform carries a small eventschedule.com credit in its bottom-right corner on every plan.</p>
             </div>
         </div>
-        <p class="text-gray-600 dark:text-gray-300 mb-4">A single-tenant <a href="{{ route('marketing.docs.selfhost') }}" class="doc-link">selfhosted</a> install has no plan tiers at all, so the event-page card, the embed and newsletter lines and ads are all absent by default, with nothing to buy. If instead you run your own multi-tenant platform on Event Schedule, those surfaces follow each tenant's tier exactly as they do on eventschedule.com, and your free tier also carries a footer strip pointing at your own marketing site, because that strip is the growth prompt of whoever runs the platform.</p>
-        <p class="text-gray-600 dark:text-gray-300 mb-4">On every install that is not eventschedule.com itself, upgrading never removes that corner chip. It is the attribution the Attribution Assurance License asks for in return for the application, so there is no setting that removes it. On a single-tenant selfhost it is on every page. On a platform of your own it is on every schedule you charge for, and a free schedule there carries the operator's footer strip in its place, because a page never shows both credits at once.</p>
+        <p class="text-gray-600 dark:text-gray-300 mb-4">A single-tenant <a href="{{ route('marketing.docs.selfhost') }}" class="doc-link">selfhosted</a> install has no plan tiers at all, so the event-page card, the embed and newsletter lines and ads are all absent by default, with nothing to buy. If instead you run your own multi-tenant platform on Event Schedule, those surfaces follow each tenant's tier exactly as they do on eventschedule.com.</p>
+        <p class="text-gray-600 dark:text-gray-300 mb-4">On every install that is not eventschedule.com itself, upgrading never removes that corner chip. It is the attribution the Attribution Assurance License asks for in return for the application, so there is no setting that removes it. On a single-tenant selfhost, and on a platform of your own, it is on every page, whatever the schedule's plan.</p>
     </section>
 
     <!-- See Also -->
@@ -653,7 +701,7 @@
                 {
                     "@type": "HowToStep",
                     "name": "Set Background and Colors",
-                    "text": "Choose a gradient by its swatch from over 380 presets, a solid color, or a background image. Set your accent color for buttons and links.",
+                    "text": "Choose Aurora, soft drifting lights drawn from your colors, a gradient by its swatch from over 380 presets, a solid color, or a background image. Set your accent color for buttons and links.",
                     "url": "{{ url(route('marketing.docs.schedule_styling')) }}#backgrounds"
                 },
                 {

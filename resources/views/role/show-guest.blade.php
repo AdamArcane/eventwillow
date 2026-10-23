@@ -79,6 +79,8 @@ html[data-es-view="list"] #gp-calendar {
       border: none !important;
       padding: 0 !important;
   }
+  {{-- Only the old background on body reads these (partials/guest-background-legacy, kept for an
+       owner's custom CSS): every other page draws its background on a fixed layer. --}}
   html[data-es-view="list"] body { background-attachment: fixed !important; }
   html[data-es-view="calendar"] body { background-attachment: scroll !important; }
   </style>
@@ -354,7 +356,7 @@ html[data-es-view="list"] #gp-calendar {
       </style>
 
       {{-- shownSponsorLogos(), not getSponsorLogos(): the owner can switch the section off without
-           deleting the sponsors (Engagement > Sponsors), and the margin test below reads the same list. --}}
+           deleting the sponsors (Page content > Sponsors), and the margin test below reads the same list. --}}
       @php $sponsorLogos = $role->shownSponsorLogos(); @endphp
 
       @if (!empty($sponsorLogos))

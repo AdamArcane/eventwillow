@@ -25,7 +25,6 @@ use App\Models\UsageDaily;
 use App\Models\User;
 use App\Services\ActiveDays;
 use App\Services\AdminAlertService;
-use App\Services\AdminDashboard;
 use App\Services\AdminPlanCounts;
 use App\Services\AppUpdateService;
 use App\Services\AuditService;
@@ -120,62 +119,6 @@ class AdminController extends Controller
         );
 
         return redirect()->intended(route('admin.dashboard', absolute: false));
-    }
-
-    /**
-     * The admin dashboard. What each card counts, and why its windows are fixed rather than chosen
-     * with the date-range select the other admin pages have, is AdminDashboard's to say.
-     */
-    public function dashboard(Request $request)
-    {
-        if (! auth()->user()->isAdmin()) {
-            return redirect()->back()->with('error', __('messages.not_authorized'));
-        }
-
-        // ?sample=1 renders invented data for the documentation screenshot, which must not publish
-        // the developer's real schedules and people. Local and testing only: in production the
-        // parameter does nothing.
-        $sample = $request->boolean('sample') && app()->environment('local', 'testing');
-        $builder = app(AdminDashboard::class);
-        $dashboard = $sample ? AdminDashboard::sample() : $builder->build();
-
-        // The same figure the growth page reports as MRR, from the same class, read off the
-        // revenue card. Zero where there is no card: an install with no billing, and a card whose
-        // query failed. Not a second RecurringRevenue call: build() has just caught and reported
-        // that failure so the rest of the page stands, and asking again here, outside its guard,
-        // turned one missing card back into a 500.
-        $recurring = $dashboard['revenue']['totals'] ?? ['arr' => 0.0, 'trialing_count' => 0];
-
-        // What the page reads besides its cards is timed too, and the lot goes out as a
-        // Server-Timing header (AdminDashboard::serverTiming()).
-        $also = [];
-        $timed = function (string $name, callable $read) use (&$also) {
-            $started = hrtime(true);
-            $value = $read();
-            $also[$name] = (hrtime(true) - $started) / 1e6;
-
-            return $value;
-        };
-
-        // Everything across /admin that is waiting on an admin, as one to-do list.
-        $adminAlerts = $timed('alerts', fn () => AdminAlertService::items());
-        // The line beside the alerts; null when realtime is off.
-        $realtimeRecentViews = $timed('realtime', fn () => \App\Services\RealtimeDashboard::recentViews());
-
-        $response = $timed('render', fn () => response()->view('admin.dashboard', [
-            'dashboard' => $dashboard,
-            'arr' => $recurring['arr'],
-            'arrTrialingCount' => $recurring['trialing_count'],
-            'adminAlerts' => $adminAlerts,
-            'realtimeRecentViews' => $realtimeRecentViews,
-        ]));
-
-        // Not for the invented data of the docs screenshot: nothing was read to make it.
-        if (! $sample) {
-            $response->header('Server-Timing', $builder->serverTiming($also));
-        }
-
-        return $response;
     }
 
     /**
@@ -504,6 +447,12 @@ class AdminController extends Controller
                 ->count();
         }
 
+        // What Stripe is billing, plan by plan, and the paid plans nobody is billed for. Hosted
+        // only, where there is billing. Moved here from the admin dashboard, whose corner card
+        // keeps the totals alone.
+        $recurring = config('app.hosted') ? RecurringRevenue::breakdown() : null;
+        $outsideStripe = config('app.hosted') ? ['granted' => AdminPlanCounts::manual(), 'trial' => AdminPlanCounts::trial()] : null;
+
         // Revenue trends
         $trendData = $this->getTrendData($startDate, $endDate);
 
@@ -615,7 +564,9 @@ class AdminController extends Controller
             'mismatchBoosts',
             'unconfirmedRefunds',
             'unrecognizedSubscriptions',
-            'orphanedSubscriptions'
+            'orphanedSubscriptions',
+            'recurring',
+            'outsideStripe'
         ));
     }
 
@@ -1433,8 +1384,7 @@ class AdminController extends Controller
             return redirect()->back()->with('error', __('messages.not_authorized'));
         }
 
-        // The two scopes the plan cards share, and the counts the admin dashboard also shows:
-        // AdminPlanCounts owns them so the dashboard's line and this page cannot disagree.
+        // The two scopes the plan cards share, and their counts, are AdminPlanCounts'.
         $validSubscriptionScope = AdminPlanCounts::validSubscription();
 
         // Plan statistics (excluding demo roles) using actualPlanTier() for accurate counts
@@ -3046,6 +2996,9 @@ class AdminController extends Controller
             // nexus is precisely the operator most likely to want a fallback affiliate ID.
             'stay22Available' => \App\Services\Stay22Service::isEnabled(),
             'stay22Aid' => \App\Services\Stay22Service::operatorAid(),
+            // The homepage's quotes: the nexus serves the homepage they are printed on.
+            'homeQuotesAvailable' => (bool) config('app.is_nexus'),
+            'homeQuoteRows' => $this->homeQuoteRows(),
             'realtimeEnabled' => \App\Utils\RealtimeTracker::enabled(),
             'realtimeOwnerView' => \App\Utils\RealtimeTracker::ownerViewSetting(),
         ]);
@@ -3288,6 +3241,135 @@ class AdminController extends Controller
         );
 
         return redirect()->route('admin.settings')->with('success', __('messages.settings_saved'));
+    }
+
+    /**
+     * Store the homepage's quotes (App\Utils\HomeQuotes). Each row names a schedule by its
+     * subdomain, which is kept as the schedule's id, so a later rename carries over. The person's
+     * name is optional and is the operator's to enter with their permission; it stays in the
+     * Setting and out of the audit row.
+     */
+    public function updateHomeQuotes(Request $request): RedirectResponse
+    {
+        if (! auth()->user()->isAdmin()) {
+            return redirect()->back()->with('error', __('messages.not_authorized'));
+        }
+
+        if (! config('app.is_nexus')) {
+            abort(404);
+        }
+
+        $text = fn ($value) => is_string($value) ? trim(str_replace(["\r\n", "\r"], "\n", $value)) : '';
+        // Only a stored quote whose schedule is down may keep it with no subdomain: emptying the
+        // subdomain of a quote on a live schedule is asking for a schedule, and says so.
+        $storedIds = array_column(\App\Utils\HomeQuotes::stored(), 'role_id');
+        $storedIds = array_values(array_diff($storedIds, Role::whereIn('id', $storedIds ?: [0])->where('is_deleted', false)->pluck('id')->map(fn ($id) => (int) $id)->all()));
+
+        $rows = [];
+        foreach (array_slice((array) $request->input('quotes', []), 0, \App\Utils\HomeQuotes::MAX) as $i => $row) {
+            $row = is_array($row) ? $row : [];
+            $rows[(int) $i] = [
+                'subdomain' => strtolower($text($row['subdomain'] ?? '')),
+                'quote' => $text($row['quote'] ?? ''),
+                'title' => $text($row['title'] ?? ''),
+                'name' => $text($row['name'] ?? ''),
+                // A stored quote whose schedule is down shows with an empty subdomain; posted back
+                // that way it keeps its schedule (HomeQuotes leaves it off the page meanwhile).
+                'keep' => is_numeric($row['role_id'] ?? null) && in_array((int) $row['role_id'], $storedIds, true) ? (int) $row['role_id'] : null,
+            ];
+        }
+
+        $roles = [];
+        $validator = \Illuminate\Support\Facades\Validator::make(['quotes' => $rows], [
+            'quotes' => ['array', 'max:'.\App\Utils\HomeQuotes::MAX],
+            'quotes.*.subdomain' => ['nullable', 'string', 'max:63'],
+            'quotes.*.quote' => ['nullable', 'string', 'max:'.\App\Utils\HomeQuotes::QUOTE_MAX],
+            'quotes.*.title' => ['nullable', 'string', 'max:'.\App\Utils\HomeQuotes::TITLE_MAX],
+            'quotes.*.name' => ['nullable', 'string', 'max:'.\App\Utils\HomeQuotes::NAME_MAX],
+        ]);
+        $validator->after(function ($validator) use ($rows, &$roles) {
+            foreach ($rows as $i => $row) {
+                if ($row['subdomain'] === '' && $row['quote'] === '' && $row['title'] === '' && $row['name'] === '') {
+                    continue;
+                }
+                foreach (['quote', 'title', 'name'] as $field) {
+                    if (str_contains($row[$field], "\u{2014}")) {
+                        $validator->errors()->add("quotes.{$i}.{$field}", __('messages.home_quotes_no_em_dash'));
+                    }
+                }
+                if ($row['subdomain'] === '' && $row['keep'] !== null && $row['quote'] !== '') {
+                    $roles[$i] = $row['keep'];
+
+                    continue;
+                }
+                if ($row['subdomain'] === '' || $row['quote'] === '') {
+                    $validator->errors()->add("quotes.{$i}.".($row['quote'] === '' ? 'quote' : 'subdomain'), __('messages.home_quotes_needs_both'));
+
+                    continue;
+                }
+                $role = Role::where('subdomain', $row['subdomain'])->where('is_deleted', false)->first();
+                if (! $role) {
+                    $validator->errors()->add("quotes.{$i}.subdomain", __('messages.home_quotes_unknown_schedule'));
+
+                    continue;
+                }
+                $roles[$i] = $role->id;
+            }
+        });
+        $validator->validate();
+
+        if (is_demo_mode()) {
+            return redirect()->route('admin.settings')->with('error', __('messages.demo_mode_settings_disabled'));
+        }
+
+        $quotes = [];
+        foreach ($rows as $i => $row) {
+            if (isset($roles[$i])) {
+                $quotes[] = ['role_id' => $roles[$i], 'quote' => $row['quote'], 'title' => $row['title'], 'name' => $row['name']];
+            }
+        }
+
+        $before = count(\App\Utils\HomeQuotes::stored());
+        \App\Utils\HomeQuotes::save($quotes);
+
+        // The count only: the words are the operator's to keep in the setting, not to copy into
+        // every audit row.
+        AuditService::log(
+            AuditService::ADMIN_SETTINGS_UPDATE,
+            auth()->id(),
+            null,
+            null,
+            ['home_quotes' => $before],
+            ['home_quotes' => count($quotes)],
+            'Updated the homepage quotes',
+        );
+
+        return redirect()->to(route('admin.settings').'#home-quotes')->with('success', __('messages.settings_saved'));
+    }
+
+    /**
+     * The quotes form's three rows, stored quotes first, each with its schedule's CURRENT
+     * subdomain.
+     *
+     * @return list<array{role_id: ?int, subdomain: string, quote: string, title: string, name: string}>
+     */
+    private function homeQuoteRows(): array
+    {
+        $stored = \App\Utils\HomeQuotes::stored();
+        // A schedule deleted since shows an empty subdomain (a deletion renames it to a placeholder
+        // no save would accept); the row's hidden role_id keeps the quote on its schedule.
+        $subdomains = Role::whereIn('id', array_column($stored, 'role_id'))->where('is_deleted', false)->pluck('subdomain', 'id');
+
+        $rows = [];
+        foreach ($stored as $quote) {
+            $rows[] = ['role_id' => $quote['role_id'], 'subdomain' => (string) ($subdomains[$quote['role_id']] ?? ''), 'quote' => $quote['quote'], 'title' => $quote['title'], 'name' => $quote['name']];
+        }
+
+        while (count($rows) < \App\Utils\HomeQuotes::MAX) {
+            $rows[] = ['role_id' => null, 'subdomain' => '', 'quote' => '', 'title' => '', 'name' => ''];
+        }
+
+        return $rows;
     }
 
     /**

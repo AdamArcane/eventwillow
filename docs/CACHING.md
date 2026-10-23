@@ -122,7 +122,7 @@ this middleware can never mark one public: the messages GET is per visitor (its 
 `private, no-store`. Whether anyone is online is fetched by the widget after load for the same
 reason nothing visitor-specific may be rendered into the page: the HTML is shared.
 
-The Realtime beacon (`POST /api/realtime`, `RealtimeBeaconController`; it feeds `/admin/realtime`
+The Realtime beacon (`POST /api/realtime`, `RealtimeBeaconController`; it feeds the live view at the top of `/admin/dashboard`
 and the Realtime tab of a schedule owner's `/analytics`) needs none of this, because it is registered in
 `routes/api.php`: the `api` group has no session, cookie or CSRF middleware at all, so it can never
 set `laravel_session` and is not in `STATELESS_ROUTES`. It does READ one cookie off the request,
@@ -242,6 +242,14 @@ never gets a chance to apply. A rule without the cookie clauses would serve the 
 signed-in visitors for up to the edge TTL. `session.domain` is `.eventschedule.com`
 (`AppServiceProvider.php`), so the apex really does receive `laravel_session`, and
 `marketing/partials/header.blade.php` really does branch on `@auth`.
+That branch only runs on a miss, though. On the live zone the cookie clauses do not work (a request
+carrying `laravel_session` comes back `cf-cache-status: HIT`), so the anonymous copy also carries a
+Dashboard link, and the page shows it instead of Sign In and Get Started when the browser holds the
+script-readable `es_signed_in=1` cookie that `MarkSignedIn` keeps in step with the session.
+For the same reason a platform admin's Hide schedule / Hide event pills on the homepage rail, and
+the note with Undo after one is pressed, are not in the page: a browser holding that cookie asks
+`GET /browse/discovery-controls` (`discovery.controls`, `private, no-store`, answered for an admin
+only) after the page loads.
 
 So this rule ships only once cookie matching is available. Everything else it needs is fine on
 Free: 10 cache rules, `http.host` and `http.request.uri.path`, `starts_with()`, cache eligibility,
@@ -420,7 +428,8 @@ and the homepage has picked a headline, that one key is merged in and everything
 ### 3. The homepage headline test
 
 The homepage headline and subtitle are an A/B test that allocates its own traffic and locks
-its own winner (`App\Utils\HeroExperiment`). The variant is **picked in the browser**, and it
+its own winner (`App\Utils\HeroExperiment`). From 2026-10-22 it holds a single headline, a baseline
+that is still picked, beaconed and credited the same way, and never locks. The variant is **picked in the browser**, and it
 has to stay that way:
 
 - The server renders the default copy (or the locked winner), every variant, and the current
@@ -459,7 +468,11 @@ has to stay that way:
 Everyone served the same cached copy shares one nonce for up to 10 minutes. Marketing pages
 contain no user-controlled content - every inline script on them is authored in the repo -
 and nothing that renders visitor-supplied content is cacheable, so a shared nonce cannot be
-reused against a page an attacker can write into. The reasoning is repeated in
+reused against a page an attacker can write into. The homepage's quotes (`App\Utils\HomeQuotes`,
+from 2026-10-22) are the one exception to "authored in the repo": the platform operator types
+them in at `/admin/settings`, and a quote's schedule name comes from that schedule. They are
+printed escaped, as text, and never inside a script, and they are the same for every visitor, so
+the reasoning holds. The reasoning is repeated in
 `SecurityHeaders.php` where the nonce is generated.
 
 ## What to watch after deploy

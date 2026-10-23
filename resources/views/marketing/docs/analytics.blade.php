@@ -42,6 +42,9 @@
         <p class="text-gray-600 dark:text-gray-300 mb-4">
             Analytics shows how your schedule pages are performing. Open it by clicking <strong>Analytics</strong> in the sidebar. It is built in and on every plan, so there is nothing to install and no third-party tracking script to add.
         </p>
+        <p class="text-gray-600 dark:text-gray-300 mb-4">
+            It covers the schedules you own and the ones you run as an admin; a viewer sees nothing here. On eventschedule.com, an admin of somebody else's schedule sees its Revenue and Check-Ins figures only while that schedule is on the Enterprise plan, the plan that includes team members, as with its Sales page.
+        </p>
 
         <x-doc-screenshot id="analytics--dashboard" alt="The Analytics page: the tabs, the schedule, event and date range filters, and one card holding the page views figure, its change and the views chart" loading="eager" />
 
@@ -234,7 +237,7 @@
             </div>
             <div id="web-social-clicks" class="doc-field">
                 <h4 class="font-semibold text-gray-900 dark:text-white mb-2">Social Link Clicks</h4>
-                <p class="text-sm text-gray-500 dark:text-gray-400">Clicks on the links in your <a href="{{ route('marketing.docs.creating_schedules') }}#videos-links" class="doc-link">schedule settings</a>, one row per platform, or per site for a link to somewhere the app does not recognise. Every link has a short address on your schedule's own URL, such as <code class="doc-inline-code">/instagram</code>, or the site's name for other sites, and the icons on your schedule page go through it, so a click there or on a short link you printed is counted. A link left without a short address, because its name was already taken, is not counted until you give it one. This measures visitors leaving your schedule rather than arriving. Bots are filtered out, one visitor counts at most ten clicks a day per schedule, and clicks by you, your team members and site administrators are skipped.</p>
+                <p class="text-sm text-gray-500 dark:text-gray-400">Clicks on your schedule's <a href="{{ route('marketing.docs.creating_schedules') }}#social-links" class="doc-link">social links</a>, one row per platform, or per site for a link to somewhere the app does not recognise. Every link has a short address on your schedule's own URL, such as <code class="doc-inline-code">/instagram</code>, or the site's name for other sites, and the icons on your schedule page go through it, so a click there or on a short link you printed is counted. A link left without a short address, because its name was already taken, is not counted until you give it one. This measures visitors leaving your schedule rather than arriving. Bots are filtered out, one visitor counts at most ten clicks a day per schedule, and clicks by you, your team members and site administrators are skipped.</p>
             </div>
             <div class="doc-field">
                 <h4 class="font-semibold text-gray-900 dark:text-white mb-2">Featured Talents &amp; Venues</h4>

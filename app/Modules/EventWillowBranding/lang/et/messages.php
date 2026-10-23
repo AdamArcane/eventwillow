@@ -42,7 +42,7 @@ return [
     'onboarding_nudge_type_curator' => 'Andke oma juhile nimi ja saate avaliku kalendri, mis koondab sündmusi teistest kanalitest ja mille saate lisada oma veebisaidile. See võtab umbes minuti.',
     'onboarding_nudge_examples_cta' => 'Vaadake näidiskanaleid',
     'activation_nudge_body_no_ticket_type' => ':schedule on avaldatud sündmused, kuid piletitüüpe pole, nii et lehte saab lugeda, aga sealt osta ei saa. Ühe loomiseks on vaja nime, hinda ja kogust. Iga pileti QR-koodi skaneerid uksel ning EventWillow ei võta üheski paketis platvormitasu.',
-    'activation_nudge_body_no_ticket_type_free' => ':schedule kanalil on avaldatud üritusi, kuid neile ei saa registreeruda. Tasuta registreerimine ja tasuta piletid on sinu paketis piiramatud, iga külalise jaoks on QR-kood, mida uksel skannida. Kui soovid tasu võtta, saad tasuliste piletite müüki 7 päeva tasuta proovida, ilma kaardita.',
+    'activation_nudge_body_no_ticket_type_free' => ':schedule kanalil on avaldatud üritusi, kuid neile ei saa registreeruda. Tasuta registreerimine ja tasuta piletid on sinu paketis piiramatud, iga külalise jaoks on QR-kood, mida uksel skannida. Kui soovid tasu võtta, on Pro-l :days-päevane tasuta prooviperiood.',
     'activation_nudge_body_no_ticket_type_free_no_trial' => ':schedule kanalil on avaldatud üritusi, kuid neile ei saa registreeruda. Tasuta registreerimine ja tasuta piletid on sinu paketis piiramatud, iga külalise jaoks on QR-kood, mida uksel skannida.',
     'also_list_on' => 'Kuva ka kanalil',
     'venue_lookup_help' => 'Kui toimumiskohal on siin juba kanal, leiame selle üles ja sinu sündmus kuvatakse ka seal.',

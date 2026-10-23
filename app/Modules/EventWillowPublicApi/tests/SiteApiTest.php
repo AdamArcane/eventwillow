@@ -71,7 +71,7 @@ class SiteApiTest extends TestCase {
         $event->refresh();
         $this->getJson($this->prefix.'events/'.$id)->assertOk()
             ->assertJsonPath('data.description', "## Lineup\n\n**The Willow Trio**")
-            ->assertJsonPath('data.description_html', '<h2 id="lineup">Lineup</h2>\n<p><strong>The Willow Trio</strong></p>\n');
+            ->assertJsonPath('data.description_html', "<h2 id=\"lineup\">Lineup</h2>\n<p><strong>The Willow Trio</strong></p>\n");
     }
     protected function setUp(): void {
         parent::setUp();
