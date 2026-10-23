@@ -1,7 +1,7 @@
 <!DOCTYPE html>
 <html lang="{{ str_replace('_', '-', app()->getLocale()) }}" dir="{{ is_rtl() ? 'rtl' : 'ltr' }}" class="overflow-x-clip">
 <head class="h-full bg-white">
-    <title>{{ $title ?? 'Event Schedule' }}</title>
+    <title>{{ $title ?? config('app.name') }}</title>
     <!-- Version: {{ config('self-update.version_installed') }} -->
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">

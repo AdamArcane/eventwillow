@@ -70,7 +70,7 @@
     @include('role.partials.create-form', ['hasSchedules' => $hasSchedules])
 </x-app-admin-layout>
 @else
-<x-app-layout :theme-variants="true" :title="__('messages.new_schedule') . ' | Event Schedule'">
+<x-app-layout :theme-variants="true" :title="__('messages.new_schedule') . ' | ' . config('app.name')">
     <x-slot name="head">
         @include('partials.web-app-manifest', ['platformApp' => true])
     </x-slot>

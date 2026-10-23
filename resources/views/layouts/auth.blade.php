@@ -30,7 +30,7 @@
         // The schedule whose own mail led here, or null: see App\View\Components\AuthLayout.
         $authSchedule = (($schedule ?? null) instanceof \App\Models\Role && $schedule->exists) ? $schedule : null;
     @endphp
-    <title>{{ $authSchedule ? $authSchedule->translatedName() : 'Event Schedule' }}</title>
+    <title>{{ $authSchedule ? $authSchedule->translatedName() : config('app.name') }}</title>
 
     <!-- Scripts -->
     @vite(['resources/css/app.css', 'resources/js/app.js'])

@@ -6,7 +6,7 @@
      for the whole window with <x-app-admin-layout wide>. Read here, ahead of the shell: inside
      its slots the attribute bag in scope is no longer this layout's own. --}}
 @php $frameWide = $attributes->has('wide') && $attributes->get('wide') !== false; @endphp
-<x-app-layout :theme-variants="true" realtime-surface="ap" :title="(request()->path() != '/' ? implode(' > ', array_map('ucwords', array_slice(explode('/', str_replace(['-', '_'], ' ', request()->path())), 0, 2))) : '') . ' | Event Schedule'">
+<x-app-layout :theme-variants="true" realtime-surface="ap" :title="(request()->path() != '/' ? implode(' > ', array_map('ucwords', array_slice(explode('/', str_replace(['-', '_'], ' ', request()->path())), 0, 2))) : '') . ' | ' . config('app.name')">
 
     <x-slot name="head">
         {{-- The admin portal is the one surface that genuinely is the Event Schedule app, so it
