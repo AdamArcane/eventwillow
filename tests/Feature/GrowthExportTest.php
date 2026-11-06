@@ -135,10 +135,11 @@ class GrowthExportTest extends TestCase
         // razorpay, 20 since boost.partner_fees (what boost partners pay on their own spend), 21
         // since the schedule rows say where each schedule stands now (subscription, what is on
         // sale, unpaid orders, its Google sync) and the deploy carries its commit, 22 since the
-        // headline test can be one arm (phase baseline), 23 since gateways can include payment_url.
+        // headline test can be one arm (phase baseline), 23 since gateways can include payment_url, 24
+        // since blocked accounts are left out, 25 since nudge_outcomes carries acted_subscribed.
         // Bumping this is deliberate: a reader diffing two pulls needs to know the shape (or the
         // meaning) moved.
-        $this->assertSame(23, $data['meta']['schema_version']);
+        $this->assertSame(25, $data['meta']['schema_version']);
         $this->assertSame(GrowthExportService::SCHEMA_VERSION, $data['meta']['schema_version']);
         $this->assertSame(now()->format('Y-m'), $data['meta']['partial_month']['month']);
         $this->assertSame(['funnel', 'funnel_trend'], $data['meta']['range_applies_to']);
@@ -1678,6 +1679,18 @@ class GrowthExportTest extends TestCase
         $this->assertSame(1, $outcome['acted_event'], 'an event 18 days after the nudge is outside the window');
         $this->assertSame(1, $outcome['acted_ticket_type']);
         $this->assertSame(0, $outcome['acted_paid_sale']);
+        $this->assertSame(0, $outcome['acted_subscribed']);
+
+        // paid_blocked asks for a plan: a subscription inside the window is its answer, and an
+        // incomplete checkout is not one.
+        $subscribe = fn (Role $role, int $daysAgo, string $status) => $role->subscriptions()->create([
+            'type' => 'default', 'stripe_id' => 'sub_'.Str::random(14), 'stripe_status' => $status,
+            'stripe_price' => 'price_pro_m', 'quantity' => 1, 'created_at' => now()->subDays($daysAgo),
+        ]);
+        $subscribe($acted, 15, 'active');
+        $subscribe($late, 15, 'incomplete');
+
+        $this->assertSame(1, $this->build()['nudge_outcomes']['no_ticket_type_free']['acted_subscribed']);
     }
 
     /**
@@ -2212,5 +2225,51 @@ class GrowthExportTest extends TestCase
         // A month before the columns existed was not counted, which is not the same as zero.
         $this->assertNull($traffic['2026-09']['guest_submit_views']);
         $this->assertNull($traffic['2026-09']['guest_submit_submissions']);
+    }
+
+    /**
+     * A blocked account is nearly always spam, and October 2026's wave read as the funnel's best
+     * month. From schema 24 the account and what it made leave every count of people: the funnel,
+     * the row tables, the monthly sign-ups and the daily series. An unclaimed placeholder has no
+     * owner at all and must survive the filter, which NOT IN on a NULL would have dropped.
+     * Mutation: drop any one of the blocked_at / excludeBlockedOwners conditions.
+     */
+    public function test_a_blocked_account_leaves_every_count_of_people(): void
+    {
+        $admin = $this->createOwner(true);
+        $this->createEvent($this->freeRole());
+        $spammer = $this->createOwner();
+        $this->createEvent($this->freeRole($spammer, 'curator'));
+        $placeholder = $this->freeRole();
+        DB::table('roles')->where('id', $placeholder->id)->update(['user_id' => null]);
+
+        $counts = function (): array {
+            $data = $this->build();
+            $stages = array_column($data['funnel']['stages'], 'count', 'key');
+            $today = $this->dailyRow($data, now()->toDateString());
+
+            return [
+                'account' => $stages['account'],
+                'saved_schedule' => $stages['saved_schedule'],
+                'signup_rows' => count($data['signups']['rows']),
+                'schedule_rows' => count($data['schedules']['rows']),
+                'verified_signups' => collect($data['traffic'])->firstWhere('month', now()->format('Y-m'))['verified_signups'],
+                'signups_organizer' => $today['signups_organizer'],
+                'first_schedule' => $today['first_schedule'],
+                'first_event' => $today['first_event'],
+            ];
+        };
+
+        $before = $counts();
+        app(\App\Services\AccountBlockService::class)->block($spammer, $admin);
+        $after = $counts();
+
+        foreach ($before as $key => $value) {
+            $this->assertSame($value - 1, $after[$key], "{$key} still counts the blocked account");
+        }
+
+        $service = app(GrowthExportService::class);
+        $kept = (fn () => $this->excludeBlockedOwners(DB::table('roles'), 'roles.user_id'))->call($service)->pluck('id')->all();
+        $this->assertContains($placeholder->id, $kept, 'an ownerless placeholder was dropped by NOT IN');
     }
 }

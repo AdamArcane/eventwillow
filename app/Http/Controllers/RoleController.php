@@ -4710,6 +4710,11 @@ class RoleController extends Controller
             return view('role/following_table', $data);
         }
 
+        // The page a confirmed subscriber lands on after setting a password, and the one place in
+        // the portal that is theirs: the offer to start a schedule of their own, for anybody who has
+        // no place on one. Same rule as gettingStarted()'s bounce.
+        $data['offerSchedule'] = ! is_demo_mode() && ! $user->member()->exists();
+
         return view('role/index', $data);
     }
 
@@ -6765,6 +6770,12 @@ class RoleController extends Controller
         // samples the header this save leaves the schedule with.
         if ($request->boolean('aurora_submitted')) {
             Aurora::saveFromRequest($role, $request);
+        }
+
+        // What the guest page shows (guest_page_settings), beside the schedule for the reason
+        // Aurora's settings are. Only on a save that carries the switch: absent is not off.
+        if ($request->has('show_next_event')) {
+            \App\Models\GuestPageSetting::store($role, ['show_next_event' => $request->boolean('show_next_event')]);
         }
 
         // The main address of a schedule served directly on its own domain, which lives beside

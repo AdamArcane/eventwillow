@@ -227,6 +227,11 @@
                     signupsAll: false,
                     bumped: {},
                     expandedCards: { pages: false, sources: false, countries: false },
+                    // The country whose block menu is open (_breakdown), or null.
+                    blockMenu: null,
+                    // The breakdown cards' span: '30m' is the live poll, the rest the hourly totals.
+                    cardsRange: CONFIG.cards || '30m',
+                    rangeCards: null,
                     // How many rows of each list are out of sight at xl (measureOverflow).
                     hiddenBelow: { feed: 0, signups: 0 },
                     fresh: {},
@@ -314,13 +319,36 @@
                     var person = this.findPerson(this.expanded);
                     return person && (person.id === data.person_id || person.aliases.indexOf(data.person_id) >= 0) ? data : null;
                 },
+                // The live half hour from the poll, or a longer range from the hourly totals
+                // (fetchRangeCards), whose rows are counts only and filter nothing.
                 cards: function () {
-                    var b = this.p.breakdowns || { pages: [], sources: [], countries: [] };
+                    var live = this.cardsRange === '30m';
+                    var b = live ? (this.p.breakdowns || {}) : (this.rangeCards || {});
+                    var views = live ? this.msg.unitViews30 : this.msg.unitViews[this.cardsRange];
+                    var visits = live ? this.msg.unitVisits30 : this.msg.unitVisits[this.cardsRange];
+                    var note = !live && this.p.filtered ? ' · ' + this.msg.notFiltered : '';
+                    var loading = !live && !this.rangeCards;
                     return [
-                        { id: 'pages', title: this.msg.topPages, unit: this.msg.unitViews30, filter: 'page', rows: b.pages || [] },
-                        { id: 'sources', title: this.msg.sources, unit: this.msg.unitVisits30, filter: 'source', rows: b.sources || [] },
-                        { id: 'countries', title: this.msg.countries, unit: this.msg.unitViews30, filter: 'country', rows: b.countries || [] },
+                        { id: 'pages', title: this.msg.topPages, unit: views + note, filter: 'page', rows: b.pages || [], loading: loading },
+                        { id: 'sources', title: this.msg.sources, unit: visits + note, filter: 'source', rows: b.sources || [], loading: loading },
+                        { id: 'countries', title: this.msg.countries, unit: views + note, filter: 'country', rows: b.countries || [], loading: loading },
                     ];
+                },
+                cardsShown: function () {
+                    return this.cardsRange !== '30m' || this.hasAnyone;
+                },
+                cardsRangeOptions: function () {
+                    var self = this;
+                    return ['30m', '24h', '7d', '30d'].map(function (value) { return { value: value, label: value === '30m' ? self.msg.range30m : self.msg.range[value] }; });
+                },
+                // "Counted from ..." while the totals began inside the range.
+                cardsSince: function () {
+                    if (this.cardsRange === '30m' || !this.rangeCards || !this.rangeCards.since) return '';
+                    try {
+                        return this.msg.trendSince.replace(':time', new Intl.DateTimeFormat(CONFIG.locale, { timeZone: CONFIG.timezone, dateStyle: 'medium', timeStyle: 'short' }).format(new Date(this.rangeCards.since)));
+                    } catch (e) {
+                        return '';
+                    }
                 },
                 // The board's columns: one per part of the site, except Sign up & log in, a doorway
                 // with a row or two, which stacks under the app. A fixed rule, never "the shortest",
@@ -598,7 +626,34 @@
                 urlParams: function () {
                     var params = this.params();
                     if (this.trendRange !== '24h') params.set('trend', this.trendRange);
+                    if (this.cardsRange !== '30m') params.set('cards', this.cardsRange);
                     return params;
+                },
+                setCardsRange: function (range) {
+                    if (range === this.cardsRange) return;
+                    this.cardsRange = range;
+                    this.rangeCards = null;
+                    this.blockMenu = null;
+                    this.syncUrl();
+                    if (range !== '30m') this.fetchRangeCards();
+                },
+                // Its own address, like Trends: the totals move by the hour, so a range change asks
+                // at once and otherwise the cards are refreshed every five minutes.
+                fetchRangeCards: function () {
+                    var self = this, range = this.cardsRange;
+                    if (range === '30m' || !CONFIG.breakdownsUrl) return;
+                    fetch(CONFIG.breakdownsUrl + '?range=' + encodeURIComponent(range), {
+                        headers: { 'X-Requested-With': 'XMLHttpRequest', 'Accept': 'application/json' },
+                        credentials: 'same-origin',
+                    }).then(function (r) {
+                        if (!r.ok) throw r;
+                        return r.json();
+                    }).then(function (data) {
+                        if (data && data.range === self.cardsRange) self.rangeCards = data;
+                    }).catch(function () {
+                        // The cards keep what they have; the poll's status line says when the page
+                        // has lost its connection.
+                    });
                 },
                 syncUrl: function () {
                     var query = this.urlParams().toString();
@@ -640,6 +695,22 @@
                 },
                 panelId: function (person) {
                     return 'realtime-person-' + person.id.replace(/[^A-Za-z0-9]/g, '');
+                },
+                // "Until Nov 2, 2026" in the page's clock, or "Until removed".
+                refusedUntil: function (row) {
+                    if (!row.blocked_until) return this.msg.refusedForever;
+                    try {
+                        return this.fill(this.msg.refusedUntil, new Intl.DateTimeFormat(CONFIG.locale, { timeZone: CONFIG.timezone, dateStyle: 'medium' }).format(new Date(row.blocked_until)));
+                    } catch (e) {
+                        return this.fill(this.msg.refusedUntil, row.blocked_until.slice(0, 10));
+                    }
+                },
+                closeBlockMenu: function (key) {
+                    this.blockMenu = null;
+                    this.$nextTick(function () {
+                        var toggle = document.querySelector('[aria-controls="realtime-block-' + key + '"]');
+                        if (toggle) toggle.focus();
+                    });
                 },
                 fill: function (template, label) {
                     // A function, so a "$&" in a page title or source is not a replacement pattern.
@@ -885,11 +956,86 @@
                         return r.json();
                     }).then(function (data) {
                         // A refresh that could not be read keeps the figures already shown.
-                        if (data && data.failed && self.revenue && !self.revenue.failed) return;
+                        if (data && data.failed && self.revenue && !self.revenue.failed) {
+                            if (data.active) { self.revenue = Object.assign({}, self.revenue, { active: data.active }); self.$nextTick(self.drawActiveChart); }
+                            return;
+                        }
                         self.revenue = data;
+                        self.$nextTick(self.drawActiveChart);
                     }).catch(function () {
                         if (!self.revenue) self.revenue = { failed: true };
                     });
+                },
+                // The corner card's active users chart (hosted): the line of the growth panel's
+                // card on the operator's own server, which stands here instead. The weeks seeded
+                // from the security log run low, so they are a dashed line never joined to the
+                // exact one, or the step between them reads as growth. Drawn afresh each time:
+                // it changes every five minutes at most.
+                drawActiveChart: function () {
+                    var self = this, canvas = this.$refs.activeChart, active = this.revenue && this.revenue.active;
+                    if (this.activeChart) { try { this.activeChart.destroy(); } catch (e) {} this.activeChart = null; }
+                    if (!active || !canvas) return;
+                    if (typeof Chart === 'undefined') {
+                        if ((this.activeTries = (this.activeTries || 0) + 1) < 100) setTimeout(function () { self.drawActiveChart(); }, 50);
+                        return;
+                    }
+                    var colors = chartColors();
+                    var soft = function (color) {
+                        var hex = /^#([0-9a-f]{3}|[0-9a-f]{6})$/i.exec((color || '').trim());
+                        if (!hex) return 'transparent';
+                        var digits = hex[1].length === 3 ? hex[1].replace(/./g, '$&$&') : hex[1];
+                        return 'rgba(' + [0, 2, 4].map(function (at) { return parseInt(digits.substr(at, 2), 16); }).join(',') + ', 0.12)';
+                    };
+                    var exact = active.exact, last = exact.length - 1;
+                    this.activeChart = new Chart(canvas, {
+                        type: 'line',
+                        data: {
+                            labels: active.labels,
+                            datasets: [
+                                { label: this.msg.estimate, data: active.estimate, borderColor: colors.gray, borderWidth: 2, borderDash: [5, 4], pointRadius: 0, pointHoverRadius: 4, tension: 0.3, fill: false },
+                                { label: this.msg.exact, data: exact, borderColor: colors.blue, backgroundColor: soft(colors.blue), fill: true, borderWidth: 2, pointRadius: exact.map(function (value, index) { return index === last && value !== null ? 3 : 0; }), pointBackgroundColor: colors.blue, pointHoverRadius: 4, tension: 0.3 },
+                            ],
+                        },
+                        options: {
+                            responsive: true,
+                            maintainAspectRatio: false,
+                            animation: false,
+                            interaction: { mode: 'index', intersect: false },
+                            layout: { padding: { top: 4, right: 4 } },
+                            plugins: {
+                                legend: { display: false },
+                                tooltip: {
+                                    rtl: CONFIG.rtl,
+                                    filter: function (item) { return item.raw !== null && item.raw !== undefined; },
+                                    callbacks: { label: function (item) { return item.dataset.label + ': ' + numberFormat.format(item.raw || 0); } },
+                                },
+                            },
+                            scales: {
+                                x: {
+                                    reverse: CONFIG.rtl,
+                                    grid: { display: false },
+                                    border: { display: false },
+                                    ticks: { color: colors.ink, font: { size: 11 }, maxRotation: 0, autoSkip: true, maxTicksLimit: 4 },
+                                },
+                                y: {
+                                    beginAtZero: true,
+                                    suggestedMax: 5,
+                                    position: CONFIG.rtl ? 'right' : 'left',
+                                    grid: { color: colors.grid },
+                                    border: { display: false },
+                                    ticks: { color: colors.ink, font: { size: 11 }, precision: 0, maxTicksLimit: 4 },
+                                },
+                            },
+                        },
+                    });
+                },
+                // "+16%", with one decimal only when there is one, as the growth panel prints it.
+                signedPct: function (value) {
+                    var text = String(Math.round(Math.abs(value) * 10) / 10);
+                    return (value >= 0 ? '+' : '-') + text + '%';
+                },
+                activeLine: function (active) {
+                    return this.msg.organizers + ' ' + this.msg.countOfTotal.replace(':count', this.fmt(active.organizers_7d)).replace(':total', this.fmt(active.active_7d));
                 },
                 trendColors: function () {
                     var self = this, colors = { blue: chartColors().blue };
@@ -1120,6 +1266,7 @@
                     this.chart.update('none');
                 },
                 recolorChart: function () {
+                    this.drawActiveChart();
                     if (!this.chart) return;
                     var colors = chartColors();
                     this.chart.data.datasets[0].backgroundColor = colors.blue;
@@ -1148,12 +1295,18 @@
                 this.$watch('activityAll', function () { self.$nextTick(function () { self.measureOverflow(); }); });
                 this.$watch('signupsAll', function () { self.$nextTick(function () { self.measureOverflow(); }); });
 
+                if (this.cardsRange !== '30m') this.fetchRangeCards();
+
+                // A click anywhere but the open block menu closes it (the menu stops its own clicks).
+                document.addEventListener('click', function () { self.blockMenu = null; });
+
                 setInterval(function () { self.nowMs = Date.now(); }, 5000);
                 setInterval(function () {
                     if (document.hidden || self.status !== 'live') return;
                     // A card asked once and refused (a 429, a blip) is asked again here, or it would
                     // stay a skeleton until somebody pressed a range.
                     if (self.trends || self.trendsAsked) self.fetchTrends(!!self.trends);
+                    if (self.cardsRange !== '30m') self.fetchRangeCards();
                     self.fetchRevenue();
                 }, 300000);
 

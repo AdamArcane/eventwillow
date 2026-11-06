@@ -13,6 +13,7 @@ require_once __DIR__.'/../vendor/autoload.php';
 // below owns it and must have the last word.
 foreach ([
     'APP_URL',
+    'APP_TIMEZONE',
     'STRIPE_KEY',
     'STRIPE_PLATFORM_SECRET',
     'STRIPE_PLATFORM_KEY',
@@ -41,6 +42,7 @@ foreach ([
     'META_SYSTEM_USER_ID',
     'META_LOGIN_CONFIG_ID',
     'GEMINI_API_KEY',
+    'SEARCH_CONSOLE_CREDENTIALS',
     'ADMIN_REQUIRE_2FA',
 ] as $pinned) {
     if (array_key_exists($pinned, $_ENV)) {
