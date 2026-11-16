@@ -11,6 +11,7 @@ class UpstreamSync extends Command
     protected $signature = 'upstream:sync
         {action=preview : setup, preview, prepare, continue, check, or draft-pr}
         {--base=origin/main : Starting Git ref}
+        {--upstream=upstream/main : Upstream Git ref, such as a release tag}
         {--branch= : New sync branch name for prepare}
         {--no-fetch : Use existing remote refs}';
 
@@ -19,7 +20,7 @@ class UpstreamSync extends Command
     public function handle(): int
     {
         try {
-            $workflow = new Workflow(base_path(), (string) $this->option('base'), $this->option('branch'), (bool) $this->option('no-fetch'), fn ($message) => $this->line($message));
+            $workflow = new Workflow(base_path(), (string) $this->option('base'), $this->option('branch'), (bool) $this->option('no-fetch'), fn ($message) => $this->line($message), (string) $this->option('upstream'));
             $workflow->execute((string) $this->argument('action'));
 
             return self::SUCCESS;

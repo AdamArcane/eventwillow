@@ -53,9 +53,9 @@ class UpstreamSyncWorkflowTest extends TestCase
         parent::tearDown();
     }
 
-    private function makeWorkflow(string $branch = 'sync-test'): FixtureSyncWorkflow
+    private function makeWorkflow(string $branch = 'sync-test', string $upstream = 'upstream/main'): FixtureSyncWorkflow
     {
-        return new FixtureSyncWorkflow($this->root, 'origin/main', $branch, true);
+        return new FixtureSyncWorkflow($this->root, 'origin/main', $branch, true, null, $upstream);
     }
 
     private function git(array $arguments): string
@@ -146,6 +146,23 @@ class UpstreamSyncWorkflowTest extends TestCase
         $this->assertTrue($this->workflow->activeMerge());
         $this->assertSame('checked', $this->workflow->load()['phase']);
         $this->assertStringContainsString('incoming.txt', $this->git(['diff', '--cached', '--name-only']));
+    }
+
+    public function test_prepare_can_select_a_release_tag_before_unreleased_commits(): void
+    {
+        $this->git(['tag', 'v1.0.143', $this->git(['rev-parse', 'upstream/main'])]);
+        $this->git(['switch', 'upstream-fixture']);
+        File::put($this->root.'/unreleased.txt', "later\n");
+        $this->commit('unreleased');
+        $this->git(['update-ref', 'refs/remotes/upstream/main', $this->git(['rev-parse', 'HEAD'])]);
+        $this->git(['switch', 'main']);
+
+        $workflow = $this->makeWorkflow('release-test', 'v1.0.143');
+        $workflow->prepare();
+
+        $this->assertSame($this->git(['rev-parse', 'v1.0.143']), $this->git(['rev-parse', 'MERGE_HEAD']));
+        $this->assertFileDoesNotExist($this->root.'/unreleased.txt');
+        $this->assertSame('v1.0.143', $workflow->load()['upstream_ref']);
     }
 
     public function test_conflicts_stop_before_checks_and_continue_after_review(): void
