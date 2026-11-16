@@ -36,6 +36,7 @@ class Workflow
         private ?string $targetBranch = null,
         private bool $noFetch = false,
         private ?Closure $output = null,
+        private string $upstreamRef = 'upstream/main',
     ) {
         $path = $this->git(['rev-parse', '--git-path', 'eventwillow-sync']);
         $this->directory = str_starts_with($path, DIRECTORY_SEPARATOR) ? $path : $root.'/'.$path;
@@ -157,9 +158,9 @@ class Workflow
             }
         }
         $base = $this->git(['rev-parse', '--verify', $this->base.'^{commit}']);
-        $upstream = $this->git(['rev-parse', '--verify', 'upstream/main^{commit}']);
+        $upstream = $this->git(['rev-parse', '--verify', $this->upstreamRef.'^{commit}']);
 
-        return ['version' => 2, 'base' => $this->base, 'base_sha' => $base, 'upstream_sha' => $upstream,
+        return ['version' => 2, 'base' => $this->base, 'base_sha' => $base, 'upstream_ref' => $this->upstreamRef, 'upstream_sha' => $upstream,
             'commits' => $this->lines($this->git(['log', '--reverse', '--format=%h %s', "{$base}..{$upstream}"])), 'checks' => []];
     }
 
@@ -167,7 +168,7 @@ class Workflow
     {
         $upstream = substr($state['upstream_sha'], 0, 12);
         $base = substr($state['base_sha'], 0, 12);
-        $lines = ["Sync EventSchedule through `{$upstream}` for development testing before merging into main.", '',
+        $lines = ["Sync EventSchedule `".($state['upstream_ref'] ?? 'upstream/main')."` (`{$upstream}`) for development testing before merging into main.", '',
             "Starting point: `{$state['base']}` (`{$base}`).", '', 'Upstream commits missing from the starting point:'];
         foreach ($state['commits'] ?: ['None.'] as $commit) {
             $lines[] = '- '.$commit;
@@ -199,7 +200,7 @@ class Workflow
         }
         $state = $this->summary();
         if (! $state['commits']) {
-            $this->say('The starting point already includes upstream/main. Nothing to prepare.');
+            $this->say('The starting point already includes '.$this->upstreamRef.'. Nothing to prepare.');
 
             return;
         }
@@ -297,7 +298,9 @@ class Workflow
             }
             throw new RuntimeException('Unresolved conflicts. Run continue after reviewing and staging the resolutions.');
         }
-        $this->checkCommand($state, 'sitemap generation', ['env', 'IS_NEXUS=true', PHP_BINARY, 'artisan', 'sitemap:lastmod']);
+        // Upstream limits nexus marketing routes to eventschedule.com and development hosts.
+        // Generate the upstream manifest under a loopback URL, regardless of this fork's APP_URL.
+        $this->checkCommand($state, 'sitemap generation', ['env', 'IS_NEXUS=true', 'APP_URL=http://localhost', PHP_BINARY, 'artisan', 'sitemap:lastmod']);
         if ($merging) {
             $this->git(['add', '--', self::MANIFEST]);
         } elseif ($this->git(['status', '--porcelain', '--', self::MANIFEST])) {
