@@ -42,6 +42,12 @@ class AppGuestLayout extends Component
          */
         public bool $bannerBar = false,
         /**
+         * Whether this page may carry the "This is an example schedule" bar, which shows only on
+         * a demo schedule's pages on the nexus (partials/example-schedule-bar). Opt-in for the
+         * same reason as the two above: the schedule and event pages set it, a checkout does not.
+         */
+        public bool $exampleBar = false,
+        /**
          * Whether this page carries the guest cart (floating button, panel and checkout form).
          *
          * Opt-in, and defaults to false, for the same reason as the two above: seventeen views
@@ -83,7 +89,7 @@ class AppGuestLayout extends Component
          * meta description. Null on every page that did not look them up, which then keeps the
          * bare schedule name as its title.
          *
-         * @var \Illuminate\Support\Collection<int, array{event: Event, date: string}>|null
+         * @var Collection<int, array{event: Event, date: string}>|null
          */
         public ?Collection $upcoming = null,
         /**
@@ -113,6 +119,13 @@ class AppGuestLayout extends Component
          * subscribe embed sets html and body transparent, which a layer of its own would ignore.
          */
         public bool $paintBackground = true,
+        /**
+         * Whether this is an event shown inside an embedded calendar (App\Support\EmbedEventView):
+         * every link leaves the frame (<base target="_blank">), the frame talks to embed.js on the
+         * organizer's page (partials/embed-frame), and a Free schedule's credit chip is drawn, as
+         * on the event's own page, where every other embed leaves it to the copied code.
+         */
+        public bool $embedEvent = false,
     ) {}
 
     /**

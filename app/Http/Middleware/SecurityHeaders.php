@@ -71,8 +71,12 @@ class SecurityHeaders
             'payments.cancel',
         ];
         $currentRouteName = $request->route()?->getName();
-        $isEmbeddable = $request->has('embed')
-            && ($request->embed === 'true' || $request->embed === '1')
+        // input(), never has() or ->embed: those read all(), which converts the uploaded files,
+        // and this runs after the controller. A FormRequest is a copy with its own file cache, so
+        // the original may convert an upload here for the first time, after the controller moved
+        // it out of /tmp (GeminiUtils::parseEvent()), and that throws FileNotFoundException.
+        $embed = $request->input('embed');
+        $isEmbeddable = ($embed === 'true' || $embed === '1')
             && in_array($currentRouteName, $embeddableRoutes);
 
         if ($isEmbeddable) {
@@ -133,8 +137,12 @@ class SecurityHeaders
             $csp[] = "frame-ancestors 'none'";
         }
 
-        // Don't set CSP for debug toolbar
-        if (! $request->is('_debugbar/*')) {
+        // Don't set CSP for debug toolbar. A page that must be stricter than the app's policy says
+        // so on the request (the operator's preview of an owner's newsletter, AdminMailReviewController).
+        $override = $request->attributes->get('csp_override');
+        if (is_string($override) && $override !== '') {
+            $response->headers->set('Content-Security-Policy', $override);
+        } elseif (! $request->is('_debugbar/*')) {
             $response->headers->set('Content-Security-Policy', implode('; ', $csp));
         }
 

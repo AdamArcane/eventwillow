@@ -2,19 +2,24 @@
 
 namespace App\Http\Controllers;
 
+use App\Exceptions\BusinessException;
 use App\Http\Requests\ImportAttendeesRequest;
 use App\Http\Requests\TicketCheckoutRequest;
 use App\Jobs\NotifyWaitlist;
+use App\Jobs\SendFeedbackEmail;
 use App\Mail\FeedbackRequest;
 use App\Models\AnalyticsEventsDaily;
+use App\Models\BoostCampaign;
 use App\Models\Event;
 use App\Models\EventFeedback;
 use App\Models\GiftCard;
 use App\Models\PromoCode;
 use App\Models\Role;
+use App\Models\RoleSubscriber;
 use App\Models\Sale;
 use App\Models\SaleInstallmentPlan;
 use App\Models\SaleTicket;
+use App\Models\SeatingSeat;
 use App\Models\TicketWaitlist;
 use App\Models\User;
 use App\Rules\NoFakeEmail;
@@ -26,18 +31,25 @@ use App\Services\PassRedemptionService;
 use App\Services\Payments\CheckoutContext;
 use App\Services\Payments\PaymentGatewayDriver;
 use App\Services\RoleMailerService;
+use App\Services\SaleRefundResult;
+use App\Services\SaleRefundService;
 use App\Services\SaleSettlementService;
+use App\Services\SeatHoldService;
+use App\Services\SeatingMapService;
 use App\Services\TicketScanService;
 use App\Services\TicketVolumeDiscount;
 use App\Services\UsageTrackingService;
 use App\Services\Wallet\GoogleWalletService;
 use App\Services\WebhookService;
+use App\Traits\HandlesSaleStatusActions;
 use App\Utils\CsvUtils;
 use App\Utils\GuestFunnel;
 use App\Utils\HoneypotUtils;
 use App\Utils\QrCodeUtils;
+use App\Utils\TurnstileUtils;
 use App\Utils\UrlUtils;
 use Carbon\Carbon;
+use Illuminate\Database\QueryException;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Arr;
@@ -45,11 +57,12 @@ use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Hash;
 use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Str;
+use Illuminate\Validation\ValidationException;
 use Stripe\StripeClient;
 
 class TicketController extends Controller
 {
-    use \App\Traits\HandlesSaleStatusActions;
+    use HandlesSaleStatusActions;
 
     public function tickets()
     {
@@ -798,7 +811,7 @@ class TicketController extends Controller
                 $sale->feedback_sent_at = now();
                 $sale->save();
 
-                \App\Jobs\SendFeedbackEmail::dispatch(
+                SendFeedbackEmail::dispatch(
                     $sale->id,
                     $event->id,
                     $saleRole->id,
@@ -837,7 +850,7 @@ class TicketController extends Controller
             ->get();
 
         // Use a sentinel date to distinguish cancelled from actually sent
-        $cancelledAt = \Carbon\Carbon::create(2000, 1, 1);
+        $cancelledAt = Carbon::create(2000, 1, 1);
 
         foreach ($pendingSales as $sale) {
             $event = $sale->event;
@@ -901,7 +914,7 @@ class TicketController extends Controller
 
         $filter = strtolower(request()->filter ?? '');
         $includePast = request()->query('include_past') == 1;
-        $sales = $this->salesQuery($filter, primaryOnly: false, includePast: $includePast)->orderBy('created_at', 'DESC')->get();
+        $sales = $this->salesQuery($filter, primaryOnly: false, includePast: $includePast)->with('promoterLink')->orderBy('created_at', 'DESC')->get();
 
         // First pass: collect unique custom field names
         $customFieldNames = [];
@@ -940,7 +953,7 @@ class TicketController extends Controller
         // an IN list long enough to run into max_allowed_packet, and one unbounded hydrate of every
         // seat row on top of the sales already held in memory.
         foreach ($seatedSaleIds->chunk(1000) as $chunk) {
-            \App\Models\SeatingSeat::with(['section', 'seatingTable'])
+            SeatingSeat::with(['section', 'seatingTable'])
                 ->whereIn('sale_id', $chunk)
                 ->orderBy('row_position')->orderBy('position')
                 ->get()
@@ -959,7 +972,7 @@ class TicketController extends Controller
             fwrite($handle, "\xEF\xBB\xBF");
 
             // Header row
-            $headers = ['Name', 'Email', 'Phone', 'Event', 'Event Date', 'Tickets', 'Add-ons', 'Quantity', 'Amount', 'Currency', 'Promo Code', 'Discount', 'Gift Card', 'Gift Card Amount', 'Transaction Reference', 'Payment Method', 'Status', 'Date', 'Group ID', 'Order ID', 'Check-in Status', 'Check-in Time', 'Pass Type', 'Pass Visits Used', 'Pass Expires', 'Seats'];
+            $headers = ['Name', 'Email', 'Phone', 'Event', 'Event Date', 'Tickets', 'Add-ons', 'Quantity', 'Amount', 'Currency', 'Promo Code', 'Discount', 'Gift Card', 'Gift Card Amount', 'Donation', 'Promoter', 'Transaction Reference', 'Payment Method', 'Status', 'Date', 'Group ID', 'Order ID', 'Check-in Status', 'Check-in Time', 'Pass Type', 'Pass Visits Used', 'Pass Expires', 'Seats'];
             $headers = array_merge($headers, $customFieldNames);
             fputcsv($handle, $headers);
 
@@ -992,6 +1005,8 @@ class TicketController extends Controller
                     $sale->discount_amount ? number_format($sale->discount_amount, 2, '.', '') : '',
                     CsvUtils::sanitizeCell($sale->giftCard ? $sale->giftCard->formattedCode() : ''),
                     $sale->gift_card_amount ? number_format($sale->gift_card_amount, 2, '.', '') : '',
+                    $sale->donation_amount ? number_format($sale->donation_amount, 2, '.', '') : '',
+                    CsvUtils::sanitizeCell($sale->promoterLink?->name ?? ''),
                     CsvUtils::sanitizeCell($sale->transaction_reference),
                     CsvUtils::sanitizeCell($sale->payment_method),
                     $sale->status,
@@ -1014,7 +1029,7 @@ class TicketController extends Controller
                 }
                 $row[] = $checkinTimestamp !== null ? 'Yes' : 'No';
                 $row[] = $checkinTimestamp !== null
-                    ? \Carbon\Carbon::createFromTimestamp($checkinTimestamp)->timezone($sale->event->creatorRole?->timezone ?? config('app.timezone'))->format('Y-m-d H:i')
+                    ? Carbon::createFromTimestamp($checkinTimestamp)->timezone($sale->event->creatorRole?->timezone ?? config('app.timezone'))->format('Y-m-d H:i')
                     : '';
 
                 // Pass / subscription columns
@@ -1095,6 +1110,10 @@ class TicketController extends Controller
         $role = Role::findForGuestOrFail($subdomain);
         $user = auth()->user();
         $isMemberOrAdmin = $user && ($user->isMember($subdomain) || $user->isAdmin());
+
+        // The language the buyer read this schedule's page in, which every mail about the order
+        // follows (Sale::guestLanguage()).
+        $guestLanguage = Sale::languageFromRequest($request, $role);
 
         // One leg per event in the cart. A request without legs[] is a single leg built from the
         // flat fields, which is every request the single-event form has ever sent.
@@ -1190,6 +1209,34 @@ class TicketController extends Controller
                     : back()->withInput()->with('error', __('messages.tickets_not_available'));
             }
 
+            // A donation: only where the event asks for one, on its own checkout (the cart panel
+            // offers none, so this is a hand-built request), within its limits, and rounded to
+            // what its currency can charge. Refused rather than dropped: a buyer who chose to give
+            // must never pay less, or more, than they saw.
+            if ($leg['donation'] > 0) {
+                if ($isCart || ! $event->offersDonations()) {
+                    return back()->withInput()->with('error', __('messages.donation_not_available'));
+                }
+
+                $ticketsTotal = collect($leg['tickets'])->map(fn ($quantity, $hash) => (float) ($event->tickets->firstWhere('id', UrlUtils::decodeId($hash))?->price ?? 0) * (int) $quantity)->sum();
+                [$minimum, $maximum] = $event->donationLimits($ticketsTotal);
+                $donation = round($leg['donation'], \App\Utils\MoneyUtils::decimalsFor($event->ticket_currency_code ?: 'USD'));
+
+                // An owner who offers only their suggested amounts gets only those.
+                if ($event->donation_custom === false && ! in_array($donation, array_map(fn ($amount) => round((float) $amount, \App\Utils\MoneyUtils::decimalsFor($event->ticket_currency_code ?: 'USD')), $event->donationAmounts()), true)) {
+                    return back()->withInput()->with('error', __('messages.donation_not_available'));
+                }
+
+                if ($donation < $minimum || $donation > $maximum) {
+                    return back()->withInput()->with('error', __('messages.donation_out_of_range', [
+                        'min' => \App\Utils\MoneyUtils::format($minimum, $event->ticket_currency_code),
+                        'max' => \App\Utils\MoneyUtils::format($maximum, $event->ticket_currency_code),
+                    ]));
+                }
+
+                $legs[$index]['donation'] = $donation;
+            }
+
             $legs[$index]['event'] = $event;
         }
 
@@ -1268,7 +1315,7 @@ class TicketController extends Controller
         // Use database transaction with row locking to prevent race conditions
         // that could lead to overselling tickets
         try {
-            $sale = DB::transaction(function () use ($request, $legs, $user, $subdomain, $isPaymentLink) {
+            $sale = DB::transaction(function () use ($request, $legs, $user, $subdomain, $isPaymentLink, $guestLanguage) {
                 $sales = [];
 
                 // Locked once for the whole order, then drawn down leg by leg. See the method.
@@ -1277,7 +1324,7 @@ class TicketController extends Controller
                 foreach ($legs as $leg) {
                     $this->assertLegTicketsAvailable($leg, $leg['event'], $isPaymentLink);
 
-                    $legSale = $this->newSaleForLeg($request, $leg, $leg['event'], $user, $subdomain);
+                    $legSale = $this->newSaleForLeg($request, $leg, $leg['event'], $user, $subdomain, $guestLanguage);
                     $legSale->save();
 
                     $this->priceSaleLeg($legSale, $request, $leg, $leg['event'], $subdomain, $isPaymentLink, $giftCard);
@@ -1312,11 +1359,11 @@ class TicketController extends Controller
 
                 return $sales[0];
             });
-        } catch (\Illuminate\Database\QueryException $e) {
+        } catch (QueryException $e) {
             report($e);
 
             return back()->withInput()->with('error', __('messages.error'));
-        } catch (\App\Exceptions\BusinessException $e) {
+        } catch (BusinessException $e) {
             return back()->withInput()->with('error', $e->getMessage());
         } catch (\Exception $e) {
             report($e);
@@ -1427,6 +1474,7 @@ class TicketController extends Controller
                 'ticket_custom_values' => $request->input('ticket_custom_values', []),
                 'guest_ticket_custom_values' => $request->input('guest_ticket_custom_values', []),
                 'promo_code' => $request->input('promo_code'),
+                'donation_amount' => $request->input('donation_amount'),
             ]];
         }
 
@@ -1443,6 +1491,7 @@ class TicketController extends Controller
             'ticket_custom_values' => (array) ($leg['ticket_custom_values'] ?? []),
             'guest_ticket_custom_values' => (array) ($leg['guest_ticket_custom_values'] ?? []),
             'promo_code' => $leg['promo_code'] ?? null,
+            'donation' => is_numeric($leg['donation_amount'] ?? null) ? max(0.0, (float) $leg['donation_amount']) : 0.0,
         ], array_values($raw));
     }
 
@@ -1526,8 +1575,8 @@ class TicketController extends Controller
             return;
         }
 
-        $holds = app(\App\Services\SeatHoldService::class);
-        $map = app(\App\Services\SeatingMapService::class)->mapFor($event, $sale->event_date);
+        $holds = app(SeatHoldService::class);
+        $map = app(SeatingMapService::class)->mapFor($event, $sale->event_date);
 
         $counts = $map ? $holds->claimForSale($map, $holds->tokenFor($request), $sale) : [];
 
@@ -1535,7 +1584,7 @@ class TicketController extends Controller
         // line was never verified, so a sale could be written with an attendee holding no seat.
         $groupSaleIds = Sale::where('id', $sale->id)->orWhere('group_id', $sale->id)->pluck('id');
 
-        foreach (\App\Models\SaleTicket::with('ticket')->whereIn('sale_id', $groupSaleIds)->get() as $saleTicket) {
+        foreach (SaleTicket::with('ticket')->whereIn('sale_id', $groupSaleIds)->get() as $saleTicket) {
             $ticket = $saleTicket->ticket;
 
             if (! $ticket) {
@@ -1549,7 +1598,7 @@ class TicketController extends Controller
             }
 
             if (($counts[$saleTicket->id] ?? 0) !== (int) $saleTicket->quantity) {
-                throw new \App\Exceptions\BusinessException(__('messages.seating_seats_no_longer_held'));
+                throw new BusinessException(__('messages.seating_seats_no_longer_held'));
             }
         }
     }
@@ -1570,7 +1619,7 @@ class TicketController extends Controller
         }
 
         if (! is_string($date) || ! Event::isOccurrenceDate($date) || ! $event->matchesDate($date, $event->scheduleTimezone())) {
-            throw new \App\Exceptions\BusinessException(__('messages.invalid_request'));
+            throw new BusinessException(__('messages.invalid_request'));
         }
     }
 
@@ -1594,7 +1643,7 @@ class TicketController extends Controller
                 ->map(fn ($id) => UrlUtils::decodeId($id));
             $selectedTickets = $event->tickets->whereIn('id', $selectedTicketIds);
             if ($selectedTickets->contains(fn ($t) => $t->is_pass) && $selectedTickets->contains(fn ($t) => ! $t->is_pass)) {
-                throw new \App\Exceptions\BusinessException(__('messages.pass_cannot_combine'));
+                throw new BusinessException(__('messages.pass_cannot_combine'));
             }
 
             foreach ($leg['tickets'] as $ticketId => $quantity) {
@@ -1603,19 +1652,19 @@ class TicketController extends Controller
                     $ticketModel = $event->tickets()->lockForUpdate()->find(UrlUtils::decodeId($ticketId));
 
                     if (! $ticketModel) {
-                        throw new \App\Exceptions\BusinessException(__('messages.ticket_not_found'));
+                        throw new BusinessException(__('messages.ticket_not_found'));
                     }
 
                     if ($ticketModel->isSalesEnded()) {
-                        throw new \App\Exceptions\BusinessException(__('messages.tickets_not_available'));
+                        throw new BusinessException(__('messages.tickets_not_available'));
                     }
 
                     if ($ticketModel->isSalesNotStarted()) {
-                        throw new \App\Exceptions\BusinessException(__('messages.tickets_not_available'));
+                        throw new BusinessException(__('messages.tickets_not_available'));
                     }
 
                     if ($ticketModel->max_per_order && $quantity > $ticketModel->max_per_order) {
-                        throw new \App\Exceptions\BusinessException(__('messages.exceeded_max_per_order', [
+                        throw new BusinessException(__('messages.exceeded_max_per_order', [
                             'max' => $ticketModel->max_per_order,
                         ]));
                     }
@@ -1637,14 +1686,14 @@ class TicketController extends Controller
                             // Check if the total requested quantity exceeds remaining tickets
                             $totalRequested = array_sum($leg['tickets']);
                             if ($totalRequested > $remainingTickets) {
-                                throw new \App\Exceptions\BusinessException(__('messages.tickets_not_available'));
+                                throw new BusinessException(__('messages.tickets_not_available'));
                             }
                         } else {
                             $soldCount = $ticketModel->soldCountFor($eventDate);
                             $remainingTickets = $ticketModel->quantity - $soldCount;
 
                             if ($quantity > $remainingTickets) {
-                                throw new \App\Exceptions\BusinessException(__('messages.tickets_not_available'));
+                                throw new BusinessException(__('messages.tickets_not_available'));
                             }
                         }
                     }
@@ -1662,7 +1711,7 @@ class TicketController extends Controller
                 $event->setRelation('tickets', $event->tickets()->lockForUpdate()->get());
                 $houseRemaining = $event->occurrenceSeatsRemaining($eventDate);
                 if ($houseRemaining !== null && array_sum($leg['tickets']) > $houseRemaining) {
-                    throw new \App\Exceptions\BusinessException(__('messages.tickets_not_available'));
+                    throw new BusinessException(__('messages.tickets_not_available'));
                 }
             }
 
@@ -1676,11 +1725,11 @@ class TicketController extends Controller
                     $addonModel = $event->addons()->lockForUpdate()->find(UrlUtils::decodeId($addonId));
 
                     if (! $addonModel) {
-                        throw new \App\Exceptions\BusinessException(__('messages.ticket_not_found'));
+                        throw new BusinessException(__('messages.ticket_not_found'));
                     }
 
                     if ($addonModel->max_per_order && $addonQty > $addonModel->max_per_order) {
-                        throw new \App\Exceptions\BusinessException(__('messages.exceeded_max_per_order', [
+                        throw new BusinessException(__('messages.exceeded_max_per_order', [
                             'max' => $addonModel->max_per_order,
                         ]));
                     }
@@ -1690,7 +1739,7 @@ class TicketController extends Controller
                         $remaining = $addonModel->quantity - $soldCount;
 
                         if ($addonQty > $remaining) {
-                            throw new \App\Exceptions\BusinessException(__('messages.tickets_not_available'));
+                            throw new BusinessException(__('messages.tickets_not_available'));
                         }
                     }
                 }
@@ -1702,9 +1751,10 @@ class TicketController extends Controller
      * The identity half of a sale row for one event: buyer details, attribution and the
      * event-level custom field answers. Unsaved; the caller saves it, then prices it.
      */
-    private function newSaleForLeg($request, array $leg, Event $event, $user, string $subdomain): Sale
+    private function newSaleForLeg($request, array $leg, Event $event, $user, string $subdomain, ?string $guestLanguage = null): Sale
     {
         $sale = new Sale;
+        $sale->language_code = $guestLanguage;
         $sale->name = $request->input('name');
         $sale->email = $request->input('email');
         $sale->phone = $request->input('phone') ? strip_tags(trim($request->input('phone'))) : null;
@@ -1731,13 +1781,16 @@ class TicketController extends Controller
             // Verify the campaign exists before assigning it: sales.boost_campaign_id
             // carries a foreign key, so a crafted utm_campaign that decodes to an unknown
             // id would fail the INSERT and take the whole checkout down with it.
-            $sale->boost_campaign_id = \App\Models\BoostCampaign::whereKey(
+            $sale->boost_campaign_id = BoostCampaign::whereKey(
                 UrlUtils::decodeId($utmParams['utm_campaign'])
             )->value('id');
         }
         if (($utmParams['utm_source'] ?? null) === 'newsletter' && ($utmParams['utm_campaign'] ?? null)) {
             $sale->newsletter_id = UrlUtils::decodeId($utmParams['utm_campaign']);
         }
+
+        // The promoter whose link brought the buyer, for the event's own schedule only.
+        $sale->promoter_link_id = \App\Services\PromoterLinks::linkFor($request, $event)?->id;
 
         if (! $sale->event_date) {
             $sale->event_date = $event->saleEventDateFromStartsAt();
@@ -1800,7 +1853,7 @@ class TicketController extends Controller
         // reduces the event owner's payout, so both must be the same user.
         if (! $giftCard || $event->user_id !== $giftCard->role->user_id
             || ! $giftCard->isRedeemable($event->ticket_currency_code)) {
-            throw new \App\Exceptions\BusinessException(__('messages.gift_card_invalid'));
+            throw new BusinessException(__('messages.gift_card_invalid'));
         }
 
         return $giftCard;
@@ -1826,7 +1879,7 @@ class TicketController extends Controller
                 // Validate no duplicate emails among guests
                 $guestEmails = collect($guests)->pluck('email')->filter()->map(fn ($e) => strtolower(trim($e)));
                 if ($guestEmails->count() !== $guestEmails->unique()->count()) {
-                    throw new \App\Exceptions\BusinessException(__('messages.duplicate_guest_emails'));
+                    throw new BusinessException(__('messages.duplicate_guest_emails'));
                 }
 
                 // Build flat list of ticket assignments for guests
@@ -1847,7 +1900,7 @@ class TicketController extends Controller
 
                 // Validate guest count matches ticket count
                 if (count($ticketAssignments) !== count($guests)) {
-                    throw new \App\Exceptions\BusinessException(__('messages.error'));
+                    throw new BusinessException(__('messages.error'));
                 }
 
                 // Primary sale gets the first ticket (qty=1)
@@ -1987,7 +2040,7 @@ class TicketController extends Controller
                                 $ticketModel = $event->tickets()->find($decodedId);
                                 if ($ticketModel) {
                                     $ticketModel->setRelation('event', $event);
-                                    $fakeSaleTicket = new \App\Models\SaleTicket(['ticket_id' => $decodedId, 'quantity' => $quantity]);
+                                    $fakeSaleTicket = new SaleTicket(['ticket_id' => $decodedId, 'quantity' => $quantity]);
                                     $fakeSaleTicket->setRelation('ticket', $ticketModel);
                                     $allSaleTickets->push($fakeSaleTicket);
                                 }
@@ -2010,12 +2063,35 @@ class TicketController extends Controller
             // Draw down the gift card resolved for the whole order (deducted after volume + promo).
             // The card is validated once, up front, in resolveOrderGiftCard(); each leg simply
             // spends whatever is left, and a leg that finds nothing left just pays its own way.
+            // The buyer's donation (validated in checkout()): after the volume and promo discounts,
+            // which never touch it, and before the gift card, which may pay it like anything else.
+            $donation = (float) ($leg['donation'] ?? 0);
+
+            // checkout() waived the gateway's minimum for a donation beside a priced ticket, from
+            // list prices. A promo code can still bring the tickets to nothing, and then the
+            // donation alone is the charge: it must reach the minimum, or the gateway refuses the
+            // order after the seats are held. A gift card that pays the whole of it leaves nothing
+            // to charge, which is fine; one that pays only part cannot help, since the draw below
+            // can only leave the minimum or nothing, and an order under the minimum has neither.
+            if ($donation > 0) {
+                $ticketsNet = max(0, $subtotalAfterVolume - $discountTotal);
+                $minCharge = (float) (payment_gateways()->get($event->payment_method)
+                    ?->amountLimits($event->ticket_currency_code ?: 'USD')[0] ?? 0);
+                $coveredByCard = $giftCard && (float) $giftCard->remaining_amount >= $ticketsNet + $donation;
+                if ($ticketsNet + $donation < $minCharge && ! $coveredByCard) {
+                    throw new BusinessException(__('messages.donation_out_of_range', [
+                        'min' => \App\Utils\MoneyUtils::format($minCharge - $ticketsNet, $event->ticket_currency_code),
+                        'max' => \App\Utils\MoneyUtils::format($event->donationLimits()[1], $event->ticket_currency_code),
+                    ]));
+                }
+            }
+
             $giftCardId = null;
             $giftCardApplied = 0.0;
             if ($giftCard) {
                 // Re-read through the locked instance: earlier legs of this order have already
                 // decremented it in memory and in the row.
-                $orderTotal = max(0, $subtotalAfterVolume - $discountTotal);
+                $orderTotal = max(0, $subtotalAfterVolume - $discountTotal) + $donation;
                 $giftCardApplied = min((float) $giftCard->remaining_amount, $orderTotal);
 
                 // A gateway with a floor (Stripe refuses under ~50 smallest units) must be left
@@ -2062,7 +2138,8 @@ class TicketController extends Controller
                 // Gift card allocation: greedy waterfall over per-seat nets (primary first).
                 // Proportional shares could push a seat negative when a ticket-restricted
                 // promo skews the nets; greedy sums exactly with no rounding residue.
-                $primaryNet = $seatPrices[0] - $seatVolumeShares[0] - $seatPromoShares[0] + $addonTotal;
+                // The primary holds seat[0], every add-on and the donation.
+                $primaryNet = $seatPrices[0] - $seatVolumeShares[0] - $seatPromoShares[0] + $addonTotal + $donation;
                 $seatGiftShares = array_fill(0, $seatCount, 0.0);
                 if ($giftCardApplied > 0) {
                     $remainingGift = $giftCardApplied;
@@ -2096,8 +2173,9 @@ class TicketController extends Controller
                     $sale->gift_card_id = $giftCardId;
                     $sale->gift_card_amount = $giftCardApplied;
                 }
-                $sale->payment_amount = max(0, $subtotalAfterVolume - $discountTotal - $giftCardApplied);
+                $sale->payment_amount = max(0, $subtotalAfterVolume - $discountTotal + $donation - $giftCardApplied);
             }
+            $sale->donation_amount = $donation > 0 ? $donation : null;
 
             // Create guest sales for individual tickets
             if ($isIndividualTickets) {
@@ -2116,6 +2194,8 @@ class TicketController extends Controller
                     $guestSale->payment_amount = max(0, $seatPrices[$g] - $seatVolumeShares[$g] - $seatPromoShares[$g] - $seatGiftShares[$g]);
                     $guestSale->status = $sale->status ?? 'unpaid';
                     $guestSale->group_id = $sale->id;
+                    $guestSale->promoter_link_id = $sale->promoter_link_id;
+                    $guestSale->language_code = $sale->language_code;
                     if ($promoCodeId) {
                         $guestSale->promo_code_id = $promoCodeId;
                     }
@@ -2206,7 +2286,7 @@ class TicketController extends Controller
                 // nullable, and an opt-in that quietly does nothing is worse than one attributed
                 // to the page the visitor was actually looking at.
                 return $event->creatorRole
-                    ?: ($subdomain ? \App\Models\Role::subdomain($subdomain)->first() : null);
+                    ?: ($subdomain ? Role::subdomain($subdomain)->first() : null);
             })
             ->filter(fn ($role) => $role && ! $role->is_deleted && ! is_demo_role($role))
             ->unique('id');
@@ -2216,7 +2296,7 @@ class TicketController extends Controller
         }
     }
 
-    private function captureAudienceOptInFor(\App\Models\Role $role, string $email, ?string $name): void
+    private function captureAudienceOptInFor(Role $role, string $email, ?string $name): void
     {
         // Trimmed AFTER the strip, and back to null when nothing survives. strip_tags alone turns
         // "<b> </b>" into "   ", and a whitespace-only string is TRUTHY - so it slips past the
@@ -2228,14 +2308,14 @@ class TicketController extends Controller
         $name = trim(strip_tags((string) $name));
 
         try {
-            $subscriber = \App\Models\RoleSubscriber::firstOrCreate(
+            $subscriber = RoleSubscriber::firstOrCreate(
                 ['role_id' => $role->id, 'email' => strtolower(trim($email))],
                 [
                     'name' => $name !== '' ? $name : null,
                     'locale' => app()->getLocale(),
                     'source' => 'checkout',
                     'confirmed_at' => now(),
-                    'token' => \App\Models\RoleSubscriber::newToken(),
+                    'token' => RoleSubscriber::newToken(),
                 ]
             );
 
@@ -2246,7 +2326,7 @@ class TicketController extends Controller
             if (! $subscriber->isConfirmed()) {
                 $subscriber->forceFill(['confirmed_at' => now(), 'confirm_token' => null])->save();
             }
-        } catch (\Illuminate\Database\QueryException $e) {
+        } catch (QueryException $e) {
             // ONLY a duplicate-key race is safe to swallow here. This runs inside the checkout
             // transaction, and a deadlock (1213) or lock-wait timeout aborts it in MySQL - so
             // swallowing those would let the closure return normally, the sale rows vanish on the
@@ -2293,12 +2373,12 @@ class TicketController extends Controller
         $request->validate($rules);
 
         // Turnstile CAPTCHA validation
-        if (\App\Utils\TurnstileUtils::isActiveForRequest()) {
+        if (TurnstileUtils::isActiveForRequest()) {
             $request->validate([
                 'cf-turnstile-response' => 'required',
             ]);
 
-            $turnstileValid = \App\Utils\TurnstileUtils::verify($request->input('cf-turnstile-response'));
+            $turnstileValid = TurnstileUtils::verify($request->input('cf-turnstile-response'));
             if (! $turnstileValid) {
                 return back()->withInput()->with('error', __('messages.turnstile_verification_failed'));
             }
@@ -2372,7 +2452,7 @@ class TicketController extends Controller
         }
 
         try {
-            $sale = DB::transaction(function () use ($request, $event, $user, $subdomain) {
+            $sale = DB::transaction(function () use ($request, $event, $user, $subdomain, $role) {
                 // Lock the event row to prevent race conditions
                 $event = Event::lockForUpdate()->find($event->id);
 
@@ -2383,7 +2463,7 @@ class TicketController extends Controller
                 $rsvpQuantity = $event->individual_tickets ? max(1, count($guests)) : 1;
                 $rsvpSoldCount = $event->rsvpSoldCount($request->event_date);
                 if ($event->rsvp_limit && ($rsvpSoldCount + $rsvpQuantity) > $event->rsvp_limit) {
-                    throw new \App\Exceptions\BusinessException(__('messages.rsvp_full'));
+                    throw new BusinessException(__('messages.rsvp_full'));
                 }
 
                 // Check for duplicate registration
@@ -2396,14 +2476,14 @@ class TicketController extends Controller
                     ->exists();
 
                 if ($duplicate) {
-                    throw new \App\Exceptions\BusinessException(__('messages.rsvp_already_registered'));
+                    throw new BusinessException(__('messages.rsvp_already_registered'));
                 }
 
                 // Check for duplicate guest registrations
                 if ($event->individual_tickets && count($guests) > 1) {
                     $guestEmails = collect($guests)->pluck('email')->filter()->map(fn ($e) => strtolower(trim($e)));
                     if ($guestEmails->count() !== $guestEmails->unique()->count()) {
-                        throw new \App\Exceptions\BusinessException(__('messages.duplicate_guest_emails'));
+                        throw new BusinessException(__('messages.duplicate_guest_emails'));
                     }
                     $duplicateGuests = Sale::where('event_id', $event->id)
                         ->where('event_date', $request->event_date)
@@ -2414,7 +2494,7 @@ class TicketController extends Controller
                         ->exists();
 
                     if ($duplicateGuests) {
-                        throw new \App\Exceptions\BusinessException(__('messages.rsvp_already_registered'));
+                        throw new BusinessException(__('messages.rsvp_already_registered'));
                     }
                 }
 
@@ -2431,6 +2511,8 @@ class TicketController extends Controller
                 $sale->payment_amount = 0;
                 $sale->status = 'paid';
                 $sale->ad_consent = consent_granted('marketing', $request);
+                // The language the guest read the page in, which their mails follow.
+                $sale->language_code = Sale::languageFromRequest($request, $role);
 
                 // Capture UTM attribution
                 $utmParams = $request->session()->get('utm_params', []);
@@ -2444,13 +2526,15 @@ class TicketController extends Controller
                     // Verify the campaign exists before assigning it: sales.boost_campaign_id
                     // carries a foreign key, so a crafted utm_campaign that decodes to an unknown
                     // id would fail the INSERT and take the whole checkout down with it.
-                    $sale->boost_campaign_id = \App\Models\BoostCampaign::whereKey(
+                    $sale->boost_campaign_id = BoostCampaign::whereKey(
                         UrlUtils::decodeId($utmParams['utm_campaign'])
                     )->value('id');
                 }
                 if (($utmParams['utm_source'] ?? null) === 'newsletter' && ($utmParams['utm_campaign'] ?? null)) {
                     $sale->newsletter_id = UrlUtils::decodeId($utmParams['utm_campaign']);
                 }
+
+                $sale->promoter_link_id = \App\Services\PromoterLinks::linkFor($request, $event)?->id;
 
                 if (! $sale->event_date) {
                     $sale->event_date = $event->saleEventDateFromStartsAt();
@@ -2499,6 +2583,8 @@ class TicketController extends Controller
                         $guestSale->payment_amount = 0;
                         $guestSale->status = 'paid';
                         $guestSale->group_id = $sale->id;
+                        $guestSale->promoter_link_id = $sale->promoter_link_id;
+                        $guestSale->language_code = $sale->language_code;
 
                         // Copy event-level custom values from primary sale
                         for ($cv = 1; $cv <= 10; $cv++) {
@@ -2514,11 +2600,11 @@ class TicketController extends Controller
 
                 return $sale;
             });
-        } catch (\Illuminate\Database\QueryException $e) {
+        } catch (QueryException $e) {
             report($e);
 
             return back()->withInput()->with('error', __('messages.error'));
-        } catch (\App\Exceptions\BusinessException $e) {
+        } catch (BusinessException $e) {
             return back()->withInput()->with('error', $e->getMessage());
         } catch (\Exception $e) {
             report($e);
@@ -2580,7 +2666,7 @@ class TicketController extends Controller
     private function redirectToPurchaseLanding($sale, $event, bool $isEmbed = false)
     {
         GuestFunnel::countCheckoutDone(request(), $sale);
-        \App\Services\Payments\PaymentGatewayDriver::markLanded($sale);
+        PaymentGatewayDriver::markLanded($sale);
 
         session()->flash('cart_purchased', $sale->orderLegs()->map(fn ($leg) => [
             'subdomain' => $leg->subdomain,
@@ -3019,6 +3105,52 @@ class TicketController extends Controller
     }
 
     /**
+     * "Add to Apple Wallet": the signed .pkpass file for the ticket (AppleWalletService). A 404 while
+     * Apple Wallet is not configured, so a hand-built address finds nothing; a ticket that may not
+     * be a pass, or a pass that could not be built, lands back on the ticket as Google's does.
+     */
+    public function appleWalletPass($eventId, $secret)
+    {
+        if (! \App\Services\Wallet\AppleWalletService::isConfigured()) {
+            abort(404);
+        }
+
+        $event = Event::findOrFail(UrlUtils::decodeId($eventId));
+        // Not filtered on is_deleted, for the reason googleWalletPass() gives: canOffer() refuses.
+        $sale = Sale::with('saleTickets.ticket')
+            ->where('event_id', $event->id)
+            ->where('secret', $secret)
+            ->firstOrFail();
+
+        $ticketUrl = route('ticket.view', [
+            'event_id' => UrlUtils::encodeId($event->id),
+            'secret' => $secret,
+        ]);
+
+        if (! \App\Services\Wallet\AppleWalletService::canOffer($sale, $event)) {
+            return redirect($ticketUrl);
+        }
+
+        try {
+            $pass = app(\App\Services\Wallet\AppleWalletService::class)->pass($sale, $event);
+        } catch (\Throwable $e) {
+            report($e);
+            $pass = null;
+        }
+
+        if (! $pass) {
+            return redirect($ticketUrl)->with('error', __('messages.wallet_pass_unavailable'));
+        }
+
+        return response($pass, 200, [
+            'Content-Type' => 'application/vnd.apple.pkpass',
+            'Content-Disposition' => 'attachment; filename="ticket.pkpass"',
+            'Cache-Control' => 'no-store, private',
+            'X-Robots-Tag' => 'noindex',
+        ]);
+    }
+
+    /**
      * Redirect to a freshly signed "Add to Google Wallet" save link.
      *
      * A redirect rather than a link built into the page: the JWT is short-lived and roughly 1300
@@ -3079,6 +3211,13 @@ class TicketController extends Controller
 
         abort_unless($primary->isOrderPrimary(), 404);
 
+        // In the language the order was placed in, as each leg's ticket page is (view()).
+        $lang = request()->query('lang');
+        $ticketLanguage = is_string($lang) && is_valid_language_code($lang) ? $lang : $primary->guestLanguage();
+        if ($ticketLanguage && ! auth()->check()) {
+            app()->setLocale($ticketLanguage);
+        }
+
         // installmentPlan is eager-loaded for the wallet badge's gate: canOffer() calls
         // isInstallmentDelinquent() per row, which would otherwise be one query per leg.
         $sales = Sale::with('event.creatorRole', 'installmentPlan')
@@ -3098,7 +3237,7 @@ class TicketController extends Controller
         $event = $primary->event;
         $role = $event ? ($event->getRoleWithEmailSettings() ?? $event->roles->first()) : null;
 
-        return view('ticket.order', compact('primary', 'sales', 'role'));
+        return view('ticket.order', compact('primary', 'sales', 'role', 'ticketLanguage'));
     }
 
     public function view($eventId, $secret)
@@ -3113,6 +3252,15 @@ class TicketController extends Controller
         $sale = Sale::with(['promoCode', 'saleTickets.ticket'])->where('event_id', $event->id)->where('secret', $secret)->firstOrFail();
         $role = $event->role();
 
+        // The language the ticket reads in: the ?lang= its mails carry, else the one the guest
+        // bought in, so a link without it (an older mail, the order page) still opens as they read
+        // the event. A signed-in visitor keeps their own interface language (SetUserLanguage).
+        $lang = request()->query('lang');
+        $ticketLanguage = is_string($lang) && is_valid_language_code($lang) ? $lang : $sale->guestLanguage();
+        if ($ticketLanguage && ! auth()->check()) {
+            app()->setLocale($ticketLanguage);
+        }
+
         // Advance booking surface (only for a paid, booking-enabled pass).
         $bookingService = app(PassBookingService::class);
         $passBookable = $bookingService->isBookable($sale);
@@ -3120,7 +3268,7 @@ class TicketController extends Controller
         $bookableOccurrences = $passBookable ? $bookingService->bookableOccurrences($sale, now()) : [];
         $passPolicyTicket = $passBookable ? $bookingService->passSaleTicket($sale)?->ticket : null;
 
-        return view('ticket.view', compact('event', 'sale', 'role', 'passBookable', 'bookedOccurrences', 'bookableOccurrences', 'passPolicyTicket'));
+        return view('ticket.view', compact('event', 'sale', 'role', 'passBookable', 'bookedOccurrences', 'bookableOccurrences', 'passPolicyTicket', 'ticketLanguage'));
     }
 
     /**
@@ -3152,9 +3300,17 @@ class TicketController extends Controller
             return response()->json(['error' => __('messages.unauthorized')], 403);
         }
 
+        $statusActions = ['mark_paid', 'refund', 'cancel', 'delete'];
+
+        // Every status change is the money rule, not only the refund: marking paid, cancelling
+        // and deleting rewrite the event creator's sales, revenue and seats. See
+        // userMayMoveMoneyOn(); GHSA-4pvq-gfvr-g847 was the three left on the read gate above.
+        if (in_array($request->action, $statusActions, true) && ! $this->userMayMoveMoneyOn($sale, $user)) {
+            return response()->json(['error' => __('messages.unauthorized')], 403);
+        }
+
         // Block status-changing actions on non-primary grouped sales
         if ($sale->group_id && ! $sale->isPrimarySale()) {
-            $statusActions = ['mark_paid', 'refund', 'cancel', 'delete'];
             if (in_array($request->action, $statusActions)) {
                 return response()->json(['error' => __('messages.error')], 403);
             }
@@ -3180,13 +3336,6 @@ class TicketController extends Controller
                 break;
 
             case 'refund':
-                // Refunding moves real money out of the EVENT CREATOR's gateway account, so it
-                // needs a stricter gate than the read check above - which never looks at
-                // event_role.is_accepted for a talent or venue role. See userMayMoveMoneyOn().
-                if (! $this->userMayMoveMoneyOn($sale, $user)) {
-                    return response()->json(['error' => __('messages.unauthorized')], 403);
-                }
-
                 // Validated rather than cast. `(float)` on an array is 1.0 in PHP 8 with no error,
                 // so an unvalidated refund_amount[]=100 quietly refunds a dollar; the API path has
                 // always validated its equivalent and these two must not disagree on a money route.
@@ -3202,11 +3351,11 @@ class TicketController extends Controller
                         // call would take a sale out of the refund path permanently.
                         'idempotency_key' => ['sometimes', 'string', 'max:64', 'regex:/^[A-Za-z0-9_.:-]+$/'],
                     ]);
-                } catch (\Illuminate\Validation\ValidationException $e) {
+                } catch (ValidationException $e) {
                     return response()->json(['error' => __('messages.refund_amount_invalid')], 422);
                 }
 
-                $refundResult = app(\App\Services\SaleRefundService::class)->refund(
+                $refundResult = app(SaleRefundService::class)->refund(
                     $sale,
                     $request->filled('refund_amount') ? (float) $request->input('refund_amount') : null,
                     $user->id,
@@ -3231,7 +3380,7 @@ class TicketController extends Controller
                     break;
                 }
 
-                if ($refundResult->status === \App\Services\SaleRefundResult::PARTIALLY_REFUNDED) {
+                if ($refundResult->status === SaleRefundResult::PARTIALLY_REFUNDED) {
                     // Deliberately NOT $actionPerformed. The sale is still paid, so it must not
                     // reach the sale.refunded webhook, the appointment cancellation mail, or
                     // Sale::booted's released branch - that branch hands back every seat, the whole
@@ -3245,7 +3394,7 @@ class TicketController extends Controller
                     break;
                 }
 
-                if ($refundResult->status === \App\Services\SaleRefundResult::REFUNDED) {
+                if ($refundResult->status === SaleRefundResult::REFUNDED) {
                     $actionPerformed = true;
                 }
                 break;
@@ -3272,8 +3421,8 @@ class TicketController extends Controller
         // underlying exception to Sentry rather than handing it to an owner.
         if ($refundResult && ! $refundResult->moved() && ! $refundResult->shouldFallBackToStatusOnly()) {
             $status = in_array($refundResult->status, [
-                \App\Services\SaleRefundResult::NEEDS_RECONCILIATION,
-                \App\Services\SaleRefundResult::IN_PROGRESS,
+                SaleRefundResult::NEEDS_RECONCILIATION,
+                SaleRefundResult::IN_PROGRESS,
             ], true) ? 409 : 422;
 
             if ($request->ajax()) {
@@ -3297,10 +3446,10 @@ class TicketController extends Controller
             && ! in_array($previousStatus, ['cancelled', 'refunded', 'expired'], true)
             && $sale->event?->appointment_type_id) {
             $wasPaidMoney = $previousStatus === 'paid' && (float) $sale->payment_amount > 0;
-            app(\App\Services\EmailService::class)->sendAppointmentGuestCancellation($sale);
+            app(EmailService::class)->sendAppointmentGuestCancellation($sale);
             if ($wasPaidMoney && $request->action !== 'refund') {
                 // A refund action means the owner is already handling the money; cancel/delete get the reminder.
-                app(\App\Services\EmailService::class)->sendAppointmentOwnerCancellation($sale, true);
+                app(EmailService::class)->sendAppointmentOwnerCancellation($sale, true);
             }
         }
 
@@ -3430,7 +3579,7 @@ class TicketController extends Controller
 
         try {
             $result = app(PassBookingService::class)->book($sale, (int) $bookEventId, $date, now());
-        } catch (\Illuminate\Database\QueryException $e) {
+        } catch (QueryException $e) {
             report($e);
 
             return $back->with('error', __('messages.error'));
@@ -3481,7 +3630,7 @@ class TicketController extends Controller
                 $date,
                 allowForfeit: $request->boolean('forfeit_ack'),
             );
-        } catch (\Illuminate\Database\QueryException $e) {
+        } catch (QueryException $e) {
             report($e);
 
             return $back->with('error', __('messages.error'));
@@ -3668,7 +3817,7 @@ class TicketController extends Controller
             $originalLocale = app()->getLocale();
 
             try {
-                app()->setLocale($role->language_code ?? $originalLocale);
+                app()->setLocale($sale->mailLocale($role->language_code ?? $originalLocale));
 
                 $mailable = new FeedbackRequest($sale, $event, $role);
                 $sent = app(RoleMailerService::class)->sendForRole($role, $sale->email, $mailable);
@@ -3928,6 +4077,8 @@ class TicketController extends Controller
                     $sale->subdomain = $subdomain;
                     $sale->secret = strtolower(Str::random(32));
                     $sale->payment_method = 'import';
+                    // Entered by the owner, not made by the buyer: not an opt-in (AudienceMailGuard).
+                    $sale->origin = 'import';
                     $sale->payment_amount = $amount;
                     $sale->status = $status;
 
@@ -3977,7 +4128,7 @@ class TicketController extends Controller
                     // available. Skipping this took quantity stock without taking seats, and an
                     // allocated ticket's availability reads the map - so the picker went on
                     // offering the very seats the import had just sold.
-                    app(\App\Services\SeatHoldService::class)->assignBestAvailableForSale($event, $sale);
+                    app(SeatHoldService::class)->assignBestAvailableForSale($event, $sale);
 
                     $seenEmails[$email] = true;
                     $imported++;
@@ -3986,12 +4137,12 @@ class TicketController extends Controller
                     }
                 }
             });
-        } catch (\App\Exceptions\BusinessException $e) {
+        } catch (BusinessException $e) {
             // Intentional and actionable - the seating band ran out of seats part way through the
             // import. The transaction rolled back, so the message names the real problem rather
             // than a generic failure.
             return back()->withInput()->with('error', $e->getMessage());
-        } catch (\Illuminate\Database\QueryException $e) {
+        } catch (QueryException $e) {
             report($e);
 
             return back()->withInput()->with('error', __('messages.error'));

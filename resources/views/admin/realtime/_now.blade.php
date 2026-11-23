@@ -58,4 +58,5 @@
     <p v-if="p.overview.phrases.embed" class="mt-4 flex items-center gap-1.5 text-xs text-gray-500 dark:text-gray-400">
         <svg class="w-3.5 h-3.5 shrink-0" fill="none" stroke="currentColor" stroke-width="1.5" viewBox="0 0 24 24" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" :d="icons.embed" /></svg>@{{ p.overview.phrases.embed }}
     </p>
+
 </section>

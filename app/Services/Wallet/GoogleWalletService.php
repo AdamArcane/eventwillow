@@ -87,38 +87,12 @@ class GoogleWalletService
     }
 
     /**
-     * Whether this particular sale may be offered as a wallet pass.
-     *
-     * One predicate for the button on the ticket page, the badge in the email, the badge on the
-     * order page and the route itself, so the four cannot drift.
-     *
-     * is_cancelled is not redundant with the status check: a cancelled EVENT leaves its sales
-     * `paid`, which is the trap ticket/order.blade.php already documents ("the buyer saw a live
-     * ticket with a working code for an event that is not happening"). It matters more here than
-     * on a web page, because a wallet pass then sits on the phone indefinitely.
-     *
-     * The delinquency arm is DELIBERATELY STRICTER THAN THE DOOR, and that is not an oversight to
-     * be tidied up. TicketController::scanned() returns an amber 'overdue' with an "admit anyway"
-     * override rather than refusing, because turning a paying guest away over one late instalment
-     * is the organizer's call. A wallet pass is different in kind: it is a snapshot that is never
-     * patched, so issuing one would put a permanently valid-looking ticket on the phone of someone
-     * who may never pay. Refusing the pass leaves the on-page QR, and the override, untouched.
-     *
-     * appointment_type_id mirrors what TicketController::view() and EmailService already decide:
-     * bookings have their own manage page and their own mailables, and never enter the QR ticket
-     * flow. Without this the route would still mint a pass for one via a hand-built URL.
+     * Whether this particular sale may be offered as a Google Wallet pass: Google is configured and
+     * the ticket may become a pass at all (WalletPasses::eligible(), shared with Apple Wallet).
      */
     public static function canOffer(?Sale $sale, ?Event $event): bool
     {
-        if (! $sale || ! $event || ! self::isConfigured()) {
-            return false;
-        }
-
-        return $sale->status === 'paid'
-            && ! $sale->is_deleted
-            && ! $event->is_cancelled
-            && ! $event->appointment_type_id
-            && ! $sale->isInstallmentDelinquent();
+        return self::isConfigured() && WalletPasses::eligible($sale, $event);
     }
 
     /**
@@ -359,7 +333,7 @@ class GoogleWalletService
         $payload = [
             'id' => $classId,
             'issuerName' => $this->clamp($role?->translatedName() ?: config('app.name'), 40),
-            'eventName' => $this->localized($event->name, $language),
+            'eventName' => $this->localizedEventName($event, $language),
             // UNDER_REVIEW is what Google's own samples insert with, and it is what makes a class
             // usable straight away. DRAFT is documented only as a state, not as a restriction, so
             // do not write a rule here about what it blocks - it has not been confirmed.
@@ -523,7 +497,8 @@ class GoogleWalletService
 
     protected function objectPayload(Sale $sale, Event $event, string $classId, ?Role $role): array
     {
-        $language = $this->language($role);
+        // The holder's own: the language they bought in (Sale::guestLanguage()), else the schedule's.
+        $language = $sale->guestLanguage() ?? $this->language($role);
 
         $object = [
             'id' => $this->objectId($sale),
@@ -582,7 +557,7 @@ class GoogleWalletService
     protected function textModules(Sale $sale, Event $event, $saleTicket, ?Role $role): array
     {
         $rows = [];
-        $language = $this->language($role);
+        $language = $sale->guestLanguage() ?? $this->language($role);
 
         $admits = $saleTicket?->ticket?->is_pass
             ? $saleTicket->ticket->admitsPerEvent()
@@ -727,6 +702,25 @@ class GoogleWalletService
     protected function localized(?string $value, string $language): array
     {
         return ['defaultValue' => ['language' => $language, 'value' => (string) $value]];
+    }
+
+    /**
+     * The event's name, with its translation beside it when it has one (the schedule's translation
+     * language, the text in name_en, hand corrections included). The class is the EVENT's and is
+     * shared by every holder, whichever language they bought in, so the name cannot be any one
+     * holder's: Google shows each phone the value for its own language and the default otherwise.
+     */
+    protected function localizedEventName(Event $event, string $language): array
+    {
+        $value = $this->localized($event->name, $language);
+        $target = $event->getTranslationLanguageCode();
+        $translated = $target ? $event->textInLanguage('name', $target) : null;
+
+        if ($target && $target !== $language && $translated !== null && $translated !== '' && $translated !== $event->name) {
+            $value['translatedValues'] = [['language' => $target, 'value' => (string) $translated]];
+        }
+
+        return $value;
     }
 
     protected function image(string $uri): array

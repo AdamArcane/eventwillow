@@ -16,7 +16,7 @@ return [
     'features_title' => 'Event Management Software: Every Feature, No Platform Fees',
     'features_description' => 'Every feature in five chapters: tickets through Stripe or PayPal with no platform fee, two-way calendar sync, newsletters, AI import and analytics.',
 
-    'about_title' => 'About Event Schedule | Open Source Event Management Platform',
+    'about_title' => 'Open Source Event Management Platform | About Event Schedule',
     'about_description' => 'Who builds Event Schedule, the license it ships under, where the source lives, and a list of what it does not do. Open source, with zero platform fees.',
 
     'selfhost_title' => 'Selfhosted Event Calendar: Every Feature Free on Your Server',
@@ -26,7 +26,7 @@ return [
     'ticketing_description' => 'Sell tickets from your own event page with zero platform fees. Stripe or PayPal checkout, full or partial refunds, and QR check-in from any phone.',
 
     'ai_title' => 'AI Event Import: Turn a Flyer into an Event | Event Schedule',
-    'ai_description' => 'Paste the text or drop a flyer and AI fills in the event: date, venue, performers, price. Free on every plan, with translation into 12 languages.',
+    'ai_description' => 'Paste the text or drop a flyer and AI fills in the event: date, venue, performers, price. Free on every plan, with translation into 13 languages.',
 
     'calendar_sync_title' => 'Two-Way Calendar Sync for Google, Outlook & CalDAV',
     'calendar_sync_description' => 'Two-way sync with Google Calendar, Outlook and any CalDAV server, free on every plan. Guests can add one event or subscribe to your live calendar feed.',

@@ -104,6 +104,15 @@
             </x-page-notice>
             @endif
 
+            @if (! empty($duplicateParticipantCount) && ! request()->filter)
+            <x-page-notice tone="warn" id="duplicate-participants-notice">
+                {{ str_replace(':count', $duplicateParticipantCount, __('messages.possible_duplicate_participants_banner')) }}
+                <x-slot name="action">
+                    <a href="{{ route('following.merge_participants') }}" class="event-link">{{ __('messages.review') }}</a>
+                </x-slot>
+            </x-page-notice>
+            @endif
+
             <div>
                 <div class="page-filters">
                     <div class="page-filter is-grow following-search">
@@ -129,6 +138,11 @@
                     @include('role.following_table')
                 </div>
             </div>
+
+            {{-- Below the list, never above it: the list is what the page is for. --}}
+            @if ($offerSchedule ?? false)
+                @include('partials.create-schedule-card', ['menuId' => 'following-create-menu'])
+            @endif
         </div>
     </div>
 

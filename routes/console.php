@@ -1,6 +1,8 @@
 <?php
 
 use App\Jobs\ProcessScheduledNewsletters;
+use App\Services\AdsService;
+use App\Services\MetaAdsService;
 use Illuminate\Support\Facades\Artisan;
 use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\Schedule;
@@ -191,6 +193,13 @@ Schedule::call(function () {
     Artisan::call('app:send-event-interest-mail', ['--apply' => true]);
 })->hourly()->name('send-event-interest-mail')->withoutOverlapping(30)->appendOutputTo(storage_path('logs/scheduler.log'));
 
+// Keep in sync with AppController::translateData(). Not gated on config('app.hosted'): a ticket
+// holder's reminder is the same promise on every install. The claim on sales.reminder_sent_at is a
+// conditional UPDATE, so the two rails cannot both send one (SendTicketReminders).
+Schedule::call(function () {
+    Artisan::call('app:send-ticket-reminders', ['--apply' => true]);
+})->hourly()->name('send-ticket-reminders')->withoutOverlapping(30)->appendOutputTo(storage_path('logs/scheduler.log'));
+
 // withoutOverlapping() is not decoration here: this command initiates card charges, so two
 // concurrent runs would attempt the same installment. The Stripe idempotency key is the second
 // line of defence; this is the first.
@@ -243,12 +252,6 @@ Schedule::call(function () {
     Artisan::call('calendar:scan-exposures');
 })->everyFifteenMinutes()->name('calendar-exposure-scan')->withoutOverlapping(20)->appendOutputTo(storage_path('logs/scheduler.log'));
 
-Schedule::call(function () {
-    if (config('app.hosted')) {
-        Artisan::call('app:setup-demo');
-    }
-})->hourly()->name('app-setup-demo')->withoutOverlapping(30)->appendOutputTo(storage_path('logs/scheduler.log'));
-
 // Nexus only: the blog is the marketing site's. Keep in sync with AppController::translateData().
 Schedule::call(function () {
     if (config('app.is_nexus')) {
@@ -296,7 +299,7 @@ Schedule::call(function () {
 })->daily()->name('boost-charge-statements')->withoutOverlapping(30)->appendOutputTo(storage_path('logs/scheduler.log'));
 
 Schedule::call(function () {
-    if (\App\Services\MetaAdsService::shouldSync()) {
+    if (MetaAdsService::shouldSync()) {
         Artisan::call('boost:sync');
     }
 })->everyFifteenMinutes()->name('boost-sync')->withoutOverlapping(30)->appendOutputTo(storage_path('logs/scheduler.log'));
@@ -314,7 +317,7 @@ Schedule::call(function () {
 // which is exactly what SyncPromotions::handle() was written to prevent. handle() reads
 // isEnabled() itself to decide which steps still apply.
 Schedule::call(function () {
-    if (\App\Services\AdsService::isEnabled()) {
+    if (AdsService::isEnabled()) {
         Artisan::call('promo:sync');
     }
 })->everyFifteenMinutes()->name('promo-sync')->withoutOverlapping(30)->appendOutputTo(storage_path('logs/scheduler.log'));
@@ -367,6 +370,15 @@ Schedule::call(function () {
     Artisan::call('app:send-carpool-reminders');
 })->hourly()->name('app-send-carpool-reminders')->withoutOverlapping(30)->appendOutputTo(storage_path('logs/scheduler.log'));
 
+// Hosted only: today's MRR into mrr_snapshots for the dashboard's chart (RecurringRevenue). Hourly,
+// overwriting the day's row, so a missed run leaves no hole. Keep in sync with
+// AppController::translateData().
+Schedule::call(function () {
+    if (config('app.hosted')) {
+        Artisan::call('app:record-mrr');
+    }
+})->hourly()->name('app-record-mrr')->withoutOverlapping(10)->appendOutputTo(storage_path('logs/scheduler.log'));
+
 // Laravel's database cache never deletes an expired row unless the same key is read again, and the
 // per-visitor daily counters and throttle keys never are, so on CACHE_STORE=database the `cache`
 // table grew without bound. Ungated (a no-op on any other store), registered after the hourly mail
@@ -394,6 +406,14 @@ Schedule::call(function () {
     }
 })->daily()->name('app-generate-daily-blog-post')->withoutOverlapping(60)->appendOutputTo(storage_path('logs/scheduler.log'));
 
+// Nexus only: sites that may be serving a copy of the marketing pages (MarketingCopyWatch). At
+// most ten hosts, two pages each, 15 seconds a fetch. Keep in sync with AppController::translateData().
+Schedule::call(function () {
+    if (config('app.is_nexus')) {
+        Artisan::call('app:check-marketing-copies');
+    }
+})->daily()->name('app-check-marketing-copies')->withoutOverlapping(15)->appendOutputTo(storage_path('logs/scheduler.log'));
+
 Schedule::call(function () {
     if (config('app.hosted')) {
         Artisan::call('app:process-referral-credits');
@@ -403,6 +423,21 @@ Schedule::call(function () {
 Schedule::call(function () {
     Artisan::call('app:update-geoip');
 })->monthly()->name('app-update-geoip')->withoutOverlapping(60)->appendOutputTo(storage_path('logs/scheduler.log'));
+
+// The demo reset: about three minutes and the most memory of anything here, since it drops and
+// re-seeds every demo schedule. Second to LAST on purpose. Everything due in a minute runs in one
+// schedule:run process, one task after another, so a task killed mid-run takes every task listed
+// after it down with it, and a daily task is due in that one minute only. On 2026-11-01 and 11-02
+// the worker was killed during this reset at midnight (exit 128, a restart three minutes later)
+// while it sat in the middle of the file, and the ten daily tasks listed below it (audit and
+// personal-data pruning, boost statements, subscription reminders, referral credits, the daily
+// blog post) did not run either day. Down here a reset that dies costs only itself and the feeds.
+// SchedulerHealthTest keeps it here.
+Schedule::call(function () {
+    if (config('app.hosted')) {
+        Artisan::call('app:setup-demo');
+    }
+})->hourly()->name('app-setup-demo')->withoutOverlapping(30)->appendOutputTo(storage_path('logs/scheduler.log'));
 
 // Feeds: the addresses schedules keep reading for events (App\Services\Feeds\FeedImporter).
 // Every minute, though a feed is due about once an hour: its own next_check_at says when, so most

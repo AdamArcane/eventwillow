@@ -7,10 +7,17 @@ use App\Jobs\GenerateEventImageVariants;
 use App\Jobs\SyncEventToCalDAV;
 use App\Jobs\SyncEventToGoogleCalendar;
 use App\Jobs\SyncEventToMicrosoftCalendar;
+use App\Jobs\TranslateEventSoon;
+use App\Services\BoostBillingService;
+use App\Services\BoostPartnerService;
+use App\Services\EventLifecycleService;
+use App\Services\MetaAdsService;
+use App\Services\SeatingMapService;
 use App\Services\TicketVolumeDiscount;
 use App\Traits\HasImageVariants;
 use App\Utils\EventTextGenerator;
 use App\Utils\GalleryUtils;
+use App\Utils\GuestSeo;
 use App\Utils\ImageUtils;
 use App\Utils\MarkdownUtils;
 use App\Utils\MoneyUtils;
@@ -20,7 +27,9 @@ use App\Utils\UrlUtils;
 use Carbon\Carbon;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Database\Eloquent\Model;
+use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Schema;
 use Illuminate\Support\Facades\Storage;
 
 class Event extends Model
@@ -53,6 +62,14 @@ class Event extends Model
     public const LIKELY_TEST_NAME_REGEX = '^test([[:space:]_-]*[0-9]*|ing| test| event)?$';
 
     public const LIKELY_TEST_WEAK_REGEX = '^(test|my test|sample|example|demo)([ _-]|$)';
+
+    /**
+     * A SCHEDULE named "test" or "testing" followed by a dash or an underscore ("Testing- PBWDA",
+     * "test_venue"): somebody's trial run with a label after it. Only for schedule names, beside
+     * LIKELY_TEST_NAME_REGEX, which is anchored at both ends and let "Testing- PBWDA" onto the
+     * homepage wall. A space alone is not enough: "Test Kitchen" and "Testing Grounds" are names.
+     */
+    public const LIKELY_TEST_SCHEDULE_REGEX = '^test(ing)?[[:space:]]*[_-]';
 
     public const REPEATED_CHAR_REGEX = '^(.)\\1{2,}$';
 
@@ -105,6 +122,10 @@ class Event extends Model
         'payment_instructions',
         'expire_unpaid_tickets',
         'installments_enabled',
+        'donations_enabled',
+        'donation_amounts',
+        'donation_custom',
+        'donation_line',
         'installment_count',
         'installment_final_days_before',
         'installment_min_order_amount',
@@ -145,6 +166,9 @@ class Event extends Model
     protected $hidden = ['event_password', 'contact_name', 'contact_email', 'contact_phone'];
 
     protected $casts = [
+        'donations_enabled' => 'boolean',
+        'donation_amounts' => 'array',
+        'donation_custom' => 'boolean',
         'tickets_grandfathered_at' => 'datetime',
         'duration' => 'float',
         'is_private' => 'boolean',
@@ -191,6 +215,12 @@ class Event extends Model
         // Written only by GenerateEventImageVariants / the backfill command through
         // recordImageVariants(), so deliberately NOT in $fillable.
         'image_variants' => 'array',
+        // Which translations a person corrected by hand, and against which original text
+        // (HAND_TRANSLATABLE_FIELDS). Written only through markTranslationManual() and
+        // forgetTranslationOverride(), so deliberately NOT in $fillable: saveEvent() fills the
+        // event from the whole request, and a posted value would mark an automatic translation as
+        // a person's, which app:translate then never refreshes.
+        'translation_overrides' => 'array',
     ];
 
     /** Per-request memo of pass advance-booking seats reserved, keyed by occurrence date. */
@@ -375,7 +405,7 @@ class Event extends Model
     public static function importColumnsReady(): bool
     {
         return self::$importColumnsReady = self::$importColumnsReady
-            || \Illuminate\Support\Facades\Schema::hasColumn('events', 'import_source');
+            || Schema::hasColumn('events', 'import_source');
     }
 
     private static bool $importColumnsReady = false;
@@ -549,6 +579,12 @@ class Event extends Model
                 $model->federated_skipped_at = null;
             }
 
+            // A translation corrected by hand is never written by anybody but the person correcting
+            // it: an import or a feed that fills name_en on an existing event leaves it as it is.
+            // Ahead of the HTML below, which is made from description_en, and of the blocks further
+            // down that decide what a changed original does to a translation.
+            $model->holdHandTranslations();
+
             $model->description_html = MarkdownUtils::convertToHtml($model->description);
             $model->description_html_en = MarkdownUtils::convertToHtml($model->description_en);
             $model->ticket_notes_html = MarkdownUtils::convertToHtml($model->ticket_notes);
@@ -562,7 +598,13 @@ class Event extends Model
                     : null;
             }
 
-            if ($model->isDirty('starts_at') && ! $model->days_of_week) {
+            // A one-off that STAYS a one-off. A series made a one-off in the same save (the form and
+            // the API null days_of_week) is left alone: its sales were bought for many dates, and
+            // moving every one of them onto the new day folded every past night's buyers into it,
+            // and app:send-ticket-reminders then told them all that "it is tomorrow". Its sales keep
+            // the dates they were bought for, which the reminders and the ticket page already
+            // expect (Event::matchesDate() turns a date the event no longer has away).
+            if ($model->isDirty('starts_at') && ! $model->days_of_week && ! $model->getOriginal('days_of_week')) {
                 $model->load(['tickets', 'addons', 'sales']);
 
                 // The occurrence moved, so re-key everything that hangs off its date. That key is
@@ -602,20 +644,26 @@ class Event extends Model
                         });
 
                         $model->sales->each(function ($sale) use ($newDate) {
+                            // A reminder already sent named the old day or time, so the holder is
+                            // reminded again with the new one (app:send-ticket-reminders): a show
+                            // moved from 8 PM to 10 AM must not leave "tomorrow at 8:00 PM" standing.
+                            if ($sale->reminder_sent_at) {
+                                $sale->reminder_sent_at = null;
+                            }
                             $sale->event_date = $newDate;
                             $sale->save();
                         });
                     });
 
                     if ($oldSeatingDate && $oldSeatingDate !== $newDate) {
-                        app(\App\Services\SeatingMapService::class)
+                        app(SeatingMapService::class)
                             ->rekeyOccurrence($model, $oldSeatingDate, $newDate);
                     }
                 }
             }
 
             if ($model->isDirty('name') && $model->exists) {
-                if (! $model->isDirty('name_en')) {
+                if (! $model->isDirty('name_en') && ! $model->keepsHandTranslation('name')) {
                     $model->name_en = null;
                 }
                 $model->translation_attempts = 0;
@@ -629,7 +677,7 @@ class Event extends Model
             }
 
             if ($model->isDirty('description') && $model->exists) {
-                if (! $model->isDirty('description_en')) {
+                if (! $model->isDirty('description_en') && ! $model->keepsHandTranslation('description')) {
                     $model->description_en = null;
                     $model->description_html_en = null;
                 }
@@ -664,7 +712,7 @@ class Event extends Model
             }
 
             if ($model->isDirty('short_description') && $model->exists) {
-                if (! $model->isDirty('short_description_en')) {
+                if (! $model->isDirty('short_description_en') && ! $model->keepsHandTranslation('short_description')) {
                     $model->short_description_en = null;
                 }
                 $model->translation_attempts = 0;
@@ -676,6 +724,9 @@ class Event extends Model
                     $eventRole->save();
                 }
             }
+
+            // Last, so a correction is dated against the original exactly as it is written.
+            $model->stampHandTranslations();
         });
 
         // Every flyer write path in the app ends in an Eloquent save(), so hooking the model
@@ -697,6 +748,8 @@ class Event extends Model
         });
 
         static::saved(function ($model) {
+            self::queueTranslationSoon($model);
+
             // wasRecentlyCreated for the same reason as above: an insert never syncs changes, so
             // wasChanged() is blind to it - and a brand new event is exactly the thing most
             // likely to belong on the wall.
@@ -731,20 +784,20 @@ class Event extends Model
                 // A partner boost is stopped, never deleted at Meta and never refunded: the platform
                 // holds none of its money, and its spend must stay readable for the statement.
                 if ($campaign->isPartner()) {
-                    \App\Services\BoostPartnerService::stopInCascade($campaign);
+                    BoostPartnerService::stopInCascade($campaign);
 
                     continue;
                 }
 
                 try {
-                    if ($campaign->meta_campaign_id && \App\Services\MetaAdsService::isBoostConfigured()) {
-                        $metaService = app()->make(\App\Services\MetaAdsService::class);
+                    if ($campaign->meta_campaign_id && MetaAdsService::isBoostConfigured()) {
+                        $metaService = app()->make(MetaAdsService::class);
                         $metaService->deleteCampaign($campaign);
                     }
 
                     $campaign->update(['status' => 'cancelled', 'meta_status' => $campaign->meta_campaign_id ? 'DELETED' : null]);
 
-                    $billingService = new \App\Services\BoostBillingService;
+                    $billingService = new BoostBillingService;
 
                     // Gate the STRIPE call, not the refund. settlePayment()'s credit branch debits
                     // boost_credit regardless of mode, so gating the whole block meant deleting a
@@ -871,7 +924,7 @@ class Event extends Model
         // 'cancel', or a guarded 'delete': hide the event without pushing the change back out.
         // The flag and nothing else: no sequence bump, no webhook, no boost or installment
         // unwinding, and the calendar services write the audit row once they have the outcome.
-        app(\App\Services\EventLifecycleService::class)->cancel(
+        app(EventLifecycleService::class)->cancel(
             $this,
             cancelBoosts: false,
             stopInstallments: false,
@@ -975,7 +1028,7 @@ class Event extends Model
 
         $key = (string) $date;
         if (! array_key_exists($key, $this->seatingMapCache)) {
-            $this->seatingMapCache[$key] = app(\App\Services\SeatingMapService::class)->mapFor($this, $date);
+            $this->seatingMapCache[$key] = app(SeatingMapService::class)->mapFor($this, $date);
         }
 
         return $this->seatingMapCache[$key];
@@ -1001,7 +1054,7 @@ class Event extends Model
             $key = 'map:'.$map->id;
 
             if (! array_key_exists($key, $this->seatedBandsByMap)) {
-                $this->seatedBandsByMap[$key] = \App\Models\SeatingSection::where('event_seating_map_id', $map->id)
+                $this->seatedBandsByMap[$key] = SeatingSection::where('event_seating_map_id', $map->id)
                     ->where('is_deleted', false)
                     ->where('kind', '!=', 'standing')
                     ->whereNotNull('band')
@@ -1014,14 +1067,14 @@ class Event extends Model
 
         if ($this->seatedBandsCache === null) {
             $plan = $this->seating_plan_id
-                ? \App\Models\SeatingPlan::with('sections')->find($this->seating_plan_id)
+                ? SeatingPlan::with('sections')->find($this->seating_plan_id)
                 : null;
 
             // whereHas('seats') matters: a section drawn but not yet given rows would otherwise
             // make its ticket "allocated" while the map holds nothing, and the picker would offer
             // the per-order cap for a band with no seats at all.
             $this->seatedBandsCache = $plan
-                ? \App\Models\SeatingSection::where('seating_plan_id', $plan->id)
+                ? SeatingSection::where('seating_plan_id', $plan->id)
                     ->where('is_deleted', false)
                     ->where('kind', '!=', 'standing')
                     ->whereNotNull('band')
@@ -1038,7 +1091,7 @@ class Event extends Model
     {
         if ($this->seatingPlanCache === false) {
             $this->seatingPlanCache = $this->seating_plan_id
-                ? \App\Models\SeatingPlan::where('is_deleted', false)->find($this->seating_plan_id)
+                ? SeatingPlan::where('is_deleted', false)->find($this->seating_plan_id)
                 : null;
         }
 
@@ -1060,7 +1113,7 @@ class Event extends Model
             return $plan ? $plan->seatCountForBand($ticket->seating_band) : 0;
         }
 
-        return app(\App\Services\SeatingMapService::class)->availableSeatCount($map, $ticket->id);
+        return app(SeatingMapService::class)->availableSeatCount($map, $ticket->id);
     }
 
     public function promoCodes()
@@ -1511,7 +1564,10 @@ class Event extends Model
 
         // (c) no associated talent/venue/curator schedule is named like a test
         $query->whereDoesntHave('roles', function ($r) {
-            $r->whereRaw('LOWER(TRIM(roles.name)) REGEXP ?', [self::LIKELY_TEST_NAME_REGEX]);
+            $r->where(function ($n) {
+                $n->whereRaw('LOWER(TRIM(roles.name)) REGEXP ?', [self::LIKELY_TEST_NAME_REGEX])
+                    ->orWhereRaw('LOWER(TRIM(roles.name)) REGEXP ?', [self::LIKELY_TEST_SCHEDULE_REGEX]);
+            });
         });
 
         return $query;
@@ -1662,7 +1718,11 @@ class Event extends Model
             return null;
         }
 
-        $text = html_entity_decode(strip_tags($this->ticket_notes_html), ENT_QUOTES | ENT_HTML5, 'UTF-8');
+        // A paragraph, a line break or a list item is a new line in the text part too: stripped bare,
+        // "Doors open at 7:30 PM.<br>Bring a photo ID." read as one run-on line.
+        $html = preg_replace('#(<br\s*/?>|</p>|</li>|</h[1-6]>|</div>)#i', "$1\n", $this->ticket_notes_html) ?? $this->ticket_notes_html;
+        $text = html_entity_decode(strip_tags($html), ENT_QUOTES | ENT_HTML5, 'UTF-8');
+        $text = trim(preg_replace("/\n{3,}/", "\n\n", $text) ?? $text);
 
         $role = $role ?? $this->getRoleWithEmailSettings() ?? $this->roles->first();
         if (! $role) {
@@ -1805,8 +1865,8 @@ class Event extends Model
      * scopeNotPasswordProtected() for a query that is not an Event builder: a schedule query that
      * joins events, or a DB::table() query that aliases the table.
      *
-     * @param  \Illuminate\Database\Eloquent\Builder|\Illuminate\Database\Query\Builder  $query
-     * @return \Illuminate\Database\Eloquent\Builder|\Illuminate\Database\Query\Builder
+     * @param  Builder|\Illuminate\Database\Query\Builder  $query
+     * @return Builder|\Illuminate\Database\Query\Builder
      */
     public static function constrainNotPasswordProtected($query, string $table = 'events')
     {
@@ -1963,12 +2023,11 @@ class Event extends Model
      *    because an appointment booking sits at is_accepted null while it awaits approval and
      *    false once cancelled, and paid bookings are meant to appear on the Sales page.
      *
-     *    SCOPED CLAIM: this is a LIST-side rule only. canViewEventData() does not read
-     *    is_accepted, so a declined schedule that still holds an event or sale id can read the
-     *    same data through BoxOfficeController::resolve(), CheckInController::stats() and
-     *    Api/ApiSaleController::show(). That gap predates this scope and closing it means teaching
-     *    canEditEvent() the rule too (canScanEvent delegates to it), which the Requests tab's Edit
-     *    button relies on staying open while a pivot is pending. Its own change.
+     *    canViewEventData() asks the same of somebody else's event since 2026-11
+     *    (GHSA-4pvq-gfvr-g847): a declined OR still-pending schedule no longer reads the buyers
+     *    through BoxOfficeController::resolve(), CheckInController::stats() or
+     *    Api/ApiSaleController::show(). canEditEvent() is left open while a pivot is pending,
+     *    because the Requests tab's Edit button relies on it.
      *
      * Curators are the third rule, inherited from the check: a curator that only LISTS an event
      * does not own the creator's private data, so it qualifies only for what it created.
@@ -2355,7 +2414,7 @@ class Event extends Model
      * do not approximate it with a +/- 1 day window around the app timezone, which breaks once
      * APP_TIMEZONE is set to an extreme offset.
      *
-     * @param  \Illuminate\Support\Collection<int, Event>  $events
+     * @param  Collection<int, Event>  $events
      * @return string[]
      */
     public static function scheduleTodayDates($events, ?Carbon $now = null): array
@@ -3175,6 +3234,125 @@ class Event extends Model
     }
 
     /**
+     * The gateways a donation may be paid through: the ones that charge the order's total online.
+     * Cash and a payment link would turn a free ticket with a donation into an unpaid order that
+     * expires (or a sum nobody collects), and Invoice Ninja's payment-link mode prices the order
+     * from its products, which would drop the donation.
+     */
+    public const DONATION_GATEWAYS = ['stripe', 'paypal', 'payfast', 'razorpay'];
+
+    /** Suggested amounts where the owner has typed none, by currency; anything else uses USD's. */
+    private const DONATION_DEFAULTS = [
+        'USD' => [5, 10, 20], 'EUR' => [5, 10, 20], 'GBP' => [5, 10, 20], 'CAD' => [5, 10, 20],
+        'AUD' => [5, 10, 20], 'NZD' => [5, 10, 20], 'CHF' => [5, 10, 20],
+        'JPY' => [500, 1000, 3000], 'INR' => [100, 250, 500], 'ILS' => [20, 50, 100],
+        'HUF' => [1000, 2500, 5000], 'ZAR' => [50, 100, 200], 'KRW' => [5000, 10000, 20000],
+        'SEK' => [50, 100, 200], 'NOK' => [50, 100, 200], 'DKK' => [50, 100, 200],
+        'PLN' => [20, 50, 100], 'CZK' => [100, 250, 500], 'RON' => [20, 50, 100], 'BRL' => [20, 50, 100],
+        'MXN' => [100, 200, 500], 'HKD' => [50, 100, 200], 'SGD' => [5, 10, 20], 'MYR' => [20, 50, 100],
+        'PHP' => [200, 500, 1000], 'THB' => [200, 500, 1000], 'TRY' => [100, 250, 500],
+        'IDR' => [50000, 100000, 200000],
+    ];
+
+    /**
+     * Whether a buyer may add a donation at this event's checkout: the owner asked for one, the
+     * event sells tickets here (free ones count: a free ticket with a donation is pay what you want),
+     * its schedule may take money, and its gateway charges the total online and is set up.
+     */
+    public function offersDonations(): bool
+    {
+        if (! $this->donations_enabled || ! $this->tickets_enabled || $this->rsvp_enabled || $this->appointment_type_id) {
+            return false;
+        }
+
+        // Pro, as add-ons and installments are: hasProTicketingPlan() and not canSellPaidTickets(),
+        // whose grandfather stamp and selling trial would keep a lapsed schedule taking donations.
+        if (! in_array($this->payment_method, self::DONATION_GATEWAYS, true) || ! $this->hasProTicketingPlan()) {
+            return false;
+        }
+
+        return (bool) payment_gateways()->get($this->payment_method)?->isConfiguredFor($this->user);
+    }
+
+    /** The suggested amounts a buyer is offered: the owner's, or the currency's defaults. */
+    public function donationAmounts(): array
+    {
+        $amounts = array_values(array_unique(array_filter(array_map('floatval', (array) ($this->donation_amounts ?? [])), fn ($amount) => $amount > 0), SORT_REGULAR));
+
+        return array_slice($amounts ?: self::defaultDonationAmounts($this->ticket_currency_code), 0, 3);
+    }
+
+    /**
+     * An amount as an owner types it, read the way the checkout reads a buyer's (parseDonation() in
+     * event/tickets): spaces and apostrophes are grouping; with one separator followed by exactly
+     * three digits it is grouping too ("1,000" and "1.000" are a thousand), otherwise the LAST
+     * separator is the decimal point ("5,50", "1.500,50"). A currency with no minor unit reads every
+     * separator as grouping. Null when it is not a number.
+     */
+    public static function parseMoneyText(mixed $text, int $decimals): ?float
+    {
+        // Text before and after the number is dropped, never text inside it, and a separator that
+        // belongs to a word ("kr. 50") is not a decimal point; "5,-" is five. As on the checkout.
+        $value = preg_replace('/[.,]-$/', '', trim((string) $text));
+        if (str_contains($value, '-')) {
+            return null;
+        }
+        preg_match('/^[^0-9]*/u', $value, $lead);
+        $lead = $lead[0] ?? '';
+        $keep = preg_match('/[.,]$/', $lead) && ! preg_match('/\p{L}[.,]$/u', $lead) ? substr($lead, -1) : '';
+        $value = $keep.substr($value, strlen($lead));
+        $value = preg_replace("/[\\s\x{00a0}']/u", '', preg_replace('/[^0-9]+$/u', '', $value));
+        if ($value === '' || preg_match('/[^0-9.,]/', $value) || ! preg_match('/^\d[\d.,]*\d$|^\d$|^[.,]\d+$/', $value)) {
+            return null;
+        }
+
+        $decimalAt = max((int) strrpos($value, ','), (int) strrpos($value, '.'));
+        $hasSeparator = strpbrk($value, '.,') !== false;
+        if ($hasSeparator) {
+            $tail = strlen($value) - $decimalAt - 1;
+            $single = preg_match_all('/[.,]/', $value) === 1;
+            if ($decimals === 0 || ($single && $tail === 3)) {
+                $value = str_replace([',', '.'], '', $value);
+            } else {
+                $value = str_replace([',', '.'], '', substr($value, 0, $decimalAt)).'.'.substr($value, $decimalAt + 1);
+            }
+        }
+
+        return is_numeric($value) ? round((float) $value, $decimals) : null;
+    }
+
+    /** @return array<string, array<int, int|float>> every currency's default amounts, for the event form */
+    public static function allDefaultDonationAmounts(): array
+    {
+        return self::DONATION_DEFAULTS;
+    }
+
+    public static function defaultDonationAmounts(?string $currency): array
+    {
+        return self::DONATION_DEFAULTS[strtoupper((string) $currency)] ?? self::DONATION_DEFAULTS['USD'];
+    }
+
+    /**
+     * The smallest and largest donation one order may carry, in the event's currency. At least the
+     * gateway's own minimum charge when the tickets themselves cost nothing (a 20-cent donation on
+     * free tickets would fail at Stripe; beside a priced ticket the order is over it anyway), and at
+     * most two thousand times the currency's first suggested amount (10,000 in dollars or euros,
+     * 1,000,000 in yen) or ten times the owner's largest, whichever is more, so a slip of the
+     * keyboard is caught before a card is charged and none of the owner's own amounts is refused.
+     *
+     * @return array{0: float, 1: float}
+     */
+    public function donationLimits(float $ticketsTotal = 0.0): array
+    {
+        $currency = $this->ticket_currency_code ?: 'USD';
+        $smallest = 1 / max(1, MoneyUtils::getSmallestUnitMultiplier($currency));
+        $gatewayMinimum = $ticketsTotal > 0 ? 0.0 : (float) (payment_gateways()->get($this->payment_method)?->amountLimits($currency)[0] ?? 0);
+        $ownLargest = max(array_merge([0], array_map('floatval', (array) ($this->donation_amounts ?? []))));
+
+        return [max($smallest, $gatewayMinimum), max((float) self::defaultDonationAmounts($currency)[0] * 2000, $ownLargest * 10)];
+    }
+
+    /**
      * Whether a PAID ticket on this event may be sold right now. Pro/Enterprise, or a schedule
      * on the selling trial (Role::onTicketTrial()).
      *
@@ -3374,19 +3552,18 @@ class Event extends Model
      * The page used to say nothing about price until the form was opened. The line is drawn from
      * the rows a visitor could be shown: the ones on sale, or, when none is, every row only if the
      * owner chose "show unavailable tickets" (an owner who hides tickets before sales open has not
-     * published their prices either). Passes count like any other row: the cheapest way in is
-     * what "from" means.
+     * published their prices either). Add-ons are never a way in, and a pass counts only when
+     * passes are all the event sells: it is priced for several visits, not for this one.
      *
      *  - free: every such row costs nothing.
-     *  - min / from: the lowest price, and whether there is a higher one.
-     *  - says: how the line is worded (priceWording()): 'free', 'from' or 'price'. A free
-     *          type beside paid ones is 'free' here while `free` stays false, because there
-     *          is still something to pay for.
+     *  - min / max / from: the lowest and highest price, and whether they differ.
+     *  - says: how the line is worded (priceWording()): 'free', 'free_range', 'from' or
+     *          'price'; priceText() turns it into words.
      *  - low:  tickets can be bought and few are left: a tenth of the house or fewer, and never
      *          more than ten. Only where the house has a size (not unlimited, not a seat map).
      *          Never a number: the page says "Few left", not how many.
      *
-     * @return array{free: bool, min: float, from: bool, says: string, currency: ?string, low: bool}|null
+     * @return array{free: bool, min: float, max: float, from: bool, says: string, currency: ?string, low: bool}|null
      */
     public function ticketPriceSummary($date = null): ?array
     {
@@ -3394,7 +3571,8 @@ class Event extends Model
             return null;
         }
 
-        $rows = $this->tickets->filter(fn ($ticket) => $ticket->setRelation('event', $this)->isSellable());
+        $rows = $this->tickets->reject(fn ($ticket) => $ticket->is_addon)
+            ->filter(fn ($ticket) => $ticket->setRelation('event', $this)->isSellable());
         $onSale = $rows->filter(fn ($ticket) => ! $ticket->isSalesEnded() && ! $ticket->isSalesNotStarted());
         // "From $10" has to be a price somebody can still pay: an early-bird type that sold out
         // with no end date is still "on sale" by its dates. ticketSale() asks the same of stock.
@@ -3411,6 +3589,12 @@ class Event extends Model
             return null;
         }
 
+        // A pass is priced for several visits (and may carry a perk of its own), so it is not the
+        // price of this night: it speaks for the event only when passes are all that is shown. A
+        // free voucher pass beside paid admission made the line say Free entry.
+        $entries = $shown->reject(fn ($ticket) => $ticket->is_pass);
+        $shown = $entries->isNotEmpty() ? $entries : $shown;
+
         $prices = $shown->map(fn ($ticket) => (float) $ticket->price);
         $capacity = $this->seatCapacity();
         $left = $capacity !== null ? $this->seatsRemainingForSale($date) : null;
@@ -3418,6 +3602,7 @@ class Event extends Model
         return [
             'free' => $prices->max() <= 0,
             'min' => $prices->min(),
+            'max' => $prices->max(),
             'from' => $prices->min() < $prices->max(),
             'says' => self::priceWording($prices->min(), $prices->max()),
             'currency' => $this->ticket_currency_code,
@@ -3428,18 +3613,53 @@ class Event extends Model
     }
 
     /**
-     * How a set of ticket prices is worded in one line: 'free' where the cheapest way in costs
-     * nothing, 'from' where prices differ, 'price' where there is one.
+     * How a set of ticket prices is worded in one line: 'free' where every way in costs nothing,
+     * 'free_range' where a free type sits beside paid ones, 'from' where paid prices differ,
+     * 'price' where there is one.
      *
      * One rule for the three places that say it: a card or a row of the list and the month
      * (cardTicketFields()), the event page's price line (event/show-guest) and a newsletter's
-     * event row (NewsletterService::eventRow()). Each used to read "the lowest price, and
-     * whether there is a higher one" for itself, and a free type beside paid ones (free entry,
-     * a paid table) came out as "From $0" in all three.
+     * event row (NewsletterService::eventRow()). A free type beside paid ones came out as
+     * "From $0" in all three, and then as "Free entry", which hid what the paid types cost
+     * (an organizer selling admission at lei 250 and lei 280 beside a free voucher was shown
+     * as free). It is "Free - lei 280" now: true in both cases, and never a zero.
      */
     public static function priceWording(float $min, float $max): string
     {
-        return $min <= 0 ? 'free' : ($min < $max ? 'from' : 'price');
+        if ($max <= 0) {
+            return 'free';
+        }
+        if ($min <= 0) {
+            return 'free_range';
+        }
+
+        return $min < $max ? 'from' : 'price';
+    }
+
+    /**
+     * The words of a price line for every wording but 'free', which each place says in its own
+     * words (the owner's "Free entry" label, or "Free"). $range: a place with room (the event
+     * page, a newsletter) says paid prices that differ as "lei 250 - lei 280"; a narrow chip
+     * says "From lei 250". In a right-to-left language each amount is isolated, or the two
+     * left-to-right amounts pull the hyphen between them into one run and the higher price
+     * reads first.
+     */
+    public static function priceText(string $says, float $min, float $max, ?string $currency, bool $range): ?string
+    {
+        $amount = function (float $value) use ($currency) {
+            $text = MoneyUtils::format($value, $currency);
+
+            return is_rtl() ? "\u{2068}".$text."\u{2069}" : $text;
+        };
+
+        return match ($says) {
+            'free' => null,
+            'free_range' => __('messages.price_free_to', ['max' => $amount($max)]),
+            'from' => $range
+                ? __('messages.price_range', ['min' => $amount($min), 'max' => $amount($max)])
+                : __('messages.price_from', ['price' => MoneyUtils::format($min, $currency)]),
+            default => MoneyUtils::format($min, $currency),
+        };
     }
 
     /**
@@ -3651,9 +3871,9 @@ class Event extends Model
      * forward is the caller's decision. $viewingRole may be an empty model, which the guest
      * layout's container fills in when a view passes none: that is no schedule.
      *
-     * @return \Illuminate\Support\Collection<int, Role>
+     * @return Collection<int, Role>
      */
-    public function pagePhotoRoles(?Role $viewingRole = null): \Illuminate\Support\Collection
+    public function pagePhotoRoles(?Role $viewingRole = null): Collection
     {
         $roles = $this->members()->filter(fn (Role $role) => $role->profile_image_url)->values();
         $venue = $this->venue;
@@ -3839,12 +4059,9 @@ class Event extends Model
         // priceWording(): the event page's price line and a newsletter's row ask the same rule.
         $says = self::priceWording($prices->min(), $prices->max());
         $free = $says === 'free';
-        $lowest = \App\Utils\MoneyUtils::format($prices->min(), $this->ticket_currency_code);
-        $from = match ($says) {
-            'free' => null,
-            'from' => __('messages.price_from', ['price' => $lowest]),
-            default => $lowest,
-        };
+        // A free type beside paid ones is "Free - lei 280" in the chip's plain style, never the
+        // green Free entry, which would hide that the rest cost something.
+        $from = self::priceText($says, $prices->min(), $prices->max(), $this->ticket_currency_code, false);
 
         $soldOut = [];
         $low = [];
@@ -3934,22 +4151,45 @@ class Event extends Model
             return $this->languageCodeCache = $this->venue->language_code;
         }
 
-        $lang = 'en';
-
         foreach ($this->roles as $role) {
             if ($role->isTalent() && $role->language_code) {
-                $lang = $role->language_code;
-                break;
+                return $this->languageCodeCache = $role->language_code;
             }
         }
 
-        return $this->languageCodeCache = $lang;
+        return $this->languageCodeCache = $this->languageCreator()?->language_code ?: 'en';
+    }
+
+    /**
+     * The schedule that wrote the event, as the last word on its languages: an online event, or
+     * one on a curator, has no venue and no talent, and was read as English to English, so a
+     * schedule that translates never had its own such events translated. After the venue and
+     * the talent, so every event that has one keeps the languages it has always had.
+     *
+     * Read from the roles already loaded (the creator is attached to its own events) or a loaded
+     * creatorRole, never with a query of its own: a list of events calling this would pay one per
+     * row. creator_role_id is read from the attributes, so a narrowed select without it is 'en'.
+     */
+    protected function languageCreator(): ?Role
+    {
+        $creatorId = (int) ($this->attributes['creator_role_id'] ?? 0);
+        if (! $creatorId) {
+            return null;
+        }
+
+        $creator = $this->roles->firstWhere('id', $creatorId);
+        if (! $creator && $this->relationLoaded('creatorRole')) {
+            $creator = $this->creatorRole;
+        }
+
+        return $creator;
     }
 
     /**
      * The TARGET language this event's content is translated INTO (stored in the `_en` columns),
      * mirroring getLanguageCode()'s source resolution: the venue drives it when set, otherwise the
-     * first talent role. Defaults to 'en', which reproduces the original English-only behavior.
+     * first talent role, otherwise the schedule that created it (languageCreator()). Defaults to
+     * 'en', which reproduces the original English-only behavior.
      */
     public function getTranslationLanguageCode()
     {
@@ -3961,16 +4201,287 @@ class Event extends Model
             return $this->translationLanguageCodeCache = $this->venue->translation_language_code;
         }
 
-        $lang = 'en';
-
         foreach ($this->roles as $role) {
             if ($role->isTalent() && $role->translation_language_code) {
-                $lang = $role->translation_language_code;
-                break;
+                return $this->translationLanguageCodeCache = $role->translation_language_code;
             }
         }
 
-        return $this->translationLanguageCodeCache = $lang;
+        // The schedule that wrote it, as getLanguageCode() falls back to it.
+        return $this->translationLanguageCodeCache = $this->languageCreator()?->translation_language_code ?: 'en';
+    }
+
+    /**
+     * Whether a save's untranslated text is translated a minute or so later (TranslateEventSoon)
+     * rather than on the next fifteen-minute run: a provider key is set and the queue is a real one.
+     */
+    public static function translatesSoon(): bool
+    {
+        return (config('services.google.gemini_key') || config('services.openai.api_key'))
+            && config('queue.default') !== 'sync';
+    }
+
+    /**
+     * Saved hook: a new event, or an original that changed, with something left untranslated is
+     * handed to TranslateEventSoon. Only the originals count, so the translation command's own
+     * saves (which write the `_en` columns) never queue another round.
+     */
+    protected static function queueTranslationSoon(self $model): void
+    {
+        if (! self::translatesSoon()
+            || (! $model->wasRecentlyCreated && ! $model->wasChanged(self::HAND_TRANSLATABLE_FIELDS))) {
+            return;
+        }
+
+        foreach (self::HAND_TRANSLATABLE_FIELDS as $field) {
+            if (trim((string) $model->{$field}) !== '' && $model->{$field.'_en'} === null) {
+                TranslateEventSoon::dispatch($model->id)->afterCommit();
+
+                return;
+            }
+        }
+    }
+
+    /**
+     * The translated fields a person may correct by hand (the Translation row under About on the
+     * event form, EventTranslationEdits). Each one's translation is "{$field}_en", in the event's
+     * target language whatever its name says.
+     */
+    public const HAND_TRANSLATABLE_FIELDS = ['name', 'short_description', 'description'];
+
+    /**
+     * Whether a person corrected this field's translation by hand. app:translate never writes such
+     * a field, a change of the original keeps it (marked by translationIsStale()), and anything
+     * that refreshes translations in bulk must skip it too.
+     */
+    public function translationIsManual(string $field): bool
+    {
+        return isset($this->translationOverrides()[$field]);
+    }
+
+    /**
+     * A correction made against an original that has changed since: kept and still shown, and the
+     * event form says the original changed so its owner can look again.
+     */
+    public function translationIsStale(string $field): bool
+    {
+        $entry = $this->translationOverrides()[$field] ?? null;
+
+        // Not stamped yet: made in this save, and stamped from the original as it is written.
+        if (! $entry || ($entry['source'] ?? null) === null) {
+            return false;
+        }
+
+        return ! hash_equals($entry['source'], self::translationSourceHash($this->{$field}));
+    }
+
+    /**
+     * The corrections, by field: `source` is the hash of the original each was made against.
+     *
+     * @return array<string, array{source: ?string, at: ?string}>
+     */
+    public function translationOverrides(): array
+    {
+        // An event read with a narrowed select has no such attribute. Read it once rather than
+        // answer "nobody corrected anything": a save would then clear a correction.
+        if (! array_key_exists('translation_overrides', $this->attributes)) {
+            if (! $this->exists) {
+                return [];
+            }
+            // toBase(): the raw JSON. Eloquent's value() hands back the CAST array, which the cast
+            // would then try to decode again (a TypeError, and a 500 on the save).
+            $this->attributes['translation_overrides'] = static::query()->whereKey($this->getKey())->toBase()->value('translation_overrides');
+            $this->syncOriginalAttribute('translation_overrides');
+        }
+
+        $stored = $this->translation_overrides;
+        if (! is_array($stored)) {
+            return [];
+        }
+
+        $overrides = [];
+        foreach (self::HAND_TRANSLATABLE_FIELDS as $field) {
+            if (isset($stored[$field]) && is_array($stored[$field])) {
+                $source = $stored[$field]['source'] ?? null;
+                $overrides[$field] = [
+                    'source' => is_string($source) && preg_match('/^[0-9a-f]{40}$/', $source) ? $source : null,
+                    'at' => is_string($stored[$field]['at'] ?? null) ? $stored[$field]['at'] : null,
+                    // The language the correction is written in. Null on a correction stored before
+                    // this was recorded, which is taken to be in the event's language as it is.
+                    'lang' => is_string($stored[$field]['lang'] ?? null) ? $stored[$field]['lang'] : null,
+                ];
+            }
+        }
+
+        return $overrides;
+    }
+
+    /**
+     * Corrections written in a language the event no longer translates into (it moved to a venue,
+     * or onto a schedule, with another target) are forgotten and their fields given back to
+     * app:translate. Called by EventRepo::saveEvent() once the event's schedules are settled. A
+     * query-builder write, so no saving hook re-derives anything from a half-loaded model.
+     */
+    public function dropCorrectionsInAnotherLanguage(): void
+    {
+        $overrides = $this->translationOverrides();
+        if (! $overrides) {
+            return;
+        }
+
+        $this->unsetRelation('roles');
+        $this->unsetRelation('venue');
+        $this->languageCodeCache = null;
+        $this->translationLanguageCodeCache = null;
+        $target = $this->getTranslationLanguageCode();
+
+        $update = [];
+        $stamped = false;
+        foreach ($overrides as $field => $entry) {
+            if ($entry['lang'] === null) {
+                // A new event's correction, saved before it had schedules: it is in this language.
+                $overrides[$field]['lang'] = $target;
+                $stamped = true;
+            } elseif ($entry['lang'] !== $target) {
+                unset($overrides[$field]);
+                $update[$field.'_en'] = null;
+                if ($field === 'description') {
+                    $update['description_html_en'] = null;
+                }
+            }
+        }
+
+        if (! $update && ! $stamped) {
+            return;
+        }
+
+        $update['translation_overrides'] = $overrides ? json_encode($overrides) : null;
+        if (count($update) > 1) {
+            $update['translation_attempts'] = 0;
+        }
+        static::query()->whereKey($this->getKey())->update($update);
+        $this->forceFill(array_merge($update, ['translation_overrides' => $overrides ?: null]));
+        $this->syncOriginal();
+    }
+
+    /** What a correction is dated against: the original, with line endings and edges evened out. */
+    public static function translationSourceHash(?string $text): string
+    {
+        return sha1(trim(str_replace(["\r\n", "\r"], "\n", (string) $text)));
+    }
+
+    /**
+     * Record that $field's translation is a person's. $basis is the hash of the original it was
+     * made against when that is not the original being saved (a copy of an event carries its
+     * source's); null stamps the original as this save writes it.
+     */
+    public function markTranslationManual(string $field, ?string $basis = null, ?string $lang = null): void
+    {
+        $overrides = $this->translationOverrides();
+        $overrides[$field] = [
+            'source' => $basis !== null && preg_match('/^[0-9a-f]{40}$/', $basis) ? $basis : null,
+            'at' => now()->toIso8601String(),
+            // Stamped once the save has settled the event's schedules, which decide its target
+            // (dropCorrectionsInAnotherLanguage()), when not given.
+            'lang' => $lang,
+        ];
+        $this->translation_overrides = $overrides;
+    }
+
+    /** "Keep mine": the correction still fits the changed original, so it is dated against it now. */
+    public function keepTranslationOverride(string $field): void
+    {
+        $overrides = $this->translationOverrides();
+        if (! isset($overrides[$field])) {
+            return;
+        }
+        $overrides[$field]['source'] = null;
+        $this->translation_overrides = $overrides;
+    }
+
+    /** Forget that $field was corrected, leaving its translation as it is. */
+    public function forgetTranslationOverride(string $field): void
+    {
+        $overrides = $this->translationOverrides();
+        unset($overrides[$field]);
+        $this->translation_overrides = $overrides ?: null;
+    }
+
+    /** Back to the automatic translation: the correction goes and app:translate takes the field up again. */
+    public function useAutomaticTranslation(string $field): void
+    {
+        $this->forgetTranslationOverride($field);
+        $this->{$field.'_en'} = null;
+        if ($field === 'description') {
+            $this->description_html_en = null;
+        }
+        $this->translation_attempts = 0;
+    }
+
+    /**
+     * Saving hook: a corrected translation that something other than the correction itself wrote
+     * to (an import or a feed filling name_en on an event it updates) is put back as it was.
+     */
+    protected function holdHandTranslations(): void
+    {
+        if (! $this->exists || ! $this->isDirty(array_map(fn ($field) => $field.'_en', self::HAND_TRANSLATABLE_FIELDS))) {
+            return;
+        }
+
+        $overrides = $this->translationOverrides();
+        $before = $this->getOriginal('translation_overrides');
+        $before = is_array($before) ? $before : [];
+
+        foreach ($overrides as $field => $entry) {
+            // The entry changed in this save: this IS the correction (or Keep), so it stands.
+            if (! isset($before[$field]) || ($before[$field]['at'] ?? null) !== $entry['at'] || ($before[$field]['source'] ?? null) !== $entry['source']) {
+                continue;
+            }
+            if ($this->isDirty($field.'_en')) {
+                $this->{$field.'_en'} = $this->getOriginal($field.'_en');
+            }
+        }
+    }
+
+    /**
+     * Saving hook, when $field's original changed: whether its translation stays. A correction
+     * does, and is marked as made against an older original; with the original emptied there is
+     * nothing left to translate, and the correction goes with it.
+     */
+    protected function keepsHandTranslation(string $field): bool
+    {
+        if (! $this->translationIsManual($field)) {
+            return false;
+        }
+
+        if (trim((string) $this->{$field}) === '') {
+            $this->forgetTranslationOverride($field);
+
+            return false;
+        }
+
+        return true;
+    }
+
+    /** Saving hook: date each correction made in this save against the original as it is written. */
+    protected function stampHandTranslations(): void
+    {
+        if (! array_key_exists('translation_overrides', $this->attributes) || $this->attributes['translation_overrides'] === null) {
+            return;
+        }
+
+        $overrides = $this->translationOverrides();
+        $stamped = false;
+        foreach ($overrides as $field => $entry) {
+            if ($entry['source'] === null) {
+                $overrides[$field]['source'] = self::translationSourceHash($this->{$field});
+                $stamped = true;
+            }
+        }
+
+        if ($stamped) {
+            $this->translation_overrides = $overrides;
+        }
     }
 
     /**
@@ -4481,7 +4992,7 @@ class Event extends Model
             ? $viewingRole->displayLanguageCode()
             : (showing_translation($this) ? $this->getTranslationLanguageCode() : $this->getLanguageCode());
 
-        return \App\Utils\GuestSeo::eventDescription($this, is_string($date) ? $date : null, $want, $viewingRole);
+        return GuestSeo::eventDescription($this, is_string($date) ? $date : null, $want, $viewingRole);
     }
 
     /**
@@ -4979,8 +5490,20 @@ class Event extends Model
     public function textInLanguage(string $field, string $want, ?Role $viewingRole = null): ?string
     {
         $authored = $this->{$field};
+        $translated = $this->{$field === 'description_html' ? 'description_html_en' : $field.'_en'};
 
         if ($viewingRole && $viewingRole->isCurator() && $viewingRole->language_code === $want) {
+            // A person's correction in the language wanted outranks the curator's own machine copy
+            // of the same text: the curator pass translates the ORIGINAL, so without this a curator
+            // writing in the event's target language showed its AI copy over the owner's wording.
+            // Asked only of a row that has the column loaded: a calendar's narrowed select would
+            // otherwise cost a query per event.
+            if ($translated && array_key_exists('translation_overrides', $this->attributes)
+                && $this->translationIsManual($field === 'description_html' ? 'description' : $field)
+                && $this->getTranslationLanguageCode() === $want) {
+                return $translated;
+            }
+
             $pivot = $this->roles->where('id', $viewingRole->id)->first()?->pivot;
             // description resolves to description_html_translated: the callers of the description
             // wrapper render HTML, and the pivot stores both the source and the derived HTML.
@@ -4990,9 +5513,10 @@ class Event extends Model
             }
         }
 
-        $translated = $this->{$field === 'description_html' ? 'description_html_en' : $field.'_en'};
-
-        if ($translated && $this->getTranslationLanguageCode() === $want) {
+        // Never a "translation" into the language the event is written in. A schedule whose second
+        // language is set to its own (Hebrew to Hebrew) still has the English copy an AI import
+        // stored in the _en column, and served it as the Hebrew one (2026-11-18).
+        if ($translated && $this->getTranslationLanguageCode() === $want && $this->getLanguageCode() !== $want) {
             return $translated;
         }
 
@@ -5002,6 +5526,37 @@ class Event extends Model
     public function nameInLanguage(string $want, ?Role $viewingRole = null): string
     {
         return str_ireplace('fuck', 'F@#%', (string) $this->textInLanguage('name', $want, $viewingRole));
+    }
+
+    /**
+     * A copy of this event whose name and descriptions are the ones stored for `$want`
+     * (textInLanguage(), so a translation corrected by hand is the one used), for a mail, an
+     * invite or a pass to a guest who read the event in that language (Sale::eventAsRead()). With
+     * no language, or none of those stored for it, the event itself.
+     *
+     * For rendering only: never saved, and never handed to a queued job, which serializes a model
+     * by its id and would read the stored row back.
+     */
+    public function readIn(?string $want): static
+    {
+        if (! $want) {
+            return $this;
+        }
+
+        $copy = null;
+        foreach (['name', 'short_description', 'description', 'description_html'] as $field) {
+            if (! array_key_exists($field, $this->attributes)) {
+                continue;
+            }
+
+            $text = $this->textInLanguage($field, $want);
+            if ($text !== null && $text !== $this->attributes[$field]) {
+                $copy ??= clone $this;
+                $copy->attributes[$field] = $text;
+            }
+        }
+
+        return $copy ?? $this;
     }
 
     public function shortDescriptionInLanguage(string $want, ?Role $viewingRole = null): ?string

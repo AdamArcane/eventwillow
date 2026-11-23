@@ -100,6 +100,21 @@ class AdminDashboardPageTest extends TestCase
     }
 
     /**
+     * layouts/app asks window.confirm() for a click anywhere inside an element carrying
+     * data-confirm, so the cards' wrapper keeps its "Confirm password" label under another name:
+     * as data-confirm, every click in the cards (Show more first of all) opened that dialog.
+     * Mutation: rename the attribute back.
+     */
+    public function test_the_cards_wrapper_asks_nothing_of_a_click_inside_it(): void
+    {
+        config(['app.hosted' => true, 'app.is_nexus' => true]);
+
+        $html = $this->page()->getContent();
+        $this->assertMatchesRegularExpression('/<div id="admin-dashboard"[^>]*\sdata-reauth-action="/', $html);
+        $this->assertDoesNotMatchRegularExpression('/<div id="admin-dashboard"[^>]*\sdata-confirm=/', $html);
+    }
+
+    /**
      * The panels are fetched with the headers the page's script sends. Asked as a page, a lapsed
      * password confirmation answered with a redirect to the form, which fetch followed and the
      * script put where the panel goes. Mutation: send Accept: text/html from the script.
@@ -196,7 +211,8 @@ class AdminDashboardPageTest extends TestCase
      */
     public function test_the_windows_are_fixed(): void
     {
-        config(['app.hosted' => true, 'app.is_nexus' => true]);
+        // Selfhosted: on hosted the active users figure is the Revenue card's.
+        config(['app.hosted' => false, 'app.is_nexus' => false]);
         $this->seedSomething();
 
         foreach (['', '?range=last_7_days', '?range=all_time'] as $query) {
@@ -290,9 +306,10 @@ class AdminDashboardPageTest extends TestCase
         config(['app.hosted' => true, 'app.is_nexus' => true]);
         $this->seedSomething();
 
+        // Active users is the Revenue card's on hosted (test_hosted_draws_active_users_in_the_revenue_card).
         $panels = [
             'recent' => ['schedules', 'recentEvents', 'eventCounts'],
-            'growth' => ['signups', 'active', 'events'],
+            'growth' => ['signups', 'events'],
             'platform' => ['federation', 'system'],
         ];
         $all = ['signups', 'active', 'revenue', 'events', 'eventCounts', 'federation', 'schedules', 'recentEvents', 'system'];
@@ -307,7 +324,7 @@ class AdminDashboardPageTest extends TestCase
             }
         }
 
-        $this->assertMatchesRegularExpression('/^revenue;dur=/', (string) $this->revenue()->headers->get('Server-Timing'));
+        $this->assertMatchesRegularExpression('/^revenue;dur=\d+(\.\d+)?, active;dur=\d+(\.\d+)?$/', (string) $this->revenue()->headers->get('Server-Timing'));
 
         // Invented data is not timed: nothing was read to make it.
         $this->assertFalse($this->panel('recent', '?sample=1')->headers->has('Server-Timing'));
@@ -338,12 +355,11 @@ class AdminDashboardPageTest extends TestCase
 
         // A card of the same panel that does not read the failed one.
         $siblings = [
-            'signups' => ['dash-active', 'dash-upcoming'], 'active' => ['dash-signups', 'dash-upcoming'],
-            'events' => ['dash-signups', 'dash-active'], 'federation' => [], 'system' => [],
+            'signups' => ['dash-upcoming'], 'events' => ['dash-signups'], 'federation' => [], 'system' => [],
             'schedules' => ['dash-recent-events'], 'recentEvents' => ['dash-recent'],
             'eventCounts' => ['dash-recent', 'dash-recent-events'],
         ];
-        $panelOf = ['signups' => 'growth', 'active' => 'growth', 'events' => 'growth', 'federation' => 'platform', 'schedules' => 'recent', 'recentEvents' => 'recent', 'eventCounts' => 'recent', 'system' => 'platform'];
+        $panelOf = ['signups' => 'growth', 'events' => 'growth', 'federation' => 'platform', 'schedules' => 'recent', 'recentEvents' => 'recent', 'eventCounts' => 'recent', 'system' => 'platform'];
 
         foreach (['signups', 'active', 'revenue', 'events', 'eventCounts', 'federation', 'schedules', 'recentEvents', 'system'] as $card) {
             $this->app->bind(AdminDashboard::class, fn () => new class($card) extends AdminDashboard
@@ -361,8 +377,16 @@ class AdminDashboardPageTest extends TestCase
                 }
             });
 
+            // The two halves of the corner card stand without each other.
             if ($card === 'revenue') {
-                $this->revenue()->assertOk()->assertExactJson(['failed' => true]);
+                $this->revenue()->assertOk()->assertJsonPath('failed', true)->assertJsonMissingPath('mrr')
+                    ->assertJsonPath('active.active_7d', fn ($value) => is_int($value));
+
+                continue;
+            }
+            if ($card === 'active') {
+                $this->revenue()->assertOk()->assertJsonPath('failed', false)->assertJsonPath('active', null)
+                    ->assertJsonPath('arr_value', 60);
 
                 continue;
             }
@@ -378,6 +402,72 @@ class AdminDashboardPageTest extends TestCase
                 $this->assertStringContainsString('id="'.$id.'"', $html, "{$card} took {$id} with it");
             }
         }
+    }
+
+    /**
+     * On hosted the active users chart fills the Revenue card in the corner, which stands as tall
+     * as the Now card and had nothing under its two figures, and the growth panel leaves it out
+     * (Sign-ups then takes its row alone). Selfhost has no corner card and keeps it in the panel.
+     * The seeded weeks and the exact ones are two lines, never one. Mutation: build active for
+     * the hosted panel, or leave it out of the revenue answer.
+     */
+    public function test_hosted_draws_active_users_in_the_revenue_card(): void
+    {
+        $this->seedSomething();
+        DB::table('user_active_days')->insert(['user_id' => $this->admin->id, 'date' => now()->toDateString(), 'counted' => true]);
+
+        config(['app.hosted' => true, 'app.is_nexus' => true]);
+        $this->panel('growth')->assertDontSee('id="dash-active"', false)->assertSee('id="dash-signups"', false)
+            ->assertViewHas('dashboard', fn (array $dashboard) => ! array_key_exists('active', $dashboard));
+        $active = $this->revenue()->assertOk()->json('active');
+        $this->assertGreaterThanOrEqual(1, $active['active_7d']);
+        $this->assertSame(count($active['labels']), count($active['exact']));
+        $this->assertSame(count($active['labels']), count($active['estimate']));
+        foreach ($active['exact'] as $index => $value) {
+            $this->assertTrue($value === null || $active['estimate'][$index] === null, 'a point on both lines');
+        }
+        // Counting began today, so today's point is the estimate's.
+        $this->assertGreaterThanOrEqual(1, end($active['exact']) ?? end($active['estimate']));
+        $this->assertStringContainsString('ref="activeChart"', $this->page()->getContent());
+
+        config(['app.hosted' => false, 'app.is_nexus' => false]);
+        $this->panel('growth')->assertSee('id="dash-active"', false)->assertSee('id="dash-signups"', false);
+        $this->revenue()->assertNotFound();
+
+        ActiveDays::flush();
+    }
+
+    /**
+     * The top of the page is four panels: Visitors, Revenue, Sign-ups and Active users, the last
+     * two moved out of the Now and Revenue cards (2026-11), and Revenue draws MRR over the last three
+     * months, ending on the figure it prints. Selfhost has no billing, so Visitors and Sign-ups
+     * only. Mutation: leave the series out of the revenue answer, or the panels out of the page.
+     */
+    public function test_the_top_is_four_panels_and_revenue_draws_mrr_over_time(): void
+    {
+        config(['app.hosted' => true, 'app.is_nexus' => true]);
+
+        $html = $this->page()->getContent();
+        foreach (['id="realtime-now"', 'id="dash-revenue"', '<section class="realtime-panel-signups', '<section class="realtime-panel-active', 'ref="mrrChart"', 'ref="activeChart"'] as $part) {
+            $this->assertStringContainsString($part, $html, $part);
+        }
+        // Sign-ups and Active users are panels of their own, not the foot of another card.
+        $this->assertStringNotContainsString('class="realtime-now-signups', $html);
+
+        $answer = $this->revenue()->assertOk()->json();
+        $history = $answer['mrr_history'];
+        // A week apart over three months, and now.
+        $this->assertCount(14, $history['labels']);
+        $this->assertCount(14, $history['values']);
+        $this->assertSame($answer['mrr'], end($history['formatted']));
+        $this->assertSame(__('messages.today'), end($history['titles']));
+        $this->assertSame(plan_price(7), $history['axis']);
+
+        config(['app.hosted' => false, 'app.is_nexus' => false]);
+        $html = $this->page()->getContent();
+        $this->assertStringContainsString('<section class="realtime-panel-signups', $html);
+        $this->assertStringNotContainsString('<section class="realtime-panel-active', $html);
+        $this->assertStringNotContainsString('ref="mrrChart"', $html);
     }
 
     /**

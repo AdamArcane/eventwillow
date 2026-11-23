@@ -2,13 +2,23 @@
 
 namespace Tests\Feature;
 
+use App\Models\AnalyticsDaily;
+use App\Models\Event;
+use App\Models\EventInterest;
 use App\Models\MarketingDailyStat;
 use App\Models\Role;
+use App\Models\RoleSubscriber;
+use App\Models\Setting;
 use App\Models\User;
+use App\Services\AccountBlockService;
 use App\Services\AuditService;
 use App\Services\DemoService;
 use App\Services\GrowthExportService;
+use App\Utils\ReleaseHistory;
+use App\Utils\SetupGuide;
 use Illuminate\Foundation\Testing\RefreshDatabase;
+use Illuminate\Support\Carbon;
+use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Str;
 use Tests\Feature\Concerns\CreatesScheduleData;
@@ -135,10 +145,14 @@ class GrowthExportTest extends TestCase
         // razorpay, 20 since boost.partner_fees (what boost partners pay on their own spend), 21
         // since the schedule rows say where each schedule stands now (subscription, what is on
         // sale, unpaid orders, its Google sync) and the deploy carries its commit, 22 since the
-        // headline test can be one arm (phase baseline), 23 since gateways can include payment_url.
+        // headline test can be one arm (phase baseline), 23 since gateways can include payment_url, 24
+        // since blocked accounts are left out, 25 since nudge_outcomes carries acted_subscribed, 26
+        // since signup_sources dates signups by source, 27 since signups carry arrival_intent and
+        // traffic signup_google_starts, 28 since marketing_pages counts each page's readers, 29
+        // since hero_test can hold a page round (two homepages, an even split, ended by hand).
         // Bumping this is deliberate: a reader diffing two pulls needs to know the shape (or the
         // meaning) moved.
-        $this->assertSame(23, $data['meta']['schema_version']);
+        $this->assertSame(29, $data['meta']['schema_version']);
         $this->assertSame(GrowthExportService::SCHEMA_VERSION, $data['meta']['schema_version']);
         $this->assertSame(now()->format('Y-m'), $data['meta']['partial_month']['month']);
         $this->assertSame(['funnel', 'funnel_trend'], $data['meta']['range_applies_to']);
@@ -168,7 +182,7 @@ class GrowthExportTest extends TestCase
 
         // An import is not the form's doing, and neither is the venue it brought.
         $imported = $this->createEvent($talent, ['user_id' => $owner->id, 'rsvp_enabled' => true]);
-        $imported->forceFill(['import_source' => \App\Models\Event::IMPORT_ICS])->save();
+        $imported->forceFill(['import_source' => Event::IMPORT_ICS])->save();
         $importedVenue = $this->freeRole($owner, 'venue');
         $imported->roles()->attach($importedVenue->id, ['is_accepted' => true]);
 
@@ -187,7 +201,7 @@ class GrowthExportTest extends TestCase
 
         $oldest = array_key_first($section['by_month']);
         $this->assertSame(['events' => 0, 'with_location' => 0, 'with_signup' => 0, 'with_flyer' => 0], $section['by_month'][$oldest]['first'], 'a month with nothing in it is a real zero');
-        $this->assertSame($first->id, \App\Models\Event::where('user_id', $owner->id)->min('id'), 'sanity check: the bare event is the first');
+        $this->assertSame($first->id, Event::where('user_id', $owner->id)->min('id'), 'sanity check: the bare event is the first');
     }
 
     public function test_claims_reports_untracked_months_as_null_not_zero(): void
@@ -338,8 +352,8 @@ class GrowthExportTest extends TestCase
      */
     public function test_the_email_code_step_is_its_own_group(): void
     {
-        $start = \Illuminate\Support\Carbon::parse('2026-09-26');
-        $end = \Illuminate\Support\Carbon::parse('2026-09-30')->endOfDay();
+        $start = Carbon::parse('2026-09-26');
+        $end = Carbon::parse('2026-09-30')->endOfDay();
 
         MarketingDailyStat::create([
             'date' => '2026-09-26',
@@ -376,8 +390,8 @@ class GrowthExportTest extends TestCase
 
         // Opens after the table but before the code counters (2026-08-03).
         $early = app(GrowthExportService::class)->funnelData(
-            \Illuminate\Support\Carbon::parse('2026-07-10'), \Illuminate\Support\Carbon::parse('2026-07-31'),
-            \Illuminate\Support\Carbon::parse('2026-06-10'), \Illuminate\Support\Carbon::parse('2026-07-09'));
+            Carbon::parse('2026-07-10'), Carbon::parse('2026-07-31'),
+            Carbon::parse('2026-06-10'), Carbon::parse('2026-07-09'));
         $byKey = array_column($early['stages'], 'count', 'key');
         $this->assertSame(5, $byKey['signup_view']);
         $this->assertNull($byKey['signup_code_requests']);
@@ -385,8 +399,8 @@ class GrowthExportTest extends TestCase
 
         // Opens after the request counters but before signup_code_invalid (2026-09-25).
         $mid = app(GrowthExportService::class)->funnelData(
-            \Illuminate\Support\Carbon::parse('2026-08-10'), \Illuminate\Support\Carbon::parse('2026-08-31'),
-            \Illuminate\Support\Carbon::parse('2026-07-10'), \Illuminate\Support\Carbon::parse('2026-08-09'));
+            Carbon::parse('2026-08-10'), Carbon::parse('2026-08-31'),
+            Carbon::parse('2026-07-10'), Carbon::parse('2026-08-09'));
         $byKey = array_column($mid['stages'], 'count', 'key');
         $this->assertSame(0, $byKey['signup_code_requests']);
         $this->assertNull($byKey['signup_code_invalid']);
@@ -668,7 +682,7 @@ class GrowthExportTest extends TestCase
     {
         // A schedule whose only signal is traffic on its public page.
         $viewedOnly = $this->freeRole();
-        \App\Models\AnalyticsDaily::create([
+        AnalyticsDaily::create([
             'role_id' => $viewedOnly->id,
             'date' => now()->subDays(2)->toDateString(),
             'desktop_views' => 40,
@@ -1043,20 +1057,20 @@ class GrowthExportTest extends TestCase
         $role = $this->createRole($owner);
         $event = $this->createEvent($role, ['creator_role_id' => $role->id]);
 
-        \App\Models\EventInterest::create([
+        EventInterest::create([
             'event_id' => $event->id,
             'event_date' => $event->getStartDateTime(null, true, $event->scheduleTimezone())->format('Y-m-d'),
             'email' => 'fan@fans.test',
             'confirmed_at' => now(),
-            'token' => \App\Models\EventInterest::newToken(),
+            'token' => EventInterest::newToken(),
         ]);
 
-        \App\Models\RoleSubscriber::create([
+        RoleSubscriber::create([
             'role_id' => $role->id,
             'email' => 'reader@fans.test',
             'name' => 'A Reader',
             'confirmed_at' => now(),
-            'token' => \App\Models\RoleSubscriber::newToken(),
+            'token' => RoleSubscriber::newToken(),
         ]);
 
         $data = $this->build();
@@ -1230,6 +1244,28 @@ class GrowthExportTest extends TestCase
         $byPath = collect($data['acquisition']['by_landing_path'])->pluck('signups', 'key');
         $this->assertSame(3, $byPath['/guest-add']);
         $this->assertSame(1, $byPath['(other)']);
+    }
+
+    public function test_signup_sources_count_each_day_by_its_anonymized_source(): void
+    {
+        $day = now()->subDays(3)->setTime(12, 0);
+        foreach (range(1, 3) as $n) {
+            $this->signupWith(['referrer_url' => 'https://www.reddit.com/r/selfhosted/', 'created_at' => $day]);
+        }
+        $this->signupWith(['referrer_url' => 'https://johns-personal-blog.net/', 'created_at' => $day]);
+        $this->signupWith(['referrer_url' => 'https://www.reddit.com/', 'created_at' => now()->subDays(120)]);
+
+        $data = $this->build();
+        $sources = $data['signup_sources'];
+        $i = array_flip($sources['columns']);
+        $onDay = array_values(array_filter($sources['rows'], fn ($r) => $r[$i['date']] === $day->toDateString()));
+        $byHost = array_column(array_map(fn ($r) => [$r[$i['referrer_domain']], $r[$i['signups']]], $onDay), 1, 0);
+
+        $this->assertSame(3, $byHost['reddit'] ?? null, 'the day carries its three reddit signups');
+        $this->assertSame(1, $byHost['(other)'] ?? null, 'a host only one signup came from is folded, as in the rows');
+        $this->assertNotContains(now()->subDays(120)->toDateString(), array_column($sources['rows'], $i['date']), 'older than the window');
+        $this->assertStringNotContainsString('johns-personal-blog', json_encode($sources));
+        $this->assertNotContains('date', $data['signups']['columns'], 'the rows themselves stay dated by month');
     }
 
     public function test_referrers_are_canonicalised_and_only_shared_hosts_survive(): void
@@ -1593,7 +1629,7 @@ class GrowthExportTest extends TestCase
         $this->assertSame(1, $sources['imported_google']);
         $this->assertSame(0, $sources['imported_eventbrite']);
         // Every source in the vocabulary has a key, used or not.
-        foreach (\App\Models\Event::IMPORT_SOURCES as $source) {
+        foreach (Event::IMPORT_SOURCES as $source) {
             $this->assertArrayHasKey('imported_'.$source, $sources);
         }
         $this->assertSame(2, $sources['google']);
@@ -1678,6 +1714,18 @@ class GrowthExportTest extends TestCase
         $this->assertSame(1, $outcome['acted_event'], 'an event 18 days after the nudge is outside the window');
         $this->assertSame(1, $outcome['acted_ticket_type']);
         $this->assertSame(0, $outcome['acted_paid_sale']);
+        $this->assertSame(0, $outcome['acted_subscribed']);
+
+        // paid_blocked asks for a plan: a subscription inside the window is its answer, and an
+        // incomplete checkout is not one.
+        $subscribe = fn (Role $role, int $daysAgo, string $status) => $role->subscriptions()->create([
+            'type' => 'default', 'stripe_id' => 'sub_'.Str::random(14), 'stripe_status' => $status,
+            'stripe_price' => 'price_pro_m', 'quantity' => 1, 'created_at' => now()->subDays($daysAgo),
+        ]);
+        $subscribe($acted, 15, 'active');
+        $subscribe($late, 15, 'incomplete');
+
+        $this->assertSame(1, $this->build()['nudge_outcomes']['no_ticket_type_free']['acted_subscribed']);
     }
 
     /**
@@ -1728,9 +1776,9 @@ class GrowthExportTest extends TestCase
     {
         $role = $this->freeRole();
         $this->followRole($this->createOwner(), $role);
-        \App\Models\RoleSubscriber::create(['role_id' => $role->id, 'email' => 'reader@fans.test',
-            'confirmed_at' => now(), 'token' => \App\Models\RoleSubscriber::newToken()]);
-        \App\Models\AnalyticsDaily::create(['role_id' => $role->id, 'date' => now()->toDateString(), 'desktop_views' => 7]);
+        RoleSubscriber::create(['role_id' => $role->id, 'email' => 'reader@fans.test',
+            'confirmed_at' => now(), 'token' => RoleSubscriber::newToken()]);
+        AnalyticsDaily::create(['role_id' => $role->id, 'date' => now()->toDateString(), 'desktop_views' => 7]);
 
         $reach = $this->build()['reach'];
         $week = array_combine($reach['columns'], end($reach['rows']));
@@ -2014,7 +2062,9 @@ class GrowthExportTest extends TestCase
     {
         $referrer = $this->createOwner();
         $user = $this->createOwner();
-        DB::table('users')->where('id', $user->id)->update(['hero_variant' => 'sell', 'referred_by_user_id' => $referrer->id]);
+        DB::table('users')->where('id', $user->id)->update(['hero_variant' => 'sell', 'arrival_intent' => 'pro', 'referred_by_user_id' => $referrer->id]);
+        // A value outside our own vocabulary is never exported.
+        DB::table('users')->where('id', $referrer->id)->update(['arrival_intent' => 'a@b.co']);
 
         foreach (range(1, 3) as $n) {
             DB::table('audit_logs')->insert(['user_id' => $user->id, 'action' => AuditService::AUTH_LOGIN,
@@ -2032,6 +2082,9 @@ class GrowthExportTest extends TestCase
         $row = collect($data['signups']['rows'])->firstWhere($i['uid'], $uid);
 
         $this->assertSame('sell', $row[$i['hero_variant']]);
+        $this->assertSame('pro', $row[$i['arrival_intent']]);
+        $referrerUid = 'u:'.substr(hash_hmac('sha256', (string) $referrer->id, (string) config('app.key')), 0, 12);
+        $this->assertNull(collect($data['signups']['rows'])->firstWhere($i['uid'], $referrerUid)[$i['arrival_intent']]);
         $this->assertTrue($row[$i['referred']]);
         $this->assertSame('2-5', $row[$i['logins_90d']], 'three recent sign-ins; the one 120 days ago is outside');
         $this->assertSame('0', $row[$i['event_edits_90d']], 'a system edit is not the owner doing anything');
@@ -2078,7 +2131,7 @@ class GrowthExportTest extends TestCase
         // The account-wide "Turn off suggestions" switch, which is not the guide being hidden.
         $this->assertFalse($rowOf($users['embedded'])[$i['suggestions_off']]);
 
-        \App\Utils\SetupGuide::suggest($users['started'], false);
+        SetupGuide::suggest($users['started'], false);
         $data = $this->build();
         $off = collect($data['signups']['rows'])->firstWhere(
             $i['uid'],
@@ -2093,14 +2146,14 @@ class GrowthExportTest extends TestCase
     public function test_release_history_records_each_version_once_in_order(): void
     {
         config(['self-update.version_installed' => 'v1.0.140']);
-        \App\Utils\ReleaseHistory::touch();
-        \App\Utils\ReleaseHistory::touch();
+        ReleaseHistory::touch();
+        ReleaseHistory::touch();
 
         config(['self-update.version_installed' => 'v1.0.141']);
-        \App\Utils\ReleaseHistory::touch();
+        ReleaseHistory::touch();
         // A lost cache must not duplicate the entry it already recorded.
-        \Illuminate\Support\Facades\Cache::forget('release_history.current');
-        \App\Utils\ReleaseHistory::touch();
+        Cache::forget('release_history.current');
+        ReleaseHistory::touch();
 
         $releases = $this->build()['meta']['releases'];
 
@@ -2115,18 +2168,18 @@ class GrowthExportTest extends TestCase
      */
     public function test_release_history_appends_to_the_stored_row_not_a_stale_cached_map(): void
     {
-        \App\Models\Setting::get('release_history');   // warm the map while the row is empty
+        Setting::get('release_history');   // warm the map while the row is empty
         DB::table('settings')->insert(['key' => 'release_history', 'created_at' => now(), 'updated_at' => now(),
             'value' => json_encode([['version' => 'v1.0.150', 'first_seen_at' => now()->subWeek()->toIso8601String()]])]);
 
         config(['self-update.version_installed' => 'v1.0.151']);
-        \App\Utils\ReleaseHistory::touch();
+        ReleaseHistory::touch();
 
         $stored = json_decode(DB::table('settings')->where('key', 'release_history')->value('value'), true);
         $this->assertSame(['v1.0.150', 'v1.0.151'], array_column($stored, 'version'));
 
         // And the payload reads it the same way: the web container's cached map may be stale.
-        \Illuminate\Support\Facades\Cache::forever('site_settings', ['release_history' => '[]']);
+        Cache::forever('site_settings', ['release_history' => '[]']);
         $this->assertSame(['v1.0.150', 'v1.0.151'], array_column($this->build()['meta']['releases'], 'version'));
     }
 
@@ -2212,5 +2265,51 @@ class GrowthExportTest extends TestCase
         // A month before the columns existed was not counted, which is not the same as zero.
         $this->assertNull($traffic['2026-09']['guest_submit_views']);
         $this->assertNull($traffic['2026-09']['guest_submit_submissions']);
+    }
+
+    /**
+     * A blocked account is nearly always spam, and October 2026's wave read as the funnel's best
+     * month. From schema 24 the account and what it made leave every count of people: the funnel,
+     * the row tables, the monthly sign-ups and the daily series. An unclaimed placeholder has no
+     * owner at all and must survive the filter, which NOT IN on a NULL would have dropped.
+     * Mutation: drop any one of the blocked_at / excludeBlockedOwners conditions.
+     */
+    public function test_a_blocked_account_leaves_every_count_of_people(): void
+    {
+        $admin = $this->createOwner(true);
+        $this->createEvent($this->freeRole());
+        $spammer = $this->createOwner();
+        $this->createEvent($this->freeRole($spammer, 'curator'));
+        $placeholder = $this->freeRole();
+        DB::table('roles')->where('id', $placeholder->id)->update(['user_id' => null]);
+
+        $counts = function (): array {
+            $data = $this->build();
+            $stages = array_column($data['funnel']['stages'], 'count', 'key');
+            $today = $this->dailyRow($data, now()->toDateString());
+
+            return [
+                'account' => $stages['account'],
+                'saved_schedule' => $stages['saved_schedule'],
+                'signup_rows' => count($data['signups']['rows']),
+                'schedule_rows' => count($data['schedules']['rows']),
+                'verified_signups' => collect($data['traffic'])->firstWhere('month', now()->format('Y-m'))['verified_signups'],
+                'signups_organizer' => $today['signups_organizer'],
+                'first_schedule' => $today['first_schedule'],
+                'first_event' => $today['first_event'],
+            ];
+        };
+
+        $before = $counts();
+        app(AccountBlockService::class)->block($spammer, $admin);
+        $after = $counts();
+
+        foreach ($before as $key => $value) {
+            $this->assertSame($value - 1, $after[$key], "{$key} still counts the blocked account");
+        }
+
+        $service = app(GrowthExportService::class);
+        $kept = (fn () => $this->excludeBlockedOwners(DB::table('roles'), 'roles.user_id'))->call($service)->pluck('id')->all();
+        $this->assertContains($placeholder->id, $kept, 'an ownerless placeholder was dropped by NOT IN');
     }
 }

@@ -106,6 +106,18 @@
         $hpFontDir = 'vendor/fonts/Red_Hat_Display/';
         $hpFontCss = (string) @file_get_contents(public_path($hpFontDir . 'font.css'));
         $hpFontFile = preg_match('~/\* latin \*/.*?url\(([^)]+\.woff2)\)~s', $hpFontCss, $hpFontMatch) ? $hpFontMatch[1] : null;
+
+        // Which of the two homepages this document holds (App\Utils\HeroExperiment, a page round).
+        // While the round runs it holds both, today's on show and the new one hidden, and the
+        // picker at the top of #hp says which a visitor sees. Once a person has ended it, only
+        // the page it was ended on is printed. With no round, or off the nexus: today's alone.
+        $hpNewPage = $hero['page'] === \App\Utils\HeroExperiment::PAGE_NEW;
+        $hpShowFull = $hero['both'] || ! $hpNewPage;
+        $hpShowNew = $hero['both'] || $hpNewPage;
+        $hpNewAlone = $hpShowNew && ! $hpShowFull;
+        // The new page's hero prints its own variant's words: the one whose page is new.
+        $hpNewKey = $hpShowNew ? array_search(\App\Utils\HeroExperiment::PAGE_NEW, $hero['pages'], true) : false;
+        $hpNewCopy = $hpNewKey !== false && isset($hero['variants'][$hpNewKey]) ? $hero['variants'][$hpNewKey] : $hero['default'];
     @endphp
 
     {{-- The search result is its own pair of strings and does NOT follow the headline test below.
@@ -558,6 +570,7 @@
             font-size: 0.95rem;
             color: var(--hp-ink-3);
         }
+        .hp-hero-import { flex-basis: 100%; text-align: center; }
         .hp-demo {
             display: inline-flex;
             align-items: center;
@@ -2587,6 +2600,15 @@
         }
         {{-- What else lives at the foot of the screen stands on the dock while it is up. --}}
         html.hp-dock-on [data-cookie-consent] { bottom: calc(var(--hp-dock-h, 4.5rem) + 0.75rem); }
+
+        {{-- The new homepage (a page round of App\Utils\HeroExperiment): which of the two pages
+           is on show, and the new one's own look. Here, in the head, so the rules are in force
+           before either page is parsed; and above "Motion off", which stays the sheet's last
+           block. --}}
+        @if ($hpShowNew)
+            @include('marketing.partials.home-new-styles')
+        @endif
+        html.hp-dock-on .es-head-start { display: none !important; }
         {{-- The calculator's footnote, folded to two lines on a phone by the script. --}}
         .hp-calc-note-open { display: none; }
         @media (max-width: 767px) {
@@ -2763,7 +2785,194 @@
         $claimSuffix = '.' . (str_contains($claimHost, '.') && ! filter_var($claimHost, FILTER_VALIDATE_IP) ? $claimHost : 'eventschedule.com');
     @endphp
 
-    <div id="hp">
+    {{-- data-home="new" puts the new homepage on show (partials/home-new-styles). The server
+         prints it only once a page round has been ended on the new page; while one runs, the
+         picker, the first thing inside #hp, sets it for the visitors given that page, before
+         either page is parsed. --}}
+    <div id="hp" @if ($hpNewPage) data-home="new" @endif>
+
+    @guest
+        @if ($hero['running'])
+            {{-- Runs before the entrance animations reveal the text, so the swap never
+                 shows. With analytics consent the pick is remembered in sessionStorage
+                 (es_hero, es_hero_clicked) so a visitor sees one headline and is counted
+                 once per session; without it nothing is stored, the headline is picked
+                 afresh on each view, and a view and a click are counted per page view.
+
+                 The pick reaches sign-up on the app host two ways. It rides the link:
+                 ?hero=<key> is added to a sign-up or sign-in link as it is pressed, and
+                 CaptureUtmParameters keeps it in the session, so nothing is stored in the
+                 browser and no consent is needed. And it is copied into the
+                 es_attribution cookie by the layout's attribution script (which reads
+                 window.esHero, and writes the cookie only with marketing consent), which
+                 covers a visitor who signs up from another page. Writing that cookie from
+                 here instead would make the attribution script think it already ran and
+                 lose the landing page and utm_* values.
+
+                 tag() is what puts the pick on the link:
+                 - Only the two app URLs in `targets`, compared whole. A substring match
+                   on /login would also tag a showcase card for a schedule called
+                   "loginlounge", and send its page a query string it has no use for.
+                 - Sign-in as well as sign-up: a social sign-in from there creates
+                   accounts.
+                 - As the link is pressed, not once on load: the links below this script
+                   do not exist yet, and initClaim() (marketing-home.js) rebuilds the
+                   claim button's href from its original each time the visitor types.
+                 - On both events: pointerdown covers a middle click and a long press,
+                   click covers the keyboard and the claim box's Enter, and a phone
+                   keyboard can commit its text between the two.
+                 - In its own listeners: the click-beacon listener stops acting after
+                   the first click.
+                 A PAGE round (a variant with a page, see HeroExperiment): show() puts
+                 data-home on #hp for the pick's page. It runs here, the first thing inside
+                 #hp, before either page is parsed, and the rules that read it are in the
+                 head, so neither page is ever drawn and then taken away. The words of the
+                 pick wait in window.esHeroCopy for today's hero, which sets them as it is
+                 parsed; the new page's hero prints its own. A throw puts #hp back as the
+                 server printed it, which is today's page while a round runs.
+                 ?home=new or ?home=full shows that page to whoever asks, for looking at
+                 it: nothing is picked, stored, beaconed or put on a link, so window.esHero
+                 stays unset and the attribution script credits nothing.
+
+                 These notes are up here so they are not sent to every visitor. --}}
+            <script {!! nonce_attr() !!}>
+                (function () {
+                    try {
+                        var variants = @json($hero['variants']);
+                        var weights = @json($hero['weights']);
+                        var pages = @json($hero['pages']);
+                        var endpoint = @json(url('/marketing/hero'));
+                        var targets = [@json(app_url('/sign_up')), @json(app_url('/login'))];
+                        var param = @json(\App\Utils\HeroExperiment::LINK_PARAMETER);
+                        var key = null;
+                        var fresh = false;
+                        var remember = !!(window.esConsent && window.esConsent.has('analytics'));
+                        var clicked = false;
+                        var root = document.getElementById('hp');
+                        var show = function (page) {
+                            if (page === 'new') {
+                                root.setAttribute('data-home', 'new');
+                            } else {
+                                root.removeAttribute('data-home');
+                            }
+                        };
+
+                        var forced = (location.search.match(/[?&]home=(new|full)(?:&|$)/) || [])[1];
+                        if (forced) {
+                            for (var k in pages) {
+                                if (pages[k] === forced) {
+                                    show(forced);
+                                    break;
+                                }
+                            }
+                            return;
+                        }
+
+                        var match = document.cookie.match(/(?:^|;\s*)es_attribution=([^;]*)/);
+                        if (match) {
+                            try {
+                                key = JSON.parse(decodeURIComponent(match[1])).hero || null;
+                            } catch (e) {}
+                        }
+                        if ((!key || !variants[key]) && remember) {
+                            try {
+                                key = sessionStorage.getItem('es_hero');
+                            } catch (e) {}
+                        }
+                        if (!key || !variants[key]) {
+                            var roll = Math.random();
+                            var keys = Object.keys(weights);
+                            key = keys[keys.length - 1];
+                            for (var i = 0; i < keys.length; i++) {
+                                roll -= weights[keys[i]];
+                                if (roll < 0) {
+                                    key = keys[i];
+                                    break;
+                                }
+                            }
+                            fresh = true;
+                        }
+                        if (remember) {
+                            try {
+                                sessionStorage.setItem('es_hero', key);
+                            } catch (e) {}
+                        }
+
+                        window.esHero = { key: key, fresh: fresh };
+
+                        show(pages[key]);
+
+                        // Set by today's hero as it is parsed (it does not exist yet).
+                        window.esHeroCopy = variants[key];
+
+                        var send = function (event) {
+                            var body = JSON.stringify({ variant: key, event: event });
+                            try {
+                                if (navigator.sendBeacon && navigator.sendBeacon(endpoint, new Blob([body], { type: 'application/json' }))) {
+                                    return;
+                                }
+                            } catch (e) {}
+                            try {
+                                fetch(endpoint, { method: 'POST', keepalive: true, credentials: 'same-origin', headers: { 'Content-Type': 'application/json' }, body: body }).catch(function () {});
+                            } catch (e) {}
+                        };
+
+                        if (fresh) {
+                            send('view');
+                        }
+
+                        var tag = function (e) {
+                            try {
+                                var link = e.target && e.target.closest ? e.target.closest('a[href]') : null;
+                                if (!link) {
+                                    return;
+                                }
+                                var url = new URL(link.getAttribute('href'), location.href);
+                                if (targets.indexOf(url.origin + url.pathname) !== -1 && url.searchParams.get(param) !== key) {
+                                    url.searchParams.set(param, key);
+                                    link.setAttribute('href', url.toString());
+                                }
+                            } catch (e) {}
+                        };
+                        document.addEventListener('pointerdown', tag, true);
+                        document.addEventListener('click', tag, true);
+
+                        // Any sign-up link on the page, not only the hero button: the
+                        // headline is what is being tested, wherever the reader acts on it.
+                        // First click per session with consent, so the rate is per
+                        // visitor; per page view without it, matching how views count.
+                        document.addEventListener('click', function (e) {
+                            var link = e.target && e.target.closest ? e.target.closest('a[href*="/sign_up"]') : null;
+                            if (!link || clicked) {
+                                return;
+                            }
+                            if (remember) {
+                                try {
+                                    if (sessionStorage.getItem('es_hero_clicked') === key) {
+                                        return;
+                                    }
+                                    sessionStorage.setItem('es_hero_clicked', key);
+                                } catch (e) {}
+                            }
+                            clicked = true;
+                            send('click');
+                        }, true);
+                    } catch (e) {
+                        try {
+                            var hp = document.getElementById('hp');
+                            if (@json($hpNewPage)) {
+                                hp.setAttribute('data-home', 'new');
+                            } else {
+                                hp.removeAttribute('data-home');
+                            }
+                        } catch (e2) {}
+                    }
+                })();
+            </script>
+        @endif
+    @endguest
+
+    @if ($hpShowFull)
 
     <!-- ============================================================ -->
     <!-- 1. Hero: the headline between two walls of real posters      -->
@@ -2802,141 +3011,19 @@
             <p class="es-fade-up es-d-2 hp-sub" data-hero="sub">{{ $hero['default']['subtitle'] }}</p>
 
             @guest
-                @if ($hero['running'])
-                    {{-- Runs before the entrance animations reveal the text, so the swap never
-                         shows. With analytics consent the pick is remembered in sessionStorage
-                         (es_hero, es_hero_clicked) so a visitor sees one headline and is counted
-                         once per session; without it nothing is stored, the headline is picked
-                         afresh on each view, and a view and a click are counted per page view.
-
-                         The pick reaches sign-up on the app host two ways. It rides the link:
-                         ?hero=<key> is added to a sign-up or sign-in link as it is pressed, and
-                         CaptureUtmParameters keeps it in the session, so nothing is stored in the
-                         browser and no consent is needed. And it is copied into the
-                         es_attribution cookie by the layout's attribution script (which reads
-                         window.esHero, and writes the cookie only with marketing consent), which
-                         covers a visitor who signs up from another page. Writing that cookie from
-                         here instead would make the attribution script think it already ran and
-                         lose the landing page and utm_* values.
-
-                         tag() is what puts the pick on the link:
-                         - Only the two app URLs in `targets`, compared whole. A substring match
-                           on /login would also tag a showcase card for a schedule called
-                           "loginlounge", and send its page a query string it has no use for.
-                         - Sign-in as well as sign-up: a social sign-in from there creates
-                           accounts.
-                         - As the link is pressed, not once on load: the links below this script
-                           do not exist yet, and initClaim() (marketing-home.js) rebuilds the
-                           claim button's href from its original each time the visitor types.
-                         - On both events: pointerdown covers a middle click and a long press,
-                           click covers the keyboard and the claim box's Enter, and a phone
-                           keyboard can commit its text between the two.
-                         - In its own listeners: the click-beacon listener stops acting after
-                           the first click.
-                         These notes are up here so they are not sent to every visitor. --}}
+                @if ($hero['running'] && $hpShowFull)
+                    {{-- The pick's words (the picker at the top of #hp chose them before this hero
+                         was parsed, window.esHeroCopy), set before the entrance animations reveal
+                         the text, so the swap never shows. --}}
                     <script {!! nonce_attr() !!}>
                         (function () {
-                            try {
-                                var variants = @json($hero['variants']);
-                                var weights = @json($hero['weights']);
-                                var endpoint = @json(url('/marketing/hero'));
-                                var targets = [@json(app_url('/sign_up')), @json(app_url('/login'))];
-                                var param = @json(\App\Utils\HeroExperiment::LINK_PARAMETER);
-                                var key = null;
-                                var fresh = false;
-                                var remember = !!(window.esConsent && window.esConsent.has('analytics'));
-                                var clicked = false;
-
-                                var match = document.cookie.match(/(?:^|;\s*)es_attribution=([^;]*)/);
-                                if (match) {
-                                    try {
-                                        key = JSON.parse(decodeURIComponent(match[1])).hero || null;
-                                    } catch (e) {}
-                                }
-                                if ((!key || !variants[key]) && remember) {
-                                    try {
-                                        key = sessionStorage.getItem('es_hero');
-                                    } catch (e) {}
-                                }
-                                if (!key || !variants[key]) {
-                                    var roll = Math.random();
-                                    var keys = Object.keys(weights);
-                                    key = keys[keys.length - 1];
-                                    for (var i = 0; i < keys.length; i++) {
-                                        roll -= weights[keys[i]];
-                                        if (roll < 0) {
-                                            key = keys[i];
-                                            break;
-                                        }
-                                    }
-                                    fresh = true;
-                                }
-                                if (remember) {
-                                    try {
-                                        sessionStorage.setItem('es_hero', key);
-                                    } catch (e) {}
-                                }
-
-                                window.esHero = { key: key, fresh: fresh };
-
-                                var copy = variants[key];
-                                document.querySelector('[data-hero="l1"]').textContent = copy.line1;
-                                document.querySelector('[data-hero="l2"]').textContent = copy.line2;
-                                document.querySelector('[data-hero="sub"]').textContent = copy.subtitle;
-
-                                var send = function (event) {
-                                    var body = JSON.stringify({ variant: key, event: event });
-                                    try {
-                                        if (navigator.sendBeacon && navigator.sendBeacon(endpoint, new Blob([body], { type: 'application/json' }))) {
-                                            return;
-                                        }
-                                    } catch (e) {}
-                                    try {
-                                        fetch(endpoint, { method: 'POST', keepalive: true, credentials: 'same-origin', headers: { 'Content-Type': 'application/json' }, body: body }).catch(function () {});
-                                    } catch (e) {}
-                                };
-
-                                if (fresh) {
-                                    send('view');
-                                }
-
-                                var tag = function (e) {
-                                    try {
-                                        var link = e.target && e.target.closest ? e.target.closest('a[href]') : null;
-                                        if (!link) {
-                                            return;
-                                        }
-                                        var url = new URL(link.getAttribute('href'), location.href);
-                                        if (targets.indexOf(url.origin + url.pathname) !== -1 && url.searchParams.get(param) !== key) {
-                                            url.searchParams.set(param, key);
-                                            link.setAttribute('href', url.toString());
-                                        }
-                                    } catch (e) {}
-                                };
-                                document.addEventListener('pointerdown', tag, true);
-                                document.addEventListener('click', tag, true);
-
-                                // Any sign-up link on the page, not only the hero button: the
-                                // headline is what is being tested, wherever the reader acts on it.
-                                // First click per session with consent, so the rate is per
-                                // visitor; per page view without it, matching how views count.
-                                document.addEventListener('click', function (e) {
-                                    var link = e.target && e.target.closest ? e.target.closest('a[href*="/sign_up"]') : null;
-                                    if (!link || clicked) {
-                                        return;
-                                    }
-                                    if (remember) {
-                                        try {
-                                            if (sessionStorage.getItem('es_hero_clicked') === key) {
-                                                return;
-                                            }
-                                            sessionStorage.setItem('es_hero_clicked', key);
-                                        } catch (e) {}
-                                    }
-                                    clicked = true;
-                                    send('click');
-                                }, true);
-                            } catch (e) {}
+                            var copy = window.esHeroCopy;
+                            if (!copy) {
+                                return;
+                            }
+                            document.querySelector('[data-hero="l1"]').textContent = copy.line1;
+                            document.querySelector('[data-hero="l2"]').textContent = copy.line2;
+                            document.querySelector('[data-hero="sub"]').textContent = copy.subtitle;
                         })();
                     </script>
                 @endif
@@ -2970,6 +3057,11 @@
                     Watch the 3-minute overview
                 </a>
                 <span>Set up in under 2 minutes. Open source, and yours to selfhost.</span>
+                {{-- The free ways in, said beside the button: the only import this page named
+                     before was Eventbrite's, on Pro (the pill further down). Google Calendar and
+                     a link are free on every plan, and a poster is read by the AI import, which
+                     Free has 50 a day of (docs/FEATURES.md). --}}
+                <span class="hp-hero-import">Already listed somewhere? Bring your events in from Google Calendar, a link or a poster, free.</span>
             </p>
 
             {{-- Below a laptop there are no walls beside the headline, so the visitor's poster
@@ -3011,7 +3103,10 @@
         </div>
 
         {{-- The screen. It stands inside the hero so the two walls run on beside it, and it comes
-             before the wall in the document. --}}
+             before the wall in the document. A visitor given the new page has all of today's page
+             hidden, the screen too, and its script then leaves the film alone (initShowreel()).
+             The page's script reads the address the posters print from the screen's address
+             bar. --}}
         <div id="showcase" class="hp-stage">
             <div class="es-persp relative" data-scene="showcase">
                     <div class="es-frame relative overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-2xl shadow-slate-900/15 dark:border-white/10 dark:bg-[#101016] dark:shadow-black/50">
@@ -3187,6 +3282,8 @@
             ],
         ];
     @endphp
+    {{-- Today's middle, from the line-up to the questions. --}}
+    <div class="hp-full">
     <section class="hp-lineup" aria-label="Who uses Event Schedule">
         <h2 class="sr-only">Who uses Event Schedule</h2>
         <div class="es-marquee-mask">
@@ -3296,7 +3393,7 @@
                                         <span class="hp-ico bg-blue-100 dark:bg-blue-500/20"><svg class="text-blue-600 dark:text-blue-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" aria-hidden="true">{!! $hpIcon['bulb'] !!}</svg></span>
                                         <div>
                                             <h5>AI-Powered</h5>
-                                            <p>Paste a poster, a press release or a screenshot and get a filled-in event back. Generate flyers, descriptions and a whole brand style, and publish in 12 languages.</p>
+                                            <p>Paste a poster, a press release or a screenshot and get a filled-in event back. Generate flyers, descriptions and a whole brand style, and publish in 13 languages.</p>
                                             <a href="{{ marketing_url('/features/ai') }}" class="hp-more">More about AI-powered features {!! $hpArrow !!}</a>
                                         </div>
                                     </div>
@@ -3304,7 +3401,7 @@
                                         <span class="hp-ico bg-sky-100 dark:bg-sky-500/20"><svg class="text-sky-600 dark:text-sky-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" aria-hidden="true">{!! $hpIcon['calendar'] !!}</svg></span>
                                         <div>
                                             <h5>Calendar Sync</h5>
-                                            <p>Two-way sync with Google Calendar, Microsoft 365 and any CalDAV server. Edit an event in either place and the other follows.</p>
+                                            <p>Two-way sync with Google Calendar{{ outlook_sync_enabled() ? ', Microsoft 365' : '' }} and any CalDAV server. Edit an event in either place and the other follows.</p>
                                             <a href="{{ marketing_url('/features/calendar-sync') }}" class="hp-more">More about calendar sync {!! $hpArrow !!}</a>
                                         </div>
                                     </div>
@@ -3644,7 +3741,7 @@
                                      out of the fold: the hero names no paid plan (MarketingHeroClaimTest). --}}
                                 <p class="hp-paid-plan">Paid tickets on Pro, {{ $hpProMonthlyText }} a month. Free registration on every plan.</p>
                                 <div class="hp-actions">
-                                    <a href="{{ app_url('/sign_up') }}" class="hp-btn hp-btn-primary is-small" data-claim-link><span data-claim-label="Start for free">Start for free</span> {!! $hpArrow !!}</a>
+                                    <a href="{{ app_url('/sign_up?intent=sell') }}" class="hp-btn hp-btn-primary is-small" data-claim-link><span data-claim-label="Start for free">Start for free</span> {!! $hpArrow !!}</a>
                                     <a href="#fees" class="hp-more">Compare the fees {!! $hpArrow !!}</a>
                                 </div>
                             </div>
@@ -4140,13 +4237,15 @@
         // The names and links in the two groups the sentence beside them speaks of: the calendars,
         // and where the money goes. PayPal joined Stripe on 2026-10-22: the sentence named both and
         // the diagram showed one.
+        // Outlook is on the calendar side only where this install can sync with it
+        // (outlook_sync_enabled(): an Azure app is set up). An odd count spans its last tile.
         $hpPlugs = [
-            'in' => [
+            'in' => array_values(array_filter([
                 ['name' => 'google', 'label' => 'Google Calendar', 'href' => marketing_url('/google-calendar')],
-                ['name' => 'outlook', 'label' => 'Outlook', 'href' => marketing_url('/features/calendar-sync')],
+                outlook_sync_enabled() ? ['name' => 'outlook', 'label' => 'Outlook', 'href' => marketing_url('/features/calendar-sync')] : null,
                 ['name' => 'apple', 'label' => 'Apple Calendar', 'href' => marketing_url('/features/calendar-sync')],
                 ['name' => 'caldav', 'label' => 'CalDAV', 'href' => marketing_url('/caldav')],
-            ],
+            ])),
             'out' => [
                 ['name' => 'stripe', 'label' => 'Stripe', 'href' => marketing_url('/stripe')],
                 ['name' => 'paypal', 'label' => 'PayPal', 'href' => route('marketing.paypal')],
@@ -4249,7 +4348,7 @@
             // Eventbrite's own fee here: the calculator above prints it from TicketFees.
             ['q' => 'How is Event Schedule different from Eventbrite?', 'a' => 'Eventbrite adds its own fee to every paid ticket. Event Schedule takes no platform fee, and payments go straight to your own Stripe or PayPal account. Your events live on a calendar of your own that people can follow, with newsletters and appointment booking built in, and the code is open source, so you can run it on your own server. On Pro you can bring your events over from Eventbrite with the built-in import.'],
             ['q' => 'Can I refund a ticket?', 'a' => 'Yes, in full or in part, from the Sales page. Refunds come with paid ticketing on Pro, because that is where the money is taken in the first place. Refund a Stripe, PayPal or Razorpay sale and the money goes back to the buyer through that provider. A partial refund leaves the tickets valid, and a full refund puts them back on sale. A sale paid any other way, cash included, can be marked as refunded so your records match.'],
-            ['q' => 'Does Event Schedule sync with my calendar?', 'a' => 'Yes. Google Calendar and Microsoft 365 both sync two ways, with webhook updates so a change made in either place shows up in the other, and you choose whether an event deleted there is kept, marked cancelled or deleted here. Any CalDAV server works as well. Guests can add a single event to Apple, Google or Outlook from the event page, or subscribe to your whole schedule as a live calendar feed that updates itself when a date changes.'],
+            ['q' => 'Does Event Schedule sync with my calendar?', 'a' => 'Yes. '.(outlook_sync_enabled() ? 'Google Calendar and Microsoft 365 both sync' : 'Google Calendar syncs').' two ways, with webhook updates so a change made in either place shows up in the other, and you choose whether an event deleted there is kept, marked cancelled or deleted here. Any CalDAV server works as well. Guests can add a single event to Apple, Google or Outlook from the event page, or subscribe to your whole schedule as a live calendar feed that updates itself when a date changes.'],
             ['q' => 'Can I use my own domain?', 'a' => 'Yes. Every schedule gets a free subdomain such as yourname.eventschedule.com, and Enterprise schedules can serve the whole guest portal from a domain you own, with the certificate issued automatically. Selfhosted installs run on your own domain from day one.'],
             // Backup & restore is on every plan; the sales CSV is Pro (docs/FEATURES.md).
             ['q' => 'Can I selfhost Event Schedule?', 'a' => 'Yes, Event Schedule is 100% open source. Selfhost it on your own server for full control over your data and every paid feature is included, or use the hosted platform at eventschedule.com. Either way your data stays yours: back up a schedule with its events and images on any plan, and restore it on another install.'],
@@ -4290,6 +4389,8 @@
             </div>
         </div>
     </section>
+
+    </div>
 
     <!-- ============================================================ -->
     <!-- 10. Finale: claim your name                                  -->
@@ -4335,6 +4436,13 @@
         </div>
     </section>
 
+    @endif
+
+    {{-- The new homepage, whole (a page round of App\Utils\HeroExperiment). --}}
+    @if ($hpShowNew)
+        @include('marketing.partials.home-new')
+    @endif
+
     {{-- The phone's way in, wherever the reader is: a bar at the foot of the screen with the one
          button, from the moment the hero's claim box has scrolled away until the finale's comes
          into view. A button and no field: a field fixed to the foot of the screen jumps when a
@@ -4363,7 +4471,9 @@
             var root = document.documentElement;
 
             var dock = document.querySelector('[data-hp-dock]');
-            var claim = document.querySelector('#top .hp-claimwrap');
+            {{-- The page on show: the new homepage has a hero box and a closing panel of its own. --}}
+            var newShown = document.getElementById('hp').getAttribute('data-home') === 'new';
+            var claim = document.querySelector(newShown ? '#hn-top .hn-claimwrap' : '#top .hp-claimwrap');
             if (dock && claim && 'IntersectionObserver' in window) {
                 var phone = window.matchMedia('(max-width: 767px)');
                 var past = false;
@@ -4419,7 +4529,7 @@
                     });
                     update();
                 });
-                [document.getElementById('claim'), document.querySelector('footer')].forEach(function (el) {
+                [document.getElementById(newShown ? 'hn-claim' : 'claim'), document.querySelector('footer')].forEach(function (el) {
                     if (el) {
                         endObserver.observe(el);
                     }
@@ -4590,7 +4700,7 @@
                 poster.querySelectorAll('[data-claim-name]').forEach(function (el) { el.setAttribute('data-default', el.textContent); });
                 // Pressing your poster puts the cursor in the box it is waiting on.
                 poster.addEventListener('click', function () {
-                    var box = document.getElementById(poster.closest('.hp-finale') ? 'es-claim-input' : 'es-claim-hero');
+                    var box = document.getElementById(poster.getAttribute('data-claim-for') || (poster.closest('.hp-finale') ? 'es-claim-input' : 'es-claim-hero'));
                     if (box) {
                         box.focus();
                     }

@@ -10,7 +10,7 @@
 
 {{ $event->name }}
 
-{{ __('messages.date') }}: {{ $event->is_multi_day ? $event->getDateRangeDisplay($sale->event_date) : $event->getStartDateTime($sale->event_date, true)->format('F j, Y') }}
+{{ __('messages.date') }}: {{ $event->is_multi_day ? $event->getDateRangeDisplay($sale->event_date) : $event->getStartDateTime($sale->event_date, true)->localDate(true, false) }}
 {{ __('messages.time') }}: {{ $event->getStartEndTime($sale->event_date) }}
 {{ __('messages.attendee') }}: {{ $sale->name }}
 {{ __('messages.number_of_attendees') }}: {{ $sale->quantity() }}
@@ -38,12 +38,20 @@ $addonTickets = $sale->saleTickets->filter(fn($st) => $st->ticket && $st->ticket
 @endforeach
 @endif
 
+@if ((float) ($sale->donation_amount ?? 0) > 0)
+{{ __('messages.donation') }}: {{ \App\Utils\MoneyUtils::format($sale->donation_amount, $event->ticket_currency_code ?: 'USD') }}
+{{ __('messages.donation_thanks', ['amount' => \App\Utils\MoneyUtils::format($sale->donation_amount, $event->ticket_currency_code ?: 'USD')]) }}
+
+@endif
 @if (($giftCardAmount ?? 0) > 0 && $giftCard)
 {{ __('messages.gift_card_applied_summary') }}: -{{ \App\Utils\MoneyUtils::format($giftCardAmount, $giftCard->currency_code) }}
 {{ __('messages.gift_card_remaining_balance') }}: {{ \App\Utils\MoneyUtils::format($giftCard->remaining_amount, $giftCard->currency_code) }}
 
 @endif
 {{ __('messages.view_your_tickets') }}: {{ $ticketUrl }}
+@if ($appleWalletUrl ?? null)
+{{ __('messages.add_to_apple_wallet') }}: {{ $appleWalletUrl }}
+@endif
 @if ($googleWalletUrl)
 {{ __('messages.add_to_google_wallet') }}: {{ $googleWalletUrl }}
 @endif

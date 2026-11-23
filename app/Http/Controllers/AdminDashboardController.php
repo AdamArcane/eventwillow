@@ -5,7 +5,9 @@ namespace App\Http\Controllers;
 use App\Services\AdminAlertService;
 use App\Services\AdminDashboard;
 use App\Services\RealtimeDashboard;
+use App\Services\RecurringRevenue;
 use App\Utils\RealtimeTracker;
+use Carbon\Carbon;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
@@ -28,7 +30,11 @@ use Illuminate\View\View;
  */
 class AdminDashboardController extends Controller
 {
-    /** What each panel shows, as the AdminDashboard cards it is built from. */
+    /**
+     * What each panel shows, as the AdminDashboard cards it is built from. On hosted the active
+     * users chart is not in the growth panel: it fills the Revenue card in the corner (revenue()),
+     * which stands as tall as the Now card beside it and had nothing under its two figures.
+     */
     private const PANEL_CARDS = [
         'recent' => ['schedules', 'recentEvents', 'eventCounts'],
         'growth' => ['signups', 'active', 'events'],
@@ -66,12 +72,15 @@ class AdminDashboardController extends Controller
         abort_unless(config('app.hosted'), 404);
 
         $builder = app(AdminDashboard::class);
-        $revenue = $this->sample($request)
-            ? (AdminDashboard::sample()['revenue'] ?? null)
-            : ($builder->build(['revenue'])['revenue'] ?? null);
+        $data = $this->sample($request) ? AdminDashboard::sample() : $builder->build(['revenue', 'active']);
+        $revenue = $data['revenue'] ?? null;
+        $timing = $this->sample($request) ? [] : ['Server-Timing' => $builder->serverTiming()];
+
+        // Each half stands without the other: a failed billing read still draws the chart.
+        $active = ['active' => $this->activeChart($data['active'] ?? null)];
 
         if (! $revenue) {
-            return response()->json(['failed' => true]);
+            return response()->json(['failed' => true] + $active)->withHeaders($timing);
         }
 
         $totals = $revenue['totals'];
@@ -81,16 +90,87 @@ class AdminDashboardController extends Controller
             'mrr' => plan_price($totals['mrr']),
             'arr' => plan_price($totals['arr']),
             'trial_mrr' => plan_price($totals['trial_mrr']),
+            'trial_arr' => plan_price($totals['trial_arr'] ?? $totals['trial_mrr'] * 12),
+            // The line under the figures: MRR at the end of each month, and now.
+            'mrr_history' => $this->mrrHistory($this->sample($request) ? null : RecurringRevenue::history(current: (float) $totals['mrr']), (float) $totals['mrr']),
             'at_risk_mrr' => plan_price($totals['at_risk_mrr']),
             'billing_count' => (int) $totals['billing_count'],
             'trialing_count' => (int) $totals['trialing_count'],
+            // The trials trial_mrr prices, and the rest: a trial an admin set for months, or one
+            // with no card, which will not turn into a charge on its own (RecurringRevenue).
+            'trial_pipeline_count' => (int) $totals['trialing_count'] - (int) ($totals['trials_set_aside'] ?? 0),
+            'trials_set_aside' => (int) ($totals['trials_set_aside'] ?? 0),
             'at_risk_count' => (int) $totals['at_risk_count'],
             'past_due_count' => (int) $totals['past_due_count'],
             'cancelling_count' => (int) $totals['cancelling_count'],
             // Not printed: the figure the growth export reports as ARR, for the test that holds
             // the two to one definition.
             'arr_value' => (float) $totals['arr'],
-        ])->withHeaders($this->sample($request) ? [] : ['Server-Timing' => $builder->serverTiming()]);
+        ] + $active)->withHeaders($timing);
+    }
+
+    /**
+     * The active users chart of the corner card, from AdminDashboard::activeUsers(): the figures
+     * and the two lines the growth panel's card draws (the seeded weeks dashed, never joined to the
+     * exact count). Null when the card failed or the tables are not there yet.
+     */
+    /**
+     * The MRR chart's points, a week apart over three months: a date for the axis, the date in
+     * full (or Today) for the tooltip, the amount, and the amount as the page prints money.
+     * Sample mode draws a steady climb that ends on the sample's own MRR.
+     *
+     * @param  list<array{at: Carbon, mrr: float}>|null  $points
+     */
+    private function mrrHistory(?array $points, float $mrr): array
+    {
+        if ($points === null) {
+            $points = [];
+            foreach (range(13, 0) as $back) {
+                $points[] = ['at' => now()->subWeeks($back), 'mrr' => round($mrr * (20 - $back) / 20, 2)];
+            }
+        }
+
+        $last = count($points) - 1;
+
+        return [
+            'labels' => array_map(fn ($point) => $point['at']->translatedFormat('M j'), $points),
+            'titles' => array_map(fn ($point, $index) => $index === $last ? __('messages.today') : $point['at']->translatedFormat('M j, Y'), $points, array_keys($points)),
+            'values' => array_map(fn ($point) => (float) $point['mrr'], $points),
+            'formatted' => array_map(fn ($point) => plan_price($point['mrr']), $points),
+            // How the platform's currency prints a whole amount, for the axis: the page puts each
+            // tick's number where the 7 is ("$7", "7 €").
+            'axis' => plan_price(7),
+            // Whether any week before today was rebuilt rather than read from mrr_snapshots: the
+            // line under the chart says so only then. Sample mode's line is made up, so it is.
+            'rebuilt' => (bool) array_filter(array_slice($points, 0, -1), fn ($point) => ! ($point['exact'] ?? false)),
+        ];
+    }
+
+    private function activeChart(?array $active): ?array
+    {
+        if (! $active || ! ($active['available'] ?? false)) {
+            return null;
+        }
+
+        $series = $active['series'] ?? [];
+
+        return [
+            'active_7d' => (int) $active['active_7d'],
+            'change' => $active['change'] === null ? null : round((float) $active['change'], 1),
+            'organizers_7d' => (int) $active['organizers_7d'],
+            'active_30d' => (int) $active['active_30d'],
+            'labels' => array_column($series, 'label'),
+            'exact' => array_map(fn ($point) => $point['exact'] ? $point['active'] : null, $series),
+            'estimate' => array_map(fn ($point) => $point['exact'] ? null : $point['active'], $series),
+        ];
+    }
+
+    /** The cards a panel is built from (PANEL_CARDS), less the one the corner shows on hosted. */
+    public static function panelCards(string $panel): array
+    {
+        $cards = self::PANEL_CARDS[$panel];
+
+        return config('app.hosted') ? array_values(array_diff($cards, ['active'])) : $cards;
     }
 
     /**
@@ -102,7 +182,7 @@ class AdminDashboardController extends Controller
         abort_unless($request->user()->isAdmin(), 403);
         abort_unless(in_array($panel, self::PANELS, true), 404);
 
-        $cards = self::PANEL_CARDS[$panel];
+        $cards = self::panelCards($panel);
         $sample = $this->sample($request);
         $builder = app(AdminDashboard::class);
 

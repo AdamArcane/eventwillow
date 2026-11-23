@@ -1,6 +1,10 @@
 <x-app-admin-layout>
 
 @php
+  // Asked once: the form shows four delete and cancel controls, and each check reads the event's
+  // schedule and its plan afresh (EventPolicy::delete(), User::runsEvent()).
+  $canDeleteEvent = \Illuminate\Support\Facades\Gate::check('delete', $event);
+
   // Set by EventController::create() only. A first event gets a slimmer form: the step
   // indicator, no Boost or locked upgrade controls, and the rarely used sections folded away.
   $isFirstEventRun = $isFirstEventRun ?? false;
@@ -43,7 +47,7 @@
   // promo code or a payment method used to come back with every tab looking fine. A key that
   // matches nothing belongs to the Event tab.
   $errorTabPrefixes = [
-      'section-tickets' => ['tickets', 'promo_codes', 'addons', 'payment_', 'installment', 'ticket_', 'rsvp_', 'coupon_', 'registration_url', 'terms_url', 'expire_unpaid', 'custom_fields', 'seating_plan', 'total_tickets'],
+      'section-tickets' => ['tickets', 'promo_codes', 'addons', 'payment_', 'installment', 'ticket_', 'rsvp_', 'coupon_', 'registration_url', 'terms_url', 'expire_unpaid', 'custom_fields', 'seating_plan', 'total_tickets', 'donation'],
       'section-participants' => ['members', 'member_'],
       'section-agenda' => ['event_parts', 'agenda_'],
       'section-listing' => ['slug', 'category_id', 'event_password', 'curators', 'curator_', 'is_draft', 'is_private', 'is_internal'],
@@ -71,7 +75,7 @@
   foreach ([
       'promo_codes' => 'promo_codes', 'addons' => 'add_ons',
       'payment_' => 'payment', 'installment' => 'payment', 'ticket_currency_code' => 'payment',
-      'terms_url' => 'checkout', 'custom_fields' => 'checkout', 'ticket_notes' => 'checkout', 'expire_unpaid' => 'sales_rules',
+      'terms_url' => 'checkout', 'custom_fields' => 'checkout', 'ticket_notes' => 'checkout', 'donation' => 'checkout', 'expire_unpaid' => 'sales_rules',
       'tickets' => 'tickets', 'seating_plan' => 'tickets', 'total_tickets' => 'tickets',
   ] as $prefix => $innerTab) {
       if (collect($errors->keys())->contains(fn ($key) => str_starts_with($key, $prefix))) {
@@ -169,6 +173,7 @@
           'ask_phone' => __('messages.summary_phone_number'),
           'custom_fields' => __('messages.checkout_custom_fields'),
           'individual_tickets' => __('messages.individual_tickets'),
+          'donations' => __('messages.donations'),
           'terms_url' => __('messages.summary_terms'),
           'ticket_notes' => __('messages.ticket_notes'),
           'registration_notes' => __('messages.registration_notes'),
@@ -203,6 +208,104 @@
   // What About says when folded: the short description, or failing that the start of the long one.
   $aboutSummary = trim((string) old('short_description', $event->short_description))
       ?: \Illuminate\Support\Str::limit(trim(preg_replace('/\s+/', ' ', strip_tags((string) $event->description_html))), 140);
+
+  // The Translation row under About: the automatic translation of the name and the descriptions,
+  // each correctable by hand (App\Services\EventTranslationEdits). Only where the event IS
+  // translated: a saved event in a language pair that differs, or a copy that carries
+  // corrections of its own (EventRepo::buildClonePayload()). Most events never show it.
+  // A new event's pair comes from what will govern it, as Event::getTranslationLanguageCode()
+  // resolves it: the venue (a copy's, or this schedule when it is one), else this schedule when it
+  // is a talent; a curator decides no event's language.
+  $translationGoverning = ($selectedVenue ?? null) instanceof \App\Models\Role ? $selectedVenue : ($role->isCurator() ? null : $role);
+  $translationSourceLang = $event->exists ? $event->getLanguageCode() : ($translationGoverning?->language_code ?: 'en');
+  $translationTargetLang = $event->exists ? $event->getTranslationLanguageCode() : ($translationGoverning?->translation_language_code ?: 'en');
+  $translationCarried = [];
+  if (! $event->exists) {
+      $translationCarried = $event->translationOverrides();
+      // A copy whose save was refused: the session's copy is gone (create() forgets it), and what
+      // it carried comes back from the post, the correction with the original it was made for.
+      $oldBasis = old('translation_basis');
+      $oldCarried = old('translations');
+      if (is_array($oldBasis) && is_array($oldCarried)) {
+          foreach (\App\Models\Event::HAND_TRANSLATABLE_FIELDS as $field) {
+              if (is_string($oldBasis[$field] ?? null) && is_string($oldCarried[$field] ?? null) && trim($oldCarried[$field]) !== '') {
+                  $translationCarried[$field] = ['source' => $oldBasis[$field], 'at' => null, 'lang' => null];
+              }
+          }
+      }
+      // Corrections written in another language than this copy translates into (a template saved
+      // before the schedule changed language) are not carried.
+      $translationCarried = array_filter($translationCarried, fn ($entry) => ($entry['lang'] ?? null) === null || $entry['lang'] === $translationTargetLang);
+  }
+  $translationShown = $detailsShown && $translationSourceLang !== $translationTargetLang
+      && ($event->exists || $translationCarried);
+  $translationRow = null;
+  if ($translationShown) {
+      $languageName = function (string $code) {
+          $languages = config('app.supported_languages', []);
+
+          return isset($languages[$code]) ? __('messages.'.$languages[$code]) : strtoupper($code);
+      };
+      // After a refused save, the row comes back as it was left: what was being typed, and what
+      // was pressed (Keep mine, Reset to automatic).
+      $oldTranslations = old('translations');
+      $oldKeep = (array) old('translations_keep', []);
+      $translationFields = [];
+      foreach (\App\Models\Event::HAND_TRANSLATABLE_FIELDS as $field) {
+          // A copy shows only the translations it carries as corrections: the rest are not posted,
+          // and the new event is translated afresh.
+          $saved = $event->exists || isset($translationCarried[$field]) ? (string) ($event->{$field.'_en'} ?? '') : '';
+          $posted = is_array($oldTranslations) && array_key_exists($field, $oldTranslations) ? (string) $oldTranslations[$field] : null;
+          $carried = $translationCarried[$field] ?? null;
+          $translationFields[$field] = [
+              'label' => __('messages.'.($field === 'name' ? 'event_name' : $field)),
+              'original' => (string) $event->{$field},
+              // The original as it reads on the page now (readPlainFields()), for the save bar.
+              'current' => null,
+              // The whole original, as plain text with its paragraphs, for the description's
+              // editor: the preview above is cut at 280 characters.
+              'original_full' => $field === 'description'
+                  ? trim(preg_replace("/\n{3,}/", "\n\n", html_entity_decode(strip_tags(preg_replace('#</(p|li|h[1-6]|blockquote|pre)>|<br\s*/?>#i', "$0\n\n", (string) $event->description_html)), ENT_QUOTES | ENT_HTML5)))
+                  : '',
+              'original_preview' => $field === 'description'
+                  ? \Illuminate\Support\Str::limit(trim(preg_replace('/\s+/', ' ', html_entity_decode(strip_tags((string) $event->description_html), ENT_QUOTES | ENT_HTML5))), 280)
+                  : (string) $event->{$field},
+              'saved' => $saved,
+              // What the folded field shows: the description as a reader sees it, without the
+              // Markdown signs, and short. Edit opens the whole text.
+              'preview' => $field === 'description'
+                  ? \Illuminate\Support\Str::limit(trim(preg_replace('/\s+/', ' ', html_entity_decode(strip_tags((string) $event->description_html_en), ENT_QUOTES | ENT_HTML5))), 280)
+                  : $saved,
+              'manual' => $event->exists ? $event->translationIsManual($field) : isset($translationCarried[$field]),
+              'stale' => $event->exists && $event->translationIsStale($field),
+              // One line where the original is one line (the name, the short description).
+              'multiline' => $field === 'description',
+              // No maxlength on the description: its limit is in bytes, which the browser cannot count.
+              'max' => $field === 'description' ? null : \App\Services\EventTranslationEdits::MAX_LENGTH[$field],
+              // A copy's correction is posted as it stands, with the original it was made against.
+              'basis' => $carried['source'] ?? null,
+              'editing' => $posted !== null && $posted !== '',
+              'text' => $posted !== null && $posted !== '' ? $posted : $saved,
+              'action' => $posted === '' ? 'auto' : (in_array($field, $oldKeep, true) ? 'keep' : ''),
+          ];
+      }
+      $translationRow = [
+          'fields' => $translationFields,
+          'dir' => in_array($translationTargetLang, ['ar', 'he'], true) ? 'rtl' : 'ltr',
+          'labels' => [
+              'language' => $languageName($translationTargetLang),
+              'automatic' => __('messages.automatic'),
+              // Saved with nothing translated yet: it is on its way when the quick path runs.
+              'not_yet' => $event->exists && \App\Models\Event::translatesSoon() ? __('messages.translation_on_its_way') : __('messages.translation_not_yet'),
+              'corrected' => __('messages.translation_corrected'),
+              'changed' => __('messages.translation_source_changed_short', ['source' => $languageName($translationSourceLang)]),
+              'resets' => __('messages.saving_resets_translation'),
+              'stays' => __('messages.translation_will_stay'),
+              'retranslates' => __('messages.saving_retranslates'),
+          ],
+      ];
+  }
+  $translationOpenOnLoad = $translationShown && collect($errors->keys())->contains(fn ($key) => str_starts_with($key, 'translation'));
 
   // The house segmented control, same strings as role/partials/appointment-editor.blade.php.
   // $segRadio keeps a real radio (keyboard, arrow keys, screen reader) and paints only
@@ -425,6 +528,7 @@
           'individual_tickets' => 'switch', 'individual_ticket_fields' => 'switch',
           'sell_after_start' => 'switch', 'show_unavailable_tickets' => 'switch',
           'expire_unpaid_tickets' => 'number', 'ticket_notes' => 'text', 'terms_url' => 'text',
+          'donations_enabled' => 'switch', 'donation_custom' => 'switch', 'donation_line' => 'text',
       ];
       foreach ($typedKinds as $typedField => $typedKind) {
           if (! array_key_exists($typedField, $postedNow) || is_array($postedNow[$typedField])) {
@@ -446,6 +550,10 @@
               'number' => is_numeric($typedValue) ? $typedValue + 0 : null,
               default => $typedValue === null ? null : (string) $typedValue,
           };
+      }
+      // The suggested donation amounts are a list, which the loop above passes by.
+      if (array_key_exists('donation_amounts', $postedNow) && is_array($postedNow['donation_amounts'])) {
+          $ticketFieldsTyped['donation_amounts'] = array_values(array_map(fn ($amount) => is_scalar($amount) ? (string) $amount : '', $postedNow['donation_amounts']));
       }
   }
   $ticketFieldNow = fn (string $field) => array_key_exists($field, $ticketFieldsTyped) ? $ticketFieldsTyped[$field] : $event->$field;
@@ -1094,6 +1202,10 @@
         return null;
     }
 
+    // The time pickers' step: a quarter of an hour, so an agenda or an event can start at 9:45
+    // or end at 10:15 from the list. A time typed by hand may be any minute.
+    var TIME_STEP_MINUTES = 15;
+
     function formatMinutesToTime(minutes) {
         var h = Math.floor(minutes / 60) % 24;
         var m = minutes % 60;
@@ -1112,7 +1224,7 @@
         inputEl._timepickerInit = true;
 
         var timeOptions = [];
-        for (var m = 0; m < 1440; m += 30) {
+        for (var m = 0; m < 1440; m += TIME_STEP_MINUTES) {
             timeOptions.push(formatMinutesToTime(m));
         }
 
@@ -1184,7 +1296,7 @@
         function scrollToNearest() {
             var minutes = parseTimeToMinutes(inputEl.value);
             if (minutes === null) minutes = 540; // Default to 9am
-            var closest = Math.round(minutes / 30) * 30;
+            var closest = Math.round(minutes / TIME_STEP_MINUTES) * TIME_STEP_MINUTES;
             if (closest >= 1440) closest = 0;
             var target = formatMinutesToTime(closest);
             var items = getVisibleItems();
@@ -1496,7 +1608,7 @@
         // Custom time picker dropdown
         function initTimePicker(inputEl, dropdownEl, getDefaultMinutes) {
             var timeOptions = [];
-            for (var m = 0; m < 1440; m += 30) {
+            for (var m = 0; m < 1440; m += TIME_STEP_MINUTES) {
                 timeOptions.push(formatMinutesToTime(m));
             }
 
@@ -1570,7 +1682,7 @@
                 var minutes = parseTimeToMinutes(inputEl.value);
                 if (minutes === null) minutes = getDefaultMinutes();
                 // Find closest 30-min slot
-                var closest = Math.round(minutes / 30) * 30;
+                var closest = Math.round(minutes / TIME_STEP_MINUTES) * TIME_STEP_MINUTES;
                 if (closest >= 1440) closest = 0;
                 var target = formatMinutesToTime(closest);
                 var items = getVisibleItems();
@@ -1678,7 +1790,7 @@
         if (typeof window.vueApp === 'undefined' || !window.vueApp.event) {
             return;
         }
-        var value = $('input[name="schedule_type"]:checked').val();
+        var value = esVal(document.querySelector('input[name="schedule_type"]:checked'));
         if (value == 'one_time') {
             window.vueApp.isRecurring = false;
         } else {
@@ -1703,49 +1815,58 @@
         var freq = window.vueApp.event.recurring_frequency || 'weekly';
         var showDays = window.vueApp.isRecurring && (freq === 'weekly' || freq === 'every_n_weeks');
         if (showDays) {
-            $('#days_of_week_div').show();
+            esShow(document.getElementById('days_of_week_div'));
         } else {
-            $('#days_of_week_div').hide();
+            esHide(document.getElementById('days_of_week_div'));
         }
     }
 
+    {{-- The answer line keeps what Validate found on the element itself (esValidatedAddress), where
+         Accept reads it. A text of undefined is left unwritten, as .text(undefined) was a read. --}}
     function onValidateClick() {
-        $('#address_response').text(@json(__('messages.searching')) + '...').show();
-        $('#accept_button').hide();
+        var answer = document.getElementById('address_response');
+        if (answer) {
+            answer.textContent = @json(__('messages.searching')) + '...';
+        }
+        esShow(answer);
+        esHide(document.getElementById('accept_button'));
         var ci = window.getCountryInput('venue_country_code');
         var country = ci ? ci.getSelectedCountryData() : null;
-        $.post({
-            url: '{{ route('validate_address') }}',
-            data: {
-                _token: '{{ csrf_token() }}',
-                address1: $('#venue_address1').val(),
-                city: $('#venue_city').val(),
-                state: $('#venue_state').val(),
-                postal_code: $('#venue_postal_code').val(),
-                country_code: country ? country.iso2 : '',
-            },
-            success: function(response) {
-                if (response) {
-                    var address = response['data']['formatted_address'];
-                    $('#address_response').text(address);
-                    $('#accept_button').show();
-                    $('#address_response').data('validated_address', response['data']);
-                } else {
-                    $('#address_response').text(@json(__('messages.address_not_found')));
+        esPost('{{ route('validate_address') }}', {
+            _token: '{{ csrf_token() }}',
+            address1: esVal(document.getElementById('venue_address1')),
+            city: esVal(document.getElementById('venue_city')),
+            state: esVal(document.getElementById('venue_state')),
+            postal_code: esVal(document.getElementById('venue_postal_code')),
+            country_code: country ? country.iso2 : '',
+        }, function(response) {
+            var answer = document.getElementById('address_response');
+            if (response) {
+                var address = response['data']['formatted_address'];
+                if (answer && address !== undefined) {
+                    answer.textContent = address;
                 }
-            },
-            error: function(xhr, status, error) {
-                $('#address_response').text(@json(__('messages.an_error_occurred')) + ': ' + error);
+                esShow(document.getElementById('accept_button'));
+                if (answer) {
+                    answer.esValidatedAddress = response['data'];
+                }
+            } else if (answer) {
+                answer.textContent = @json(__('messages.address_not_found'));
+            }
+        }, function(xhr, status, error) {
+            var answer = document.getElementById('address_response');
+            if (answer) {
+                answer.textContent = @json(__('messages.an_error_occurred')) + ': ' + error;
             }
         });
     }
 
     function viewMap() {
         var address = [
-            $('#venue_address1').val(),
-            $('#venue_city').val(),
-            $('#venue_state').val(),
-            $('#venue_postal_code').val(),
+            esVal(document.getElementById('venue_address1')),
+            esVal(document.getElementById('venue_city')),
+            esVal(document.getElementById('venue_state')),
+            esVal(document.getElementById('venue_postal_code')),
             (window.getCountryInput('venue_country_code') ? window.getCountryInput('venue_country_code').getSelectedCountryData().name : '')
         ].filter(Boolean).join(', ');
 
@@ -1759,7 +1880,8 @@
 
     function acceptAddress(event) {
         event.preventDefault();
-        var validatedAddress = $('#address_response').data('validated_address');
+        var answer = document.getElementById('address_response');
+        var validatedAddress = answer ? answer.esValidatedAddress : undefined;
         if (validatedAddress) {
             // Into Vue, not into the inputs: they are v-model fields, so a value written to the
             // DOM alone is not what the hidden venue_* inputs post, and the next re-render puts
@@ -1772,8 +1894,8 @@
             }
 
             // Hide the address response and accept button after accepting
-            $('#address_response').hide();
-            $('#accept_button').hide();
+            esHide(answer);
+            esHide(document.getElementById('accept_button'));
         }
     }
 
@@ -1896,9 +2018,9 @@
       <svg class="w-5 h-5 text-red-600 dark:text-red-400 flex-shrink-0 mt-0.5" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" d="M18.364 18.364A9 9 0 0 0 5.636 5.636m12.728 12.728A9 9 0 0 1 5.636 5.636m12.728 12.728L5.636 5.636" /></svg>
       <p class="text-sm text-red-800 dark:text-red-300 font-medium">{{ __('messages.event_is_cancelled_ap') }}</p>
     </div>
-    @can('delete', $event)
+    @if ($canDeleteEvent)
     <button type="button" @click="submitRestore()" :disabled="isSubmittingRestore" class="shrink-0 inline-flex items-center justify-center px-4 py-2 text-sm font-semibold rounded-lg text-white bg-[var(--brand-button-bg)] hover:bg-[var(--brand-button-bg-hover)] transition-colors">{{ __('messages.restore_event') }}</button>
-    @endcan
+    @endif
   </div>
   @endif
 
@@ -2048,7 +2170,7 @@
                         </div>
                     </button>
                     @endif
-                    @can('delete', $event)
+                    @if ($canDeleteEvent)
                     <div class="py-2" role="none">
                         <div class="border-t border-gray-100 dark:border-gray-700"></div>
                     </div>
@@ -2075,7 +2197,7 @@
                             </div>
                         </button>
                     </form>
-                    @endcan
+                    @endif
                 </div>
             </div>
         </div>
@@ -2153,7 +2275,7 @@
                     <div>{{ __('messages.save_as_template') }}</div>
                 </button>
                 @endif
-                @can('delete', $event)
+                @if ($canDeleteEvent)
                 <div class="py-2" role="none">
                     <div class="border-t border-gray-100 dark:border-gray-700"></div>
                 </div>
@@ -2174,7 +2296,7 @@
                     </svg>
                     <div>{{ __('messages.delete_event') }}</div>
                 </button>
-                @endcan
+                @endif
             </div>
         </div>
     </div>
@@ -3032,6 +3154,108 @@
                             </div>
                             </div>
                         </div>
+
+                        @if ($translationRow)
+                        {{-- The automatic translation, correctable by hand (EventTranslationEdits). Folded like
+                             About: most people never open it. Everything in it is somebody's text, so all of it
+                             comes from the page's data through v-text, and none is printed here by the server. --}}
+                        <div class="ap-card rounded-xl" id="event-translation">
+                            <button type="button" class="event-row" @click="translationOpen = ! translationOpen"
+                                :aria-expanded="translationOpen ? 'true' : 'false'" aria-controls="event-translation-body">
+                                <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" class="event-row-icon" aria-hidden="true">
+                                    <path stroke-linecap="round" stroke-linejoin="round" d="M10.5 21l5.25-11.25L21 21m-9-3h7.5M3 5.621a48.474 48.474 0 016-.371m0 0c1.12 0 2.233.038 3.334.114M9 5.25V3m3.334 2.364C11.176 10.658 7.69 15.08 3 17.502m9.334-12.138c.896.061 1.785.147 2.666.257m-4.589 8.495a18.023 18.023 0 01-3.827-5.802" />
+                                </svg>
+                                <span class="event-row-title">{{ __('messages.event_translation_row', ['language' => $translationRow['labels']['language']]) }}</span>
+                                <span class="event-row-summary" v-cloak v-show="! translationOpen" :class="{ 'is-empty': ! translationSummary.marked, 'is-warn': translationSummary.warn }"><bdi v-text="translationSummary.text"></bdi></span>
+                                <svg class="event-row-chevron" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true">
+                                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7"></path>
+                                </svg>
+                            </button>
+                            <div id="event-translation-body" class="event-row-body" v-show="translationOpen" @if (! $translationOpenOnLoad) style="display: none" @endif>
+                            <div class="max-w-xl">
+                                <p class="event-hint">{{ __('messages.event_translation_help', ['source' => $languageName($translationSourceLang)]) }}
+                                    @if ($event->exists)
+                                    @php
+                                        // The guest page as a visitor reading the translation sees it (?lang= enters it).
+                                        $translationViewUrl = $event->getGuestUrl($subdomain, null, true);
+                                        $translationViewUrl .= (str_contains($translationViewUrl, '?') ? '&' : '?').'lang='.urlencode($translationTargetLang);
+                                    @endphp
+                                    <x-link :href="$translationViewUrl" target="_blank" class="ms-1">{{ __('messages.translation_view_in', ['language' => $translationRow['labels']['language']]) }}</x-link>
+                                    @endif
+                                </p>
+                                <x-input-error class="mb-3" :messages="$errors->get('translations.*')" />
+                                <div class="space-y-5">
+                                <div v-for="(f, key) in translation.fields" :key="key" v-show="f.original || f.saved" class="event-translation-field">
+                                    <div class="flex flex-wrap items-baseline justify-between gap-x-3 gap-y-1">
+                                        <span class="text-sm font-medium text-gray-700 dark:text-gray-300" v-text="f.label"></span>
+                                        {{-- Neutral, not green: a correction is somebody's wording, not a success, and it
+                                             may stand beside the amber notice below. --}}
+                                        <span v-if="f.manual && f.action !== 'auto'" class="event-status" v-text="translation.labels.corrected"></span>
+                                    </div>
+
+                                    {{-- The value in the page's direction, isolated in its own: under a Hebrew page's
+                                         label a Portuguese name starts at the same edge as the label. --}}
+                                    <p v-if="! f.editing && f.action !== 'auto'" class="mt-1 text-sm break-words"
+                                        :class="f.saved ? 'text-gray-900 dark:text-gray-100' : 'text-gray-500 dark:text-gray-400 italic'"><bdi :dir="f.saved ? translation.dir : null" v-text="f.saved ? (f.preview || f.saved) : translation.labels.not_yet"></bdi></p>
+                                    {{-- The field's own actions, under its value and ahead of any notice, so Edit is
+                                         never read as a third choice inside it. --}}
+                                    <div v-if="! f.editing && f.action !== 'auto' && (f.original || f.manual)" class="mt-1 flex flex-wrap items-center gap-x-4 gap-y-1">
+                                        <button v-if="f.original" type="button" class="event-link" @click="translationEdit(key)">{{ __('messages.edit') }}</button>
+                                        <button v-if="f.manual && ! f.action && ! f.stale" type="button" class="event-link event-link-quiet" @click="translationAuto(key)">{{ __('messages.translation_reset') }}</button>
+                                    </div>
+
+                                    {{-- The original changed after the correction: said where the field is, under the
+                                         wording it concerns, with the one thing most people want (keep it) as the button. --}}
+                                    <div v-if="f.stale && ! f.action && ! f.editing" class="mt-2 rounded-lg border border-amber-200 bg-amber-50 p-3 dark:border-amber-700 dark:bg-amber-900/20">
+                                        <div class="flex gap-2">
+                                            <svg class="w-5 h-5 flex-none text-amber-600 dark:text-amber-400" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" aria-hidden="true">
+                                                <path stroke-linecap="round" stroke-linejoin="round" d="M12 9v3.75m-9.303 3.376c-.866 1.5.217 3.374 1.948 3.374h14.71c1.73 0 2.813-1.874 1.948-3.374L13.949 3.378c-.866-1.5-3.032-1.5-3.898 0L2.697 16.126zM12 15.75h.007v.008H12v-.008z" />
+                                            </svg>
+                                            <div class="min-w-0 text-sm text-gray-800 dark:text-gray-200">
+                                                <p>{{ __('messages.translation_source_changed', ['source' => $languageName($translationSourceLang)]) }}</p>
+                                                <p class="mt-1 text-gray-600 dark:text-gray-400 break-words line-clamp-3"><bdi v-text="f.original_preview"></bdi></p>
+                                                <div class="mt-3 flex flex-wrap items-center gap-x-4 gap-y-2">
+                                                    <button type="button" class="event-link" @click="translationAuto(key)">{{ __('messages.translation_translate_again') }}</button>
+                                                    <x-secondary-button class="min-w-0" @click="translationKeep(key)">{{ __('messages.translation_keep_mine') }}</x-secondary-button>
+                                                </div>
+                                            </div>
+                                        </div>
+                                    </div>
+
+                                    <div v-if="f.editing" class="mt-2">
+                                        {{-- The description's whole original, a press away: the line is cut at three. --}}
+                                        <details v-if="f.original_full" class="event-hint" style="margin: 0 0 0.25rem">
+                                            <summary class="cursor-pointer break-words">{{ $languageName($translationSourceLang) }}: <bdi v-text="f.original_preview"></bdi></summary>
+                                            <div class="mt-2 max-h-48 overflow-auto whitespace-pre-line break-words rounded-lg border border-gray-200 dark:border-gray-700 p-3"><bdi v-text="f.original_full"></bdi></div>
+                                        </details>
+                                        <p v-else class="event-hint break-words line-clamp-3" style="margin: 0 0 0.25rem">{{ $languageName($translationSourceLang) }}: <bdi v-text="f.original_preview"></bdi></p>
+                                        <input v-if="! f.multiline" type="text" v-model="f.text" :dir="translation.dir" :maxlength="f.max" :aria-label="f.label" :id="'translation_' + key"
+                                            class="mt-1 block w-full border-gray-300 dark:border-gray-700 dark:bg-gray-900 dark:text-gray-300 focus:border-[var(--brand-blue)] focus:ring-[var(--brand-blue)] rounded-lg shadow-sm" autocomplete="off">
+                                        <textarea v-else v-model="f.text" :dir="translation.dir" :maxlength="f.max" :aria-label="f.label" :id="'translation_' + key" rows="8"
+                                            class="mt-1 block w-full border-gray-300 dark:border-gray-700 dark:bg-gray-900 dark:text-gray-300 focus:border-[var(--brand-blue)] focus:ring-[var(--brand-blue)] rounded-lg shadow-sm"
+                                            autocomplete="off"></textarea>
+                                        <p v-if="key === 'description'" class="event-hint">{{ __('messages.translation_markdown_hint') }}</p>
+                                        {{-- "Discard" and "Undo", never "Cancel": the save bar's Cancel, a glance away,
+                                             throws away the whole form. --}}
+                                        <button type="button" class="event-link mt-1" @click="translationCancel(key)">{{ __('messages.discard') }}</button>
+                                    </div>
+
+                                    <p v-if="f.action" class="event-hint">
+                                        <span v-if="f.action === 'auto'">{{ __('messages.translation_will_retranslate') }}</span>
+                                        <span v-else>{{ __('messages.translation_will_keep') }}</span>
+                                        <button type="button" class="event-link ms-2" @click="translationUndo(key)">{{ __('messages.undo') }}</button>
+                                    </p>
+
+                                    {{-- What Save sends, for this field alone: nothing unless something was done. --}}
+                                    <input v-if="translationPost(key) !== null" type="hidden" :name="'translations[' + key + ']'" :value="translationPost(key)">
+                                    <input v-if="f.basis && translationPost(key) !== null" type="hidden" :name="'translation_basis[' + key + ']'" :value="f.basis">
+                                    <input v-if="f.action === 'keep'" type="hidden" name="translations_keep[]" :value="key">
+                                </div>
+                                </div>
+                            </div>
+                            </div>
+                        </div>
+                        @endif
 
                     </div>
                 </div>
@@ -4200,6 +4424,71 @@
                                 </button>
                                 <div id="ticket-pane-checkout" v-show="activeTicketTab === 'checkout'" data-ticket-pane="checkout" class="event-subrow-body">
 
+                                <!-- Donations (Event::offersDonations()): on free registration they need a ticket, so the pane says how. -->
+                                <div class="mb-6" v-if="event.rsvp_enabled && isPro">
+                                    <p class="text-sm text-gray-500 dark:text-gray-400">{{ __('messages.donations_need_tickets') }}</p>
+                                </div>
+                                {{-- Disabled with tickets off ("Tickets elsewhere", "Not needed"): the row is hidden then, and a
+                                     field nobody can see must never refuse the save. --}}
+                                <fieldset class="mb-6" v-else-if="! event.rsvp_enabled" :disabled="! event.tickets_enabled">
+                                    {{-- Below Pro the switch is locked on its way ON only: a schedule that left Pro can still switch donations off. --}}
+                                    <div class="flex items-center gap-3" :class="(isPro || event.donations_enabled) ? '' : 'opacity-60'">
+                                        <label class="relative w-11 h-6 flex-shrink-0" :class="(isPro || event.donations_enabled) ? 'cursor-pointer' : 'cursor-not-allowed'">
+                                            <input id="donations_enabled_checkbox" type="checkbox"
+                                                :checked="event.donations_enabled"
+                                                @change="event.donations_enabled = $event.target.checked"
+                                                :disabled="! isPro && ! event.donations_enabled"
+                                                class="sr-only peer">
+                                            <div class="w-11 h-6 bg-gray-300 dark:bg-gray-600 rounded-full peer-checked:bg-[var(--brand-button-bg)] transition-colors"></div>
+                                            <div class="absolute top-0.5 ltr:left-0.5 rtl:right-0.5 w-5 h-5 bg-white rounded-full shadow-md transition-transform duration-200 peer-checked:ltr:translate-x-5 peer-checked:rtl:-translate-x-5"></div>
+                                        </label>
+                                        <label for="donations_enabled_checkbox" class="text-sm font-medium text-gray-700 dark:text-gray-300" :class="(isPro || event.donations_enabled) ? 'cursor-pointer' : 'cursor-not-allowed'">
+                                            {{ __('messages.donations_toggle') }}
+                                        </label>
+                                        <template v-if="! isPro"><x-lock-badge tier="pro" /></template>
+                                    </div>
+                                    <p class="text-xs text-gray-500 dark:text-gray-400 mt-1 ms-14">{{ __('messages.donations_help') }}</p>
+                                    <input type="hidden" name="donations_enabled" :value="event.donations_enabled ? 1 : 0">
+                                    <input type="hidden" name="donation_custom" :value="event.donation_custom ? 1 : 0">
+
+                                    <div v-if="event.donations_enabled" class="mt-3 ms-14 space-y-4">
+                                        <div v-if="! donationGatewayOk" class="flex items-start gap-3 bg-amber-50 dark:bg-amber-900/20 border border-amber-200 dark:border-amber-700 rounded-lg p-3">
+                                            <svg class="w-5 h-5 flex-shrink-0 text-amber-600 dark:text-amber-400" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" d="M12 9v3.75m-9.303 3.376c-.866 1.5.217 3.374 1.948 3.374h14.71c1.73 0 2.813-1.874 1.948-3.374L13.949 3.378c-.866-1.5-3.032-1.5-3.898 0L2.697 16.126zM12 15.75h.007v.008H12v-.008z" /></svg>
+                                            <p class="text-sm text-amber-800 dark:text-amber-200">
+                                                {{ __('messages.donations_need_online_payment') }}
+                                                <button type="button" class="event-link ms-2" @click="activeTicketTab = 'payment'">{{ __('messages.payment') }}</button>
+                                            </p>
+                                        </div>
+                                        <div>
+                                            <x-input-label :value="__('messages.donation_suggested_amounts')" />
+                                            <div class="mt-1 grid grid-cols-3 gap-2 max-w-xs">
+                                                <input v-for="(amount, index) in event.donation_amounts" :key="'donation-' + index"
+                                                    type="text" inputmode="decimal" name="donation_amounts[]"
+                                                    v-model="event.donation_amounts[index]"
+                                                    :placeholder="donationPlaceholders[index]"
+                                                    :aria-label='@json(__('messages.donation_suggested_amounts')) + " " + (index + 1)'
+                                                    class="block w-full border-gray-300 dark:border-gray-700 dark:bg-gray-900 dark:text-gray-300 focus:border-[var(--brand-blue)] focus:ring-[var(--brand-blue)] rounded-md shadow-sm">
+                                            </div>
+                                            <p class="text-xs text-gray-500 dark:text-gray-400 mt-1">{{ __('messages.donation_suggested_amounts_help') }}</p>
+                                            <x-input-error class="mt-2" :messages="$errors->get('donation_amounts.*')" />
+                                        </div>
+                                        <div class="flex items-center gap-3">
+                                            <label class="relative w-11 h-6 flex-shrink-0 cursor-pointer">
+                                                <input id="donation_custom_checkbox" type="checkbox" :checked="event.donation_custom" @change="event.donation_custom = $event.target.checked" class="sr-only peer">
+                                                <div class="w-11 h-6 bg-gray-300 dark:bg-gray-600 rounded-full peer-checked:bg-[var(--brand-button-bg)] transition-colors"></div>
+                                                <div class="absolute top-0.5 ltr:left-0.5 rtl:right-0.5 w-5 h-5 bg-white rounded-full shadow-md transition-transform duration-200 peer-checked:ltr:translate-x-5 peer-checked:rtl:-translate-x-5"></div>
+                                            </label>
+                                            <label for="donation_custom_checkbox" class="text-sm text-gray-700 dark:text-gray-300 cursor-pointer">{{ __('messages.donation_custom') }}</label>
+                                        </div>
+                                        <div class="max-w-md">
+                                            <x-input-label for="donation_line" :value="__('messages.donation_line')" />
+                                            <x-text-input id="donation_line" name="donation_line" type="text" maxlength="120" class="mt-1 block w-full"
+                                                v-model="event.donation_line" :placeholder="__('messages.donation_line_placeholder')" />
+                                            <x-input-error class="mt-2" :messages="$errors->get('donation_line')" />
+                                        </div>
+                                    </div>
+                                </fieldset>
+
                                 <!-- Phone Number -->
                                 <div class="mb-6">
                                     <div class="flex items-center gap-3">
@@ -5078,7 +5367,7 @@
                                 <div class="event-agenda-sub">
                                     <button type="button" class="event-link" v-if="! partDescOpen[part.uid]" @click="openPartDescription(part)">+ {{ __('messages.add_description') }}</button>
                                     <div v-show="partDescOpen[part.uid]">
-                                        <textarea :ref="'partDescription_' + part.uid" :name="'event_parts[' + index + '][description]'" rows="1"
+                                        <textarea :ref="'partDescription_' + part.uid" :name="'event_parts[' + index + '][description]'" rows="3"
                                                   data-content-dir="{{ content_dir($role) }}" aria-label="{{ __('messages.description') }}"
                                                   class="block w-full border-gray-300 dark:border-gray-700 dark:bg-gray-900 dark:text-gray-300 focus:border-[var(--brand-blue)] focus:ring-[var(--brand-blue)] rounded-lg shadow-sm">@{{ part.description }}</textarea>
                                     </div>
@@ -6491,7 +6780,7 @@
         <input type="hidden" name="venue_name">
         <input type="hidden" name="venue_id">
     </form>
-    @can('delete', $event)
+    @if ($canDeleteEvent)
     <form id="event-cancel-form" method="POST" action="{{ route('event.cancel', ['subdomain' => $subdomain, 'hash' => \App\Utils\UrlUtils::encodeId($event->id)]) }}" class="hidden">
         @csrf
         <input type="hidden" name="notify_attendees" value="0">
@@ -6500,7 +6789,7 @@
     <form id="event-restore-form" method="POST" action="{{ route('event.restore', ['subdomain' => $subdomain, 'hash' => \App\Utils\UrlUtils::encodeId($event->id)]) }}" class="hidden">
         @csrf
     </form>
-    @endcan
+    @endif
     @endif
 
     {{-- Cancel-event confirm dialog (issue #94). --}}
@@ -6675,6 +6964,11 @@
           installment_count: {{ (int) ($event->installment_count ?: 4) }},
           installment_final_days_before: {{ (int) ($event->installment_final_days_before ?? 14) }},
           installment_min_order_amount: @json($canSeeTicketData ? $event->installment_min_order_amount : null),
+          donations_enabled: @json($canSeeTicketData && (bool) $event->donations_enabled),
+          // Three boxes, always: the ones the owner left empty show the currency's suggestions.
+          donation_amounts: @json(array_pad(array_map(fn ($amount) => (string) $amount, array_slice((array) ($canSeeTicketData ? ($event->donation_amounts ?? []) : []), 0, 3)), 3, '')),
+          donation_custom: @json(! $canSeeTicketData || $event->donation_custom === null || (bool) $event->donation_custom),
+          donation_line: @json($canSeeTicketData ? $event->donation_line : null),
           // Last, so it wins: the Tickets tab's fields as they were typed before a refused save
           // ($ticketFieldsTyped). An empty object on an ordinary load.
           ...@json((object) $ticketFieldsTyped), // typed
@@ -6691,6 +6985,9 @@
         showMoreSections: @json(! $isFirstEventRun),
         // Folded parts of the Event tab. Each starts open only when a refused save has an error inside it.
         aboutOpen: @json($aboutOpenOnLoad),
+        // The Translation row under About: null where the event is not translated.
+        translationOpen: @json($translationOpenOnLoad),
+        translation: @json($translationRow),
         showVenueContact: @json($venueContactOpenOnLoad),
         showVenueMore: @json($venueMoreOpenOnLoad),
         // The tabs a refused save has errors on, and the tabs with changes not yet saved.
@@ -7307,10 +7604,59 @@
           }
         });
       },
+      // The Translation row (EventTranslationEdits). A press fires no input event, so each says
+      // itself that the tab changed.
+      translationEdit(key) {
+        var f = this.translation.fields[key];
+        f.text = f.saved;
+        f.action = '';
+        f.editing = true;
+        this.$nextTick(function () {
+          var input = document.getElementById('translation_' + key);
+          if (input) { input.focus(); }
+        });
+      },
+      translationCancel(key) {
+        var f = this.translation.fields[key];
+        f.editing = false;
+        f.text = f.saved;
+      },
+      translationKeep(key) {
+        this.translation.fields[key].action = 'keep';
+        this.markTabDirty('section-details');
+      },
+      translationAuto(key) {
+        var f = this.translation.fields[key];
+        f.editing = false;
+        f.action = 'auto';
+        this.markTabDirty('section-details');
+      },
+      translationUndo(key) {
+        this.translation.fields[key].action = '';
+      },
+      // What Save sends for one field: its text (a correction), '' (back to automatic), or null
+      // (nothing, which keeps whatever is stored).
+      translationPost(key) {
+        var f = this.translation.fields[key];
+        if (f.action === 'auto') {
+          return '';
+        }
+        if (f.editing) {
+          var text = (f.text || '').trim();
+          if (text === '') {
+            return f.manual || f.saved ? '' : null;
+          }
+          // Opened and left as it was: an automatic translation is not made a person's by that.
+          return text !== (f.saved || '').trim() || f.stale || f.basis ? f.text : null;
+        }
+        // A copy's corrections, carried as they stand.
+        return f.basis && f.saved ? f.saved : null;
+      },
       // A field the browser refuses the save over may be folded away; unfold what holds it.
       revealField(el) {
         if (! el || ! el.closest) { return; }
         if (el.closest('#event-about-body')) { this.aboutOpen = true; }
+        if (el.closest('#event-translation-body')) { this.translationOpen = true; }
         // A row of the Tickets tab that is closed: open it. The ticket types themselves are
         // always showing ("tickets" is the name for no row open).
         var pane = el.closest('[data-ticket-pane]');
@@ -7425,9 +7771,12 @@
             field._easyMDE.value(e[id] || '');
           }
         });
-        ['ask_phone', 'require_phone', 'country_code_phone', 'individual_tickets', 'individual_ticket_fields', 'sell_after_start', 'show_unavailable_tickets', 'installments_enabled'].forEach(function (field) {
+        ['ask_phone', 'require_phone', 'country_code_phone', 'individual_tickets', 'individual_ticket_fields', 'sell_after_start', 'show_unavailable_tickets', 'installments_enabled', 'donations_enabled', 'donation_custom'].forEach(function (field) {
           e[field] = !! input[field];
         });
+        // The preset's donation ask, in the three boxes the Checkout row draws.
+        e.donation_amounts = [0, 1, 2].map(function (i) { var a = (input.donation_amounts || [])[i]; return a === undefined || a === null ? '' : String(a); });
+        e.donation_line = input.donation_line || null;
         ['installment_count', 'installment_final_days_before', 'installment_min_order_amount', 'terms_url', 'total_tickets_mode'].forEach(function (field) {
           e[field] = input[field];
         });
@@ -7658,6 +8007,17 @@
         var short = document.getElementById('short_description');
         if (short && short.value.trim()) {
           this.aboutSummary = short.value.trim();
+        }
+        // The originals as they read now, for the save bar's word about corrections they move
+        // away from (translationStays). The description is a markdown editor with its own text.
+        if (this.translation) {
+          var originals = { name: 'event_name', short_description: 'short_description', description: 'description' };
+          Object.keys(originals).forEach((key) => {
+            var input = document.getElementById(originals[key]);
+            if (input && this.translation.fields[key]) {
+              this.translation.fields[key].current = input._easyMDE ? input._easyMDE.value() : input.value;
+            }
+          });
         }
       },
       // Unfold the venue's contact fields, where matching a venue by email or phone happens. The
@@ -8250,8 +8610,18 @@
             this.partDescOpen[part.uid] = true;
           }
         });
-        if (this.agendaShowDescription) {
+        if (! this.agendaShowDescription) return;
+        // This runs from mounted(), and the form mounts from an inline script, which runs BEFORE
+        // the deferred app.js module that defines window.initTinyMDE. So every saved part's
+        // description used to be skipped and left as a one-row textarea, while a part added later
+        // got the editor: "the agenda is compressed into tiny windows" once it had been saved
+        // (support, 2026-11). Wait for the module when it has not run yet.
+        if (window.initTinyMDE) {
           this.eventParts.forEach(part => this.initPartEditor(part));
+        } else if (document.readyState === 'loading') {
+          document.addEventListener('DOMContentLoaded', () => {
+            if (this.agendaShowDescription) this.eventParts.forEach(part => this.initPartEditor(part));
+          }, { once: true });
         }
       },
       destroyAllPartEditors() {
@@ -9715,6 +10085,8 @@
         var C = this.tabLabels.checkout;
         var asked = [];
         if (e.ask_phone) { asked.push(C.ask_phone); }
+        // Donations first: they change what a buyer pays, the rest only what they are asked.
+        if (e.donations_enabled && e.tickets_enabled && ! e.rsvp_enabled) { asked.push(C.donations); }
         if ((this.isPro || this.eventExists) && this.eventCustomFields && Object.keys(this.eventCustomFields).length) { asked.push(C.custom_fields); }
         if (this.individualTicketsOn) { asked.push(C.individual_tickets); }
         if (e.tickets_enabled && (e.terms_url || '').trim()) { asked.push(C.terms_url); }
@@ -9804,7 +10176,19 @@
         return (exists ? this.presetWords.updates : this.presetWords.adds).split(':preset').join(name);
       },
       anyTicketPriced() {
-        return this.tickets.some(function (ticket) { return parseFloat(ticket.price) > 0; });
+        return this.tickets.some(function (ticket) { return parseFloat(ticket.price) > 0; })
+          // A free ticket with a donation takes money too, so it needs a way to pay as much.
+          || (!! this.event.donations_enabled && ! this.event.rsvp_enabled);
+      },
+      // Donations are paid only through a gateway that charges the whole order online
+      // (Event::DONATION_GATEWAYS).
+      donationGatewayOk() {
+        return @json(\App\Models\Event::DONATION_GATEWAYS).indexOf(this.event.payment_method) !== -1;
+      },
+      // The amounts checkout offers when none are typed, for the currency chosen on this page.
+      donationPlaceholders() {
+        const defaults = @json(\App\Models\Event::allDefaultDonationAmounts());
+        return defaults[String(this.event.ticket_currency_code || 'USD').toUpperCase()] || defaults.USD;
       },
       // EventRepo::saveEvent() turns Individual tickets off when any ticket type is a pass.
       hasPassTicket() {
@@ -9876,6 +10260,62 @@
         }
 
         return { gallery: gallery, sponsors: sponsors, tab: tab };
+      },
+      // The Translation row's line while it is folded: what was changed under a correction first,
+      // then what was corrected, else that it is all automatic.
+      translationSummary() {
+        if (! this.translation) {
+          return { text: '', marked: false, warn: false };
+        }
+        var L = this.translation.labels, F = this.translation.fields;
+        var stale = [], manual = [], any = false;
+        Object.keys(F).forEach(function (key) {
+          var f = F[key];
+          if (f.saved) { any = true; }
+          if (! f.manual || f.action === 'auto') { return; }
+          (f.stale && f.action !== 'keep' ? stale : manual).push(f.label);
+        });
+        if (stale.length) {
+          return { text: L.changed + ': ' + stale.join(', '), marked: true, warn: true };
+        }
+        if (manual.length) {
+          return { text: L.corrected + ': ' + manual.join(', '), marked: true, warn: false };
+        }
+        return { text: any ? L.automatic : L.not_yet, marked: false, warn: false };
+      },
+      // A correction whose original is being changed on this page: Save keeps it as written, and
+      // the bar says so, so nobody expects the translation to follow the new text.
+      translationStays() {
+        if (! this.translation) {
+          return '';
+        }
+        var F = this.translation.fields;
+        var even = function (text) { return (text || '').replace(/\r\n?/g, '\n').trim(); };
+        var names = Object.keys(F).filter(function (key) {
+          var f = F[key];
+          return f.manual && ! f.action && typeof f.current === 'string' && even(f.current) !== '' && even(f.current) !== even(f.original);
+        }).map(function (key) { return F[key].label; });
+        return names.length ? this.translation.labels.stays.replace(':fields', names.join(', ')) : '';
+      },
+      // The corrections a save gives back to the automatic translation, for the save bar.
+      translationResets() {
+        if (! this.translation) {
+          return '';
+        }
+        var F = this.translation.fields;
+        // Reset pressed, or the box emptied, which Save reads the same way (translationPost()).
+        var givenBack = function (key) {
+          var f = F[key];
+          return f.action === 'auto' || (f.editing && (f.text || '').trim() === '' && (f.manual || f.saved));
+        };
+        var label = function (key) { return F[key].label; };
+        var corrected = Object.keys(F).filter(function (key) { return givenBack(key) && F[key].manual; }).map(label);
+        var automatic = Object.keys(F).filter(function (key) { return givenBack(key) && ! F[key].manual; }).map(label);
+        var L = this.translation.labels;
+        return [
+          corrected.length ? L.resets.replace(':fields', corrected.join(', ')) : '',
+          automatic.length ? L.retranslates.replace(':fields', automatic.join(', ')) : '',
+        ].filter(Boolean).join(' ');
       },
       // One line per tab, from what is on screen now and not from what was saved. Names mean in
       // use; an empty tab asks only where adding is the next step; a warning comes first and turns
@@ -10051,6 +10491,10 @@
         if (! this.agendaShowTimes && this.eventParts.some(function (part) { return part.start_time || part.end_time; })) {
           removes.push(L.saving_removes_times);
         }
+        // A translation corrected by hand that Reset gives back to the automatic one.
+        if (this.translationResets) {
+          removes.push(this.translationResets);
+        }
         // Its own sponsors go when the tiles leave them. They also go on ANY save while neither
         // schedule's plan has sponsors (EventRepo::saveEvent() clears them then, as it always has):
         // that is no change of anybody's, so it is a standing note beside whatever the bar says
@@ -10062,6 +10506,8 @@
         } else if (this.savedSponsorCount > 0 && this.event.sponsor_mode !== 'custom') {
           removes.push(L.saving_removes_sponsors);
         }
+        // Not a removal: a correction kept while its original changes (translationStays).
+        standing = [standing, this.translationStays].filter(Boolean).join(' ');
         var withStanding = function (text) { return [text, standing].filter(Boolean).join(' '); };
         if (removes.length) {
           return { kind: 'text', text: withStanding(removes.join(' ')), strong: true };

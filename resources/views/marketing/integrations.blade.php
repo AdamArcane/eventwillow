@@ -1,12 +1,35 @@
 <x-marketing-layout :hp="true">
+    @php
+        // Five ports only exist where the operator has set them up, and each reads the same
+        // predicate the feature itself does: Outlook sync (an Azure app), web push (OneSignal),
+        // the accommodation map (Stay22) and the two wallets. A port that is off is not on the
+        // panel, in the register or in any count, and the ports after it close up the numbering.
+        // Set here, above the slots, because the meta description is the first place it is read.
+        $outlookLive = outlook_sync_enabled();
+        $pushLive = \App\Services\OneSignalService::isConfigured();
+        $stayLive = \App\Services\Stay22Service::isEnabled();
+        $gWalletLive = \App\Services\Wallet\GoogleWalletService::isConfigured();
+        $aWalletLive = \App\Services\Wallet\AppleWalletService::isConfigured();
+        $walletLive = $gWalletLive || $aWalletLive;
+        $walletTitle = $gWalletLive && $aWalletLive ? 'Google Wallet and Apple Wallet' : ($gWalletLive ? 'Google Wallet' : 'Apple Wallet');
+        $walletButtons = $gWalletLive && $aWalletLive
+            ? 'Add to Google Wallet and Add to Apple Wallet buttons'
+            : 'an Add to '.($gWalletLive ? 'Google' : 'Apple').' Wallet button';
+
+        $portCount = 11 + ($outlookLive ? 1 : 0) + ($pushLive ? 1 : 0) + ($stayLive ? 1 : 0) + ($walletLive ? 1 : 0);
+        $portWord = [11 => 'eleven', 12 => 'twelve', 13 => 'thirteen', 14 => 'fourteen', 15 => 'fifteen', 16 => 'sixteen'][$portCount];
+        $edgeWord = [2 => 'Two', 3 => 'Three', 4 => 'Four', 5 => 'Five'][2 + ($pushLive ? 1 : 0) + ($stayLive ? 1 : 0) + ($walletLive ? 1 : 0)];
+        $calendarList = $outlookLive ? 'Google Calendar, Outlook and CalDAV' : 'Google Calendar and CalDAV';
+    @endphp
+
     <x-slot name="title">Event Schedule Integrations: Calendars, Stripe, PayPal, API</x-slot>
-    <x-slot name="description">Sixteen real integrations, each labelled with its direction, trigger and plan: Google Calendar, Outlook, CalDAV, Stripe, PayPal, webhooks and more.</x-slot>
+    <x-slot name="description">{{ ucfirst($portWord) }} real integrations, each labelled with its direction, trigger and plan: Google Calendar, {{ $outlookLive ? 'Outlook, ' : '' }}CalDAV, Stripe, PayPal, webhooks and more.</x-slot>
     <x-slot name="breadcrumbTitle">Integrations</x-slot>
 
     <x-slot name="structuredData">
     <x-seo.webpage
         name="Event Schedule - Integrations"
-        description="Event Schedule connects directly to the services you already run: two-way calendar sync with Google Calendar, Outlook and CalDAV, payments through your own Stripe, PayPal, Payfast or Razorpay account or Invoice Ninja, refunds sent back through Stripe, PayPal and Razorpay, signed outbound webhooks, a REST API, OneSignal web push, Google Wallet ticket passes, a nearby-accommodation map, Eventbrite import, Facebook and Instagram ad boosting, and event creation over WhatsApp." />
+        :description="'Event Schedule connects directly to the services you already run: two-way calendar sync with '.$calendarList.', payments through your own Stripe, PayPal, Payfast or Razorpay account or Invoice Ninja, refunds sent back through Stripe, PayPal and Razorpay, signed outbound webhooks, a REST API, '.($pushLive ? 'OneSignal web push, ' : '').($walletLive ? $walletTitle.' ticket passes, ' : '').($stayLive ? 'a nearby-accommodation map, ' : '').'Eventbrite import, Facebook and Instagram ad boosting, and event creation over WhatsApp.'" />
     </x-slot>
 
     {{-- Motion gate: hidden pre-reveal states only apply when this class is present,
@@ -597,31 +620,36 @@
     </style>
 
     @php
-        // The sixteen ports. Direction is the first thing a reader needs, so it is
+        // The ports. Direction is the first thing a reader needs, so it is
         // screen-printed on the panel and repeated in the register below. It is
         // the direction the DATA runs, not the direction the call is made in:
         // CalDAV and Eventbrite arrive by us asking rather than them telling.
-        // These numbers are also printed on the section cards further down and the
-        // finale's open port is the next one along, so a new port means renumbering
-        // those chips too - they drifted two ports behind this list once already.
-        $ports = [
-            ['01', 'Google Calendar',  'two-way sync',        'both', 'Free'],
-            ['02', 'Outlook 365',      'Microsoft Graph',     'both', 'Free'],
-            ['03', 'CalDAV',           'your own server',     'both', 'Free'],
-            ['04', 'Stripe',           'checkout + webhook',  'both', 'Free'],
-            ['05', 'Invoice Ninja',    'invoice or pay link', 'both', 'Free'],
-            ['06', 'PayPal',           'orders v2 + capture', 'both', 'Free'],
-            ['07', 'Payfast',          'ZAR checkout + ITN',  'both', 'Free'],
-            ['08', 'Razorpay',         'INR link + webhook',  'both', 'Free'],
-            ['09', 'Webhooks',         'your endpoint',       'out',  'Pro'],
-            ['10', 'REST API',         'you call us',         'in',   'Pro'],
-            ['11', 'Eventbrite',       'import on demand',    'in',   'Pro'],
-            ['12', 'Web push',         'OneSignal',           'out',  'Pro'],
-            ['13', 'Accommodation',    'Stay22 map',          'out',  'Free'],
-            ['14', 'Meta ads',         'boost a campaign',    'out',  'Pro'],
-            ['15', 'WhatsApp',         'Twilio inbound',      'in',   'Ent'],
-            ['16', 'Google Wallet',    'ticket pass + QR',    'out',  'Free'],
-        ];
+        // The numbers are given here, in order, after the ports this install has
+        // not set up are left out, and $portNo prints them on the section cards
+        // further down; the finale's open port is the next one along.
+        $ports = array_values(array_filter([
+            ['google',     'Google Calendar',  'two-way sync',        'both', 'Free'],
+            $outlookLive ? ['outlook', 'Outlook 365', 'Microsoft Graph', 'both', 'Free'] : null,
+            ['caldav',     'CalDAV',           'your own server',     'both', 'Free'],
+            ['stripe',     'Stripe',           'checkout + webhook',  'both', 'Pro'],
+            ['invoiceninja', 'Invoice Ninja',  'invoice or pay link', 'both', 'Pro'],
+            ['paypal',     'PayPal',           'orders v2 + capture', 'both', 'Pro'],
+            ['payfast',    'Payfast',          'ZAR checkout + ITN',  'both', 'Pro'],
+            ['razorpay',   'Razorpay',         'INR link + webhook',  'both', 'Pro'],
+            ['webhooks',   'Webhooks',         'your endpoint',       'out',  'Pro'],
+            ['api',        'REST API',         'you call us',         'in',   'Pro'],
+            ['eventbrite', 'Eventbrite',       'import on demand',    'in',   'Pro'],
+            $pushLive ? ['push', 'Web push', 'OneSignal', 'out', 'Pro'] : null,
+            $stayLive ? ['stay22', 'Accommodation', 'Stay22 map', 'out', 'Free'] : null,
+            ['meta',       'Meta ads',         'boost a campaign',    'out',  'Pro'],
+            ['whatsapp',   'WhatsApp',         'Twilio inbound',      'in',   'Ent'],
+            $walletLive ? ['wallet', 'Wallet passes', $gWalletLive && $aWalletLive ? 'Google + Apple' : ($gWalletLive ? 'Google' : 'Apple'), 'out', 'Free'] : null,
+        ]));
+        $portNo = [];
+        foreach ($ports as $portAt => $portRow) {
+            $portNo[$portRow[0]] = str_pad((string) ($portAt + 1), 2, '0', STR_PAD_LEFT);
+            $ports[$portAt][0] = $portNo[$portRow[0]];
+        }
 
         // The register. Every row is traceable to code: the calendar services,
         // StripeController / TicketController, PayPalGateway, PayfastGateway,
@@ -629,37 +657,37 @@
         // drivers can refund),
         // WebhookService, routes/api.php, OneSignalService, Stay22Service and
         // GoogleWalletService.
-        $register = [
+        $register = array_values(array_filter([
             [
                 'Google Calendar', 'both', 'Free',
                 'Saving an event writes it to Google straight away. Google notifies us back through a watch channel, and a sweep every fifteen minutes catches anything the channel missed.',
             ],
-            [
+            $outlookLive ? [
                 'Outlook / Microsoft 365', 'both', 'Free',
                 'The same shape over Microsoft Graph, with a change subscription inbound and a delta token so a resync does not re-read the whole calendar. Optional Teams meeting link.',
-            ],
+            ] : null,
             [
                 'CalDAV', 'both or one', 'Free',
                 'Server URL, username, password. Outbound on save; inbound is polled every fifteen minutes, because CalDAV has no notification standard to subscribe to.',
             ],
             [
-                'Stripe', 'out then in', 'Free',
-                'Checkout runs on Stripe. On the hosted platform the charge is created on your own connected account, and the result returns as a signed webhook. A refund from the Sales page goes back out along the same wire, in full or in part. Connecting it is free on any plan; a ticket that carries a price is what needs Pro.',
+                'Stripe', 'out then in', 'Pro',
+                'Checkout runs on Stripe. On the hosted platform the charge is created on your own connected account, and the result returns as a signed webhook. A refund from the Sales page goes back out along the same wire, in full or in part. It comes with Pro, which is what lets a ticket carry a price.',
             ],
             [
-                'Invoice Ninja', 'out then in', 'Free',
+                'Invoice Ninja', 'out then in', 'Pro',
                 'Either an invoice per sale, or a payment link the buyer completes on your Invoice Ninja install. A webhook marks the sale paid when it clears. A refund is only recorded here; you return the money in Invoice Ninja.',
             ],
             [
-                'PayPal', 'out then in', 'Free',
+                'PayPal', 'out then in', 'Pro',
                 'The buyer approves on PayPal and the payment is taken by a call we make straight afterwards, so the ticket is issued on their return rather than waiting for a callback. A PayPal event CAN join the multi-event cart, unlike Payfast, because the whole order is taken as one payment, and a refund, full or partial, goes back against that payment. Installments are not supported. A selfhost operator can supply one account for the whole install, which an owner who connected their own keeps overriding.',
             ],
             [
-                'Payfast', 'out then in', 'Free',
+                'Payfast', 'out then in', 'Pro',
                 'South African rand only, so it is offered on ZAR events and nowhere else. The buyer pays on Payfast and the sale is confirmed by an ITN callback. A Payfast event cannot join the multi-event cart or use installments, and a refund is made in your Payfast dashboard and only recorded here. A selfhost operator can supply one merchant account for the whole install, which an owner who connected their own keeps overriding.',
             ],
             [
-                'Razorpay', 'out then in', 'Free',
+                'Razorpay', 'out then in', 'Pro',
                 'Indian rupees (INR) only, so it is offered on INR events and nowhere else. The buyer pays on a Razorpay payment link by UPI, card, netbanking or wallet, and the sale is confirmed on their return, or by a webhook if they never come back. A Razorpay event CAN join the multi-event cart, and a refund, full or partial, goes back through Razorpay. Installments are not supported. A selfhost operator can supply one account for the whole install, which an owner who connected their own keeps overriding.',
             ],
             [
@@ -674,14 +702,14 @@
                 'Eventbrite import', 'in', 'Pro',
                 'Paste an Eventbrite private token, pick from the events it finds, and they arrive with their venues, ticket types and images. You press the button; nothing runs on a timer.',
             ],
-            [
+            $pushLive ? [
                 'Web push', 'out', 'Pro',
                 'The notifications you already get by email, repeated as browser and mobile push. Per device, opt-in, and only where the site operator has configured it.',
-            ],
-            [
+            ] : null,
+            $stayLive ? [
                 'Accommodation map', 'out', 'Free',
                 'Lodging near the venue on your public event pages, dated from the occurrence being viewed. Nothing is requested until the visitor consents.',
-            ],
+            ] : null,
             [
                 'Meta ads', 'out', 'Pro',
                 'Your event becomes a Facebook and Instagram campaign: you choose budget, dates, audience and placements. The ads run on the ad account of whoever operates your Event Schedule site.',
@@ -690,11 +718,11 @@
                 'WhatsApp', 'in', 'Ent',
                 'Message the site\'s WhatsApp number, or send a photo of a flyer, and the event is created and answered with its link. Runs over the operator\'s Twilio account.',
             ],
-            [
-                'Google Wallet', 'out', 'Free',
-                'A buyer taps Add to Google Wallet and the pass is signed and sent to Google at that moment, never while a page or an email is rendering. It carries the ticket\'s own QR code, so it scans at the door like the ticket. Needs the site operator\'s Google Wallet issuer account.',
-            ],
-        ];
+            $walletLive ? [
+                $walletTitle, 'out', 'Free',
+                'A buyer taps '.($gWalletLive && $aWalletLive ? 'Add to Google Wallet or Add to Apple Wallet' : 'Add to '.$walletTitle).' and the pass is made at that moment, never while a page or an email is rendering. It carries the ticket\'s own QR code, so it scans at the door like the ticket.'.($gWalletLive && $aWalletLive ? ' Each wallet needs the site operator\'s own account with Google or Apple, so a button appears only for the wallets that are set up.' : ''),
+            ] : null,
+        ]));
 
         // Webhook event types, verbatim from Webhook::EVENT_TYPES. The heading below counts them,
         // so adding one there means adding it here too.
@@ -713,11 +741,11 @@
         $faqs = [
             [
                 'q' => 'Which integrations are free?',
-                'a' => 'Two-way calendar sync with Google Calendar, Outlook or Microsoft 365 and any CalDAV server is free on every plan, and so are the nearby-accommodation map and Google Wallet passes, which the site operator switches on. The five money ports, Stripe, PayPal, Payfast, Razorpay and Invoice Ninja, come with Pro at '.plan_price($proMonthly).' a month, which is what lets a ticket or an appointment booking carry a price in the first place. There are zero platform fees on every plan either way. Pro adds webhooks, the REST API, web push, Eventbrite import and ad boosting alongside them. Creating events over WhatsApp is the one Enterprise port, at '.plan_price($entMonthly).'. Selfhosted installs resolve to the top tier, so every port is on from the first boot.',
+                'a' => 'Two-way calendar sync with Google Calendar'.($outlookLive ? ', Outlook or Microsoft 365' : '').' and any CalDAV server is free on every plan, and so are the iCal and RSS feeds of your schedule'.($stayLive || $walletLive ? ', importing from a link or from Google Calendar, and '.implode(' and ', array_filter([$stayLive ? 'the nearby-accommodation map' : null, $walletLive ? $walletTitle.' passes' : null])).', which the site operator switches on.' : ', and importing from a link or from Google Calendar.').' The five money ports, Stripe, PayPal, Payfast, Razorpay and Invoice Ninja, come with Pro at '.plan_price($proMonthly).' a month, which is what lets a ticket or an appointment booking carry a price; free registration and zero-price tickets need no gateway. There are zero platform fees on every plan either way. Pro adds webhooks, the REST API, '.($pushLive ? 'web push, ' : '').'Eventbrite import and ad boosting alongside them. Creating events over WhatsApp is the one Enterprise port, at '.plan_price($entMonthly).', and Feeds, which read another site\'s events about once an hour, are Enterprise on eventschedule.com too. Selfhosted installs resolve to the top tier, so every port is on from the first boot.',
             ],
             [
                 'q' => 'Is the calendar sync really two-way?',
-                'a' => 'Yes, and you choose the direction per schedule: import only, export only, or both. Outbound happens when you save an event. Inbound arrives through a Google watch channel or a Microsoft Graph change subscription, backed up by a sweep every fifteen minutes. CalDAV inbound is polled only, because CalDAV has no notification standard to subscribe to.',
+                'a' => 'Yes, and you choose the direction per schedule: import only, export only, or both. Outbound happens when you save an event. Inbound arrives through a Google watch channel'.($outlookLive ? ' or a Microsoft Graph change subscription' : '').', backed up by a sweep every fifteen minutes. CalDAV inbound is polled only, because CalDAV has no notification standard to subscribe to.',
             ],
             [
                 'q' => 'Where does the ticket money actually go?',
@@ -733,22 +761,119 @@
             ],
             [
                 'q' => 'Do you integrate with Zoom, YouTube or Twitch?',
-                'a' => 'No, and it is worth being plain about it. An online event carries one link field: mark the event as online and paste the URL to wherever you are streaming. The one place that field gets filled in for you is Outlook, where turning on Teams meetings writes the join link into it for events that have no venue.',
+                'a' => 'No, and it is worth being plain about it. An online event carries one link field: mark the event as online and paste the URL to wherever you are streaming.'.($outlookLive ? ' The one place that field gets filled in for you is Outlook, where turning on Teams meetings writes the join link into it for events that have no venue.' : ''),
             ],
             [
                 'q' => 'What happens if I delete an event in my calendar?',
                 'a' => 'You decide, per schedule. An event deleted in the calendar you import from can be kept in Event Schedule, marked as cancelled so it is hidden but reversible, or deleted outright. Events that have ticket sales or a running ad boost are hidden instead of deleted, so a stray drag in a calendar app cannot take a sold show with it.',
             ],
+            [
+                'q' => 'Which Event Schedule integration should I set up first?',
+                'a' => 'The one at the start of your events. If they already live in your '.($outlookLive ? 'Google, Outlook or CalDAV' : 'Google or CalDAV').' calendar, connect that calendar first: it is free and it fills your schedule. If you sell tickets, connect Stripe (or PayPal, Payfast or Razorpay where those fit your currency) next, because that is where the money lands, and a priced ticket needs Pro. On eventschedule.com, fill in Email Settings after that, so confirmations come from your own address and you can email buyers about a change. Webhooks and the API come last, once you know what your own systems need to hear.',
+            ],
+            [
+                'q' => 'Can Event Schedule import events from another website automatically?',
+                'a' => 'Yes, in three ways. A Feed reads a calendar address (.ics or webcal), an RSS, Atom or JSON feed, or a page that lists events, about once an hour, and publishes new events or holds them as drafts for you; it is Enterprise on eventschedule.com and included when you selfhost. Import from a link reads the same kinds of address once, when you ask, on every plan, and publishes what it adds. A curator schedule can also name talent and venue schedules on Event Schedule as event sources, and everything they publish is listed on it automatically, free.',
+            ],
+            [
+                'q' => 'Can people subscribe to my schedule in their own calendar app?',
+                'a' => 'Yes, on every plan and with no account needed. Each schedule has an iCal feed address that Google Calendar, Apple Calendar and Outlook can subscribe to, and an RSS feed for readers. A subscribed calendar re-reads the address on its own, so a date you move reaches it without anybody doing anything. Recurring events are listed date by date for the next 90 days. Visitors are offered the iCal feed in the Add to Calendar menu of an event that is not selling tickets or taking registrations, and you can copy both addresses from Edit Schedule, Integrations, Calendar text and feeds.',
+            ],
+        ];
+
+        // Where to start, by what the reader runs. Every line is checked against the user guide
+        // and docs/FEATURES.md: calendar reads arrive as drafts (creating-schedules#publish-on-arrival),
+        // event sources are a curator's (FEATURES "Curator event sources"), Feeds are Enterprise on
+        // hosted (EventFeed::allowedFor()), Invoice Ninja is the one gateway appointments cannot use
+        // (InvoiceNinjaGateway::supportsAppointments()), webhooks and keys live on the ACCOUNT.
+        $startCards = [
+            [
+                'You perform', 'A band, a comedian, a DJ, a speaker',
+                [
+                    ['First', ($outlookLive ? 'Google Calendar or Outlook' : 'Google Calendar').', both ways. The gigs already in your phone come in as drafts you publish, or straight onto your page once you turn on Publish new events automatically. Use a calendar that holds gigs only.'],
+                    ['Then', 'Give fans your schedule\'s iCal feed address, so their own calendar follows yours and a moved date updates itself.'],
+                    ['Plan', 'Free. Selling your own shows at a price, and the payment ports that take the money, come with Pro.'],
+                ],
+                '/google-calendar', 'Google Calendar sync',
+            ],
+            [
+                'You run a venue', 'Selling tickets to your own nights',
+                [
+                    ['First', 'Stripe, or PayPal. The charge lands in your own account. The payment ports come with Pro, which is what lets a ticket carry a price.'],
+                    ['Then', 'Calendar sync out to the calendar your staff already read, so the bar and the door see the same nights the public does.'],
+                    ['Hosted', 'On eventschedule.com, fill in Email Settings, so confirmations come from your own address and you can email buyers when a night moves.'],
+                ],
+                '/stripe', 'Selling tickets with Stripe',
+            ],
+            [
+                'You curate', 'A community or city calendar',
+                [
+                    ['First', 'Event sources: name the talent and venue schedules you list, and everything they publish lands on yours automatically. Free.'],
+                    ['Then', 'Import from a link for a calendar file or an events page you only need once. Free, and what you tick is published.'],
+                    ['Later', 'Feeds, for somebody else\'s list read about once an hour, with new events published or held as drafts. Enterprise on eventschedule.com.'],
+                ],
+                '/for-curators', 'Event Schedule for curators',
+            ],
+            [
+                'You teach by appointment', 'Lessons, coaching, consultations',
+                [
+                    ['First', 'Calendar sync in from the calendar you live in. Events synced in close the booking slots they overlap; an entry your calendar marks private is not pulled in, so it closes nothing.'],
+                    ['Then', 'A payment port for paid sessions, any of them except Invoice Ninja, which comes with Pro. One free appointment type is on Free; a price on a type is Pro.'],
+                    ['Plan', 'Free to start, Pro for paid or extra types.'],
+                ],
+                '/features/appointments', 'Appointment booking',
+            ],
+            [
+                'You bill or sell abroad', 'Invoices, rand or rupees',
+                [
+                    ['First', 'Invoice Ninja when the buyer is an organisation that needs an invoice rather than a receipt.'],
+                    ['Or', 'Payfast for events priced in South African rand, Razorpay for Indian rupees, with UPI, cards, netbanking and wallets.'],
+                    ['Plan', 'Pro. The payment ports come with paid ticket selling.'],
+                ],
+                '/invoiceninja', 'Invoice Ninja invoicing',
+            ],
+            [
+                'You run your own systems', 'A CRM, a spreadsheet, a members database',
+                [
+                    ['First', 'Webhooks, so your own code hears about every sale, refund, scan and change as it happens, signed so you can prove it came from us.'],
+                    ['Then', 'The REST API, to create events from your system and read sales back to reconcile anything a webhook missed.'],
+                    ['Plan', 'Pro. Both belong to your account, under Settings, Developers, not to one schedule.'],
+                ],
+                '/docs/developer/webhooks', 'Webhook reference',
+            ],
+        ];
+
+        // One ticketed night through every wire, in the order things happen. Webhook names are
+        // Webhook::EVENT_TYPES; a draft sends nothing (docs/developer/webhooks#drafts); change emails
+        // to buyers need Email Settings on hosted (docs/creating-events#notify-attendees).
+        $nightSteps = [
+            ['Planning', 'You make the event here, or it arrives: from your own calendar by sync, from another site by a feed, from Eventbrite by import. A draft goes nowhere. Publishing it writes it to every calendar you connected and sends event.created to your webhooks.'],
+            ['On sale', 'A buyer pays on Stripe\'s page or approves on PayPal, and the money settles in your account. Your endpoint hears sale.created when the order is made and sale.paid when the payment is confirmed.'],
+            ['A minute later', 'The buyer\'s confirmation carries the QR code'.($walletLive ? ', with '.($gWalletLive && $aWalletLive ? 'Add to Google Wallet and Add to Apple Wallet' : 'Add to '.$walletTitle).' beneath it' : '').'. On eventschedule.com it comes from your own address once Email Settings are filled in.'],
+            ['A change', 'Move the start time and save. Every connected calendar is updated and your endpoint hears event.updated. Saving asks whether to notify attendees; on eventschedule.com, emailing buyers and registrants needs the schedule\'s Email Settings.'],
+            ['A refund', 'Refund from the Sales page and the money goes back through Stripe, PayPal or Razorpay before the sale changes, and your endpoint hears sale.refunded. For any other method you return the money yourself and mark it refunded.'],
+            ['At the door', 'Any phone with a browser scans the QR code'.($walletLive ? ', wallet pass or not,' : '').' and each admitted ticket sends ticket.scanned, so a live count can appear somewhere of your own.'],
+            ['The morning after', 'Feedback requests go out if you switched them on (Pro, and on eventschedule.com with Email Settings filled in), and each answer arrives as feedback.submitted. The sales CSV export (Pro) carries the answers to your checkout questions to whoever does the books.'],
+        ];
+
+        $wireMistakes = [
+            ['Every event twice', 'A calendar that is synced with your schedule and also subscribed to its iCal feed shows each event twice, one entry from each. Give your own calendar the sync and everybody else the feed.'],
+            ['Publishing your whole diary', 'Events read from a calendar arrive as drafts, and that is a safety catch. Turn on Publish new events automatically only for a calendar that holds public events alone, or every entry that is not marked private becomes a public event.'],
+            ['A webhook that works before it answers', 'Event Schedule waits five seconds for a 2xx. A handler that writes to a spreadsheet first can time out, be retried, and record one sale twice. Answer at once, queue the work, and key each delivery on data.id together with the event type.'],
+            ['Building a priced event on Free', 'It is easy to set up the whole event and only then learn that a ticket with a price, and the payment ports that collect it, come with Pro. If the event is free, it needs neither: free registration and zero-price tickets need no payment port at all.'],
         ];
 
         $dotSections = [
             ['top', 'The panel'],
             ['direction', 'Direction'],
             ['register', 'The register'],
+            ['start', 'Where to start'],
+            ['night', 'One night, every wire'],
             ['calendars', 'Calendar ports'],
             ['money', 'Money ports'],
             ['block', 'Terminal block'],
             ['edges', 'Operator ports'],
+            ['partners', 'Partner apps'],
             ['open', 'Not wired'],
             ['faq', 'Questions'],
             ['claim', 'Wire it up'],
@@ -776,14 +901,14 @@
                             <svg aria-hidden="true" class="es-wire-accent h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="1.8">
                                 <path stroke-linecap="round" stroke-linejoin="round" d="M13.828 10.172a4 4 0 00-5.656 0l-4 4a4 4 0 105.656 5.656l1.102-1.101m-.758-4.899a4 4 0 005.656 0l4-4a4 4 0 00-5.656-5.656l-1.1 1.1" />
                             </svg>
-                            <span class="es-wire-muted text-sm font-medium tracking-wide">Sixteen Event Schedule integrations</span>
+                            <span class="es-wire-muted text-sm font-medium tracking-wide">{{ ucfirst($portWord) }} Event Schedule integrations</span>
                         </x-marketing.hero-eyebrow>
                         <span class="es-mask"><span class="es-mask-line">No middle layer.</span></span>
                         <span class="es-mask es-mask-2"><span class="es-mask-line">Just <span class="es-wire-accent">wires.</span></span></span>
                     </h1>
 
                     <p class="es-fade-up es-d-2 es-wire-muted mb-8 max-w-xl text-lg sm:text-xl">
-                        Every Event Schedule integration talks straight to the services you already run: your calendar or your own CalDAV server, your own Stripe or PayPal account, your own endpoint. Sixteen ports, each labelled with which way it runs, what makes data move, and which plan it is on.
+                        Every Event Schedule integration talks straight to the services you already run: your calendar or your own CalDAV server, your own Stripe or PayPal account, your own endpoint. {{ ucfirst($portWord) }} ports, each labelled with which way it runs, what makes data move, and which plan it is on.
                     </p>
 
                     <div class="es-fade-up es-d-3 flex flex-col items-start gap-4 sm:flex-row sm:flex-wrap">
@@ -810,7 +935,7 @@
 
                         <div class="mb-2 flex items-baseline justify-between gap-3 px-1">
                             <p class="es-wire-tag">Integration panel</p>
-                            <p class="es-wire-dir">16 ports</p>
+                            <p class="es-wire-dir">{{ $portCount }} ports</p>
                         </div>
                         <div class="es-wire-bar mb-1.5" aria-hidden="true"></div>
 
@@ -843,7 +968,7 @@
                     <div class="es-marquee" data-marquee="1">
                         <div class="es-marquee-track">
                             @for ($chipCopy = 0; $chipCopy < 2; $chipCopy++)
-                                @foreach (['Google Calendar', 'Outlook', 'Microsoft 365', 'Nextcloud', 'Radicale', 'Fastmail', 'Baikal', 'Stripe', 'PayPal', 'Payfast', 'Razorpay', 'Invoice Ninja', 'Google Wallet', 'Eventbrite', 'Facebook', 'Instagram', 'WhatsApp', 'Your endpoint'] as $chip)
+                                @foreach (array_filter(['Google Calendar', $outlookLive ? 'Outlook' : null, $outlookLive ? 'Microsoft 365' : null, 'Nextcloud', 'Radicale', 'Fastmail', 'Baikal', 'Stripe', 'PayPal', 'Payfast', 'Razorpay', 'Invoice Ninja', $gWalletLive ? 'Google Wallet' : null, $aWalletLive ? 'Apple Wallet' : null, 'Eventbrite', 'Facebook', 'Instagram', 'WhatsApp', 'Your endpoint']) as $chip)
                                     <span @if ($chipCopy === 1) aria-hidden="true" @endif class="es-wire-chip">{{ $chip }}</span>
                                 @endforeach
                             @endfor
@@ -890,7 +1015,7 @@
                             <span class="es-wire-dir">in</span>
                         </div>
                         <h3 class="mb-2 text-lg font-bold es-wire-onband">Data arrives here</h3>
-                        <p class="text-sm es-wire-onband-muted">Google and Microsoft tell us when something changed; Stripe, Invoice Ninja, Payfast and Twilio report the same way. Where a service cannot tell us, we ask: CalDAV on a timer, Eventbrite when you press import. PayPal and Razorpay are asked on purpose, because the payment is confirmed by our own call when the buyer comes back. The REST API is inbound too, with your code doing the calling.</p>
+                        <p class="text-sm es-wire-onband-muted">{{ $outlookLive ? 'Google and Microsoft tell us' : 'Google tells us' }} when something changed; Stripe, Invoice Ninja, Payfast and Twilio report the same way. Where a service cannot tell us, we ask: CalDAV on a timer, Eventbrite when you press import. PayPal and Razorpay are asked on purpose, because the payment is confirmed by our own call when the buyer comes back. The REST API is inbound too, with your code doing the calling.</p>
                     </div>
                     <div class="es-wire-card p-6" data-reveal="panel">
                         <div class="mb-4 flex items-center gap-3">
@@ -918,7 +1043,7 @@
                 <div class="es-wire-corner mb-6" data-reveal aria-hidden="true"><span>03</span></div>
                 <p class="es-wire-tag mb-4" data-reveal style="--reveal-delay: 0.05s;">The register</p>
                 <h2 class="es-balance es-wire-ink text-3xl font-black tracking-tight md:text-5xl" data-reveal style="--reveal-delay: 0.1s;">
-                    Sixteen ports, <span class="es-wire-accent">written down.</span>
+                    {{ ucfirst($portWord) }} ports, <span class="es-wire-accent">written down.</span>
                 </h2>
                 <p class="es-wire-muted mt-5 text-lg" data-reveal style="--reveal-delay: 0.15s;">
                     Every one of them is on this page in full: the direction it runs, what makes data move along it, and the plan it is on. No marketplace, no logos we merely admire, and the gaps people hit are spelled out further down rather than left for you to find.
@@ -928,7 +1053,7 @@
             <div class="es-wire-card p-5 sm:p-7" data-reveal="panel">
                 <div class="es-wire-scroll">
                     <table class="es-wire-reg" role="table">
-                        <caption class="sr-only">The sixteen Event Schedule integration ports, with the direction each one runs, what makes data move along it, and the plan it is on</caption>
+                        <caption class="sr-only">The {{ $portWord }} Event Schedule integration ports, with the direction each one runs, what makes data move along it, and the plan it is on</caption>
                         <thead role="rowgroup">
                             <tr class="es-wire-tag" role="row">
                                 <th scope="col" role="columnheader" class="font-bold">Port</th>
@@ -957,27 +1082,169 @@
     </section>
 
     <!-- ============================================================ -->
-    <!-- 4. Calendar ports                                            -->
+    <!-- 4. Where to start: which port first, by what you run          -->
+    <!-- ============================================================ -->
+    <section id="start" class="scroll-mt-24 es-wire-rule border-t py-20 lg:py-28">
+        <div class="mx-auto max-w-7xl px-4 sm:px-6 lg:px-8">
+            <div class="mx-auto mb-14 max-w-3xl text-center">
+                <div class="es-wire-corner mb-6" data-reveal aria-hidden="true"><span>04</span></div>
+                <p class="es-wire-tag mb-4" data-reveal style="--reveal-delay: 0.05s;">Where to start</p>
+                <h2 class="es-balance es-wire-ink text-3xl font-black tracking-tight md:text-5xl" data-reveal style="--reveal-delay: 0.1s;">
+                    You will not need all {{ $portWord }}. <span class="es-wire-accent">Start where your events start.</span>
+                </h2>
+                <p class="es-wire-muted mt-5 text-lg" data-reveal style="--reveal-delay: 0.15s;">
+                    The order matters more than the count. Wire the place your events already come from first, then the place the money goes, then whatever has to hear about it. Here is that order for six kinds of organizer.
+                </p>
+            </div>
+
+            <div class="grid grid-cols-1 gap-4 md:grid-cols-2 lg:grid-cols-3" data-reveal-group="90">
+                @foreach ($startCards as [$startWho, $startSub, $startRows, $startPath, $startLink])
+                    <div class="es-wire-card flex flex-col p-7" data-reveal="panel">
+                        <p class="es-wire-tag mb-3">{{ $startSub }}</p>
+                        <h3 class="es-wire-ink mb-4 text-xl font-bold">{{ $startWho }}</h3>
+                        <div class="es-wire-spec mb-5">
+                            @foreach ($startRows as [$startKey, $startText])
+                                <span class="es-wire-spec-k">{{ $startKey }}</span>
+                                <span class="es-wire-spec-v es-wire-muted">{{ $startText }}</span>
+                            @endforeach
+                        </div>
+                        <a href="{{ marketing_url($startPath) }}" class="es-wire-link mt-auto inline-flex items-center gap-1 text-sm font-semibold hover:underline">
+                            {{ $startLink }}
+                            <svg aria-hidden="true" class="h-4 w-4 rtl:rotate-180" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M13 7l5 5m0 0l-5 5m5-5H6" /></svg>
+                        </a>
+                    </div>
+                @endforeach
+            </div>
+
+            <div class="mx-auto mt-16 mb-8 max-w-3xl text-center">
+                <p class="es-wire-tag mb-4" data-reveal>What each plan wires</p>
+                <h3 class="es-balance es-wire-ink text-2xl font-black tracking-tight md:text-3xl" data-reveal style="--reveal-delay: 0.05s;">
+                    The calendars are free. <span class="es-wire-accent">The money and the code are Pro.</span>
+                </h3>
+            </div>
+
+            <div class="grid grid-cols-1 gap-4 md:grid-cols-3" data-reveal-group="100">
+                <div class="es-wire-card flex flex-col p-7" data-reveal="panel">
+                    <div class="mb-4 flex flex-wrap items-center gap-2">
+                        <span class="es-wire-plan">Free</span>
+                        <span class="es-wire-dir">{{ plan_price(0) }}</span>
+                    </div>
+                    <ul class="es-wire-muted space-y-2 text-sm">
+                        <li class="es-wire-li">Two-way sync with {{ $outlookLive ? 'Google Calendar, Outlook' : 'Google Calendar' }} and any CalDAV server</li>
+                        <li class="es-wire-li">Your schedule's iCal and RSS feeds, for anybody to subscribe to</li>
+                        <li class="es-wire-li">Import from a link or from Google Calendar, and a curator's event sources</li>
+                        <li class="es-wire-li">Email Settings on eventschedule.com, to send from your own address</li>
+                        <li class="es-wire-li">Free registration and zero-price tickets, which need no payment port</li>
+                        @if ($walletLive || $stayLive)
+                            <li class="es-wire-li">{{ ucfirst(implode(' and ', array_filter([$walletLive ? 'wallet passes' : null, $stayLive ? 'the accommodation map' : null]))) }}, where the site operator has set {{ $walletLive && $stayLive ? 'them' : 'it' }} up</li>
+                        @endif
+                    </ul>
+                </div>
+                <div class="es-wire-card flex flex-col p-7" data-reveal="panel">
+                    <div class="mb-4 flex flex-wrap items-center gap-2">
+                        <span class="es-wire-plan es-wire-plan-pro">Pro</span>
+                        <span class="es-wire-dir">{{ plan_price($proMonthly) }} / month</span>
+                    </div>
+                    <ul class="es-wire-muted space-y-2 text-sm">
+                        <li class="es-wire-li">A price on a ticket through Stripe, PayPal, Payfast, Razorpay or Invoice Ninja, or on an appointment through any of them but Invoice Ninja</li>
+                        <li class="es-wire-li">Refunds sent back through Stripe, PayPal and Razorpay</li>
+                        <li class="es-wire-li">Webhooks, the REST API and the Appointment API</li>
+                        <li class="es-wire-li">Eventbrite import{{ $pushLive ? ' and web push' : '' }}</li>
+                        <li class="es-wire-li">Boosting an event on Facebook and Instagram</li>
+                    </ul>
+                </div>
+                <div class="es-wire-card flex flex-col p-7" data-reveal="panel">
+                    <div class="mb-4 flex flex-wrap items-center gap-2">
+                        <span class="es-wire-plan es-wire-plan-pro">Ent</span>
+                        <span class="es-wire-dir">{{ plan_price($entMonthly) }} / month</span>
+                    </div>
+                    <ul class="es-wire-muted space-y-2 text-sm">
+                        <li class="es-wire-li">Everything in Pro</li>
+                        <li class="es-wire-li">Feeds: another site's calendar, RSS, Atom or JSON feed, or events page, read about once an hour</li>
+                        <li class="es-wire-li">Creating events by sending a WhatsApp message or a photo of a flyer</li>
+                    </ul>
+                    <p class="es-wire-muted mt-auto pt-5 text-sm">Selfhosted, every line on all three cards is on from the first boot, and the operator keys are yours to add.</p>
+                </div>
+            </div>
+        </div>
+    </section>
+
+    <!-- ============================================================ -->
+    <!-- 5. One ticketed night, through every wire (fixed-dark band)   -->
+    <!-- ============================================================ -->
+    <section id="night" class="relative scroll-mt-24 px-2 py-14 sm:px-4 lg:py-20">
+        <div class="es-wire-band noise relative overflow-hidden rounded-[2.5rem] border border-white/[0.06] px-4 py-16 sm:px-6 lg:px-8 lg:py-20 2xl:mx-auto 2xl:max-w-[100rem]">
+            <div class="pointer-events-none absolute inset-0" aria-hidden="true">
+                <div class="grid-overlay absolute inset-0 opacity-20"></div>
+            </div>
+
+            <div class="relative z-10 mx-auto max-w-5xl">
+                <div class="mx-auto mb-12 max-w-3xl text-center">
+                    <div class="es-wire-corner mb-6" data-reveal aria-hidden="true"><span>05</span></div>
+                    <p class="es-wire-tag mb-4" data-reveal style="--reveal-delay: 0.05s;">How the wires fit together</p>
+                    <h2 class="es-balance text-3xl font-black tracking-tight text-white md:text-5xl" data-reveal style="--reveal-delay: 0.1s;">
+                        One ticketed night, <span class="es-wire-lit">through every wire.</span>
+                    </h2>
+                    <p class="mt-5 text-lg es-wire-onband-muted" data-reveal style="--reveal-delay: 0.15s;">
+                        Integrations are easier to choose when you can see what each one carries on an ordinary night. Here is one show, from the day it is planned to the morning after, with the wire that moves at each step and the webhook your own code would hear.
+                    </p>
+                </div>
+
+                <div class="es-wire-card p-6 sm:p-8" data-reveal="panel">
+                    <div class="es-wire-spec">
+                        @foreach ($nightSteps as [$nightWhen, $nightWhat])
+                            <span class="es-wire-spec-k">{{ $nightWhen }}</span>
+                            <span class="es-wire-spec-v es-wire-onband-muted">{{ $nightWhat }}</span>
+                        @endforeach
+                    </div>
+                </div>
+
+                <div class="mx-auto mt-14 mb-8 max-w-3xl text-center">
+                    <p class="es-wire-tag mb-4" data-reveal>Four wiring mistakes</p>
+                    <h3 class="es-balance text-2xl font-black tracking-tight text-white md:text-3xl" data-reveal style="--reveal-delay: 0.05s;">
+                        What goes wrong when the wires <span class="es-wire-lit">meet.</span>
+                    </h3>
+                </div>
+
+                <div class="grid gap-4 md:grid-cols-2" data-reveal-group="100">
+                    @foreach ($wireMistakes as [$mistakeTitle, $mistakeText])
+                        <div class="es-wire-card p-6" data-reveal="panel">
+                            <h4 class="mb-2 text-lg font-bold es-wire-onband">{{ $mistakeTitle }}</h4>
+                            <p class="text-sm es-wire-onband-muted">{{ $mistakeText }}</p>
+                        </div>
+                    @endforeach
+                </div>
+
+                <p class="mx-auto mt-10 max-w-2xl text-center es-wire-onband-muted" data-reveal>
+                    The <a href="{{ route('marketing.docs.developer.webhooks') }}#best-practices" class="es-wire-lit font-semibold hover:underline">webhook best practices</a> and the <a href="{{ route('marketing.docs.creating_schedules') }}#integrations" class="es-wire-lit font-semibold hover:underline">Integrations tab in the user guide</a> go further into each of these.
+                </p>
+            </div>
+        </div>
+    </section>
+
+    <!-- ============================================================ -->
+    <!-- 6. Calendar ports                                            -->
     <!-- ============================================================ -->
     <section id="calendars" class="scroll-mt-24 es-wire-rule border-y py-20 lg:py-28">
         <div class="mx-auto max-w-7xl px-4 sm:px-6 lg:px-8">
             <div class="mx-auto mb-14 max-w-3xl text-center">
-                <div class="es-wire-corner mb-6" data-reveal aria-hidden="true"><span>04</span></div>
+                <div class="es-wire-corner mb-6" data-reveal aria-hidden="true"><span>06</span></div>
                 <p class="es-wire-tag mb-4" data-reveal style="--reveal-delay: 0.05s;">Calendar ports</p>
                 <h2 class="es-balance es-wire-ink text-3xl font-black tracking-tight md:text-5xl" data-reveal style="--reveal-delay: 0.1s;">
                     Your calendar, or <span class="es-wire-accent">your own server.</span>
                 </h2>
                 <p class="es-wire-muted mt-5 text-lg" data-reveal style="--reveal-delay: 0.15s;">
-                    Three ports, all free on every plan, all two-way, and all with the direction under your control per schedule.
+                    {{ $outlookLive ? 'Three ports' : 'Two ports' }}, all free on every plan, all two-way, and all with the direction under your control per schedule.
                 </p>
             </div>
 
-            <div class="grid grid-cols-1 gap-4 md:grid-cols-3" data-reveal-group="100">
+            {{-- Two columns when the Outlook card is off, so the row still closes. --}}
+            <div class="grid grid-cols-1 gap-4 {{ $outlookLive ? 'md:grid-cols-3' : 'md:grid-cols-2' }}" data-reveal-group="100">
                 <a href="{{ marketing_url('/google-calendar') }}" class="es-bento group relative block" data-reveal="panel" data-tilt="4">
                     <div class="es-tilt-inner es-wire-card relative flex h-full flex-col overflow-hidden p-7">
                         <div class="relative z-10 flex h-full flex-col">
                             <div class="mb-4 flex flex-wrap items-center gap-2">
-                                <span class="es-wire-port" aria-hidden="true">01</span>
+                                <span class="es-wire-port" aria-hidden="true">{{ $portNo['google'] }}</span>
                                 <h3 class="es-wire-ink text-xl font-bold">Google Calendar</h3>
                                 <span class="es-wire-plan">Free</span>
                             </div>
@@ -997,11 +1264,12 @@
                     </div>
                 </a>
 
+                @if ($outlookLive)
                 <a href="{{ marketing_url('/outlook-calendar') }}" class="es-bento group relative block" data-reveal="panel" data-tilt="4">
                     <div class="es-tilt-inner es-wire-card relative flex h-full flex-col overflow-hidden p-7">
                         <div class="relative z-10 flex h-full flex-col">
                             <div class="mb-4 flex flex-wrap items-center gap-2">
-                                <span class="es-wire-port" aria-hidden="true">02</span>
+                                <span class="es-wire-port" aria-hidden="true">{{ $portNo['outlook'] }}</span>
                                 <h3 class="es-wire-ink text-xl font-bold">Outlook and Microsoft 365</h3>
                                 <span class="es-wire-plan">Free</span>
                             </div>
@@ -1020,12 +1288,13 @@
                         <div class="es-ring-glow" aria-hidden="true"></div>
                     </div>
                 </a>
+                @endif
 
                 <a href="{{ marketing_url('/caldav') }}" class="es-bento group relative block" data-reveal="panel" data-tilt="4">
                     <div class="es-tilt-inner es-wire-card relative flex h-full flex-col overflow-hidden p-7">
                         <div class="relative z-10 flex h-full flex-col">
                             <div class="mb-4 flex flex-wrap items-center gap-2">
-                                <span class="es-wire-port" aria-hidden="true">03</span>
+                                <span class="es-wire-port" aria-hidden="true">{{ $portNo['caldav'] }}</span>
                                 <h3 class="es-wire-ink text-xl font-bold">CalDAV</h3>
                                 <span class="es-wire-plan">Free</span>
                             </div>
@@ -1071,12 +1340,12 @@
     </section>
 
     <!-- ============================================================ -->
-    <!-- 5. Money ports                                               -->
+    <!-- 7. Money ports                                               -->
     <!-- ============================================================ -->
     <section id="money" class="scroll-mt-24 py-20 lg:py-28">
         <div class="mx-auto max-w-7xl px-4 sm:px-6 lg:px-8">
             <div class="mx-auto mb-14 max-w-3xl text-center">
-                <div class="es-wire-corner mb-6" data-reveal aria-hidden="true"><span>05</span></div>
+                <div class="es-wire-corner mb-6" data-reveal aria-hidden="true"><span>07</span></div>
                 <p class="es-wire-tag mb-4" data-reveal style="--reveal-delay: 0.05s;">Money ports</p>
                 <h2 class="es-balance es-wire-ink text-3xl font-black tracking-tight md:text-5xl" data-reveal style="--reveal-delay: 0.1s;">
                     The money never <span class="es-wire-accent">lands here.</span>
@@ -1089,9 +1358,9 @@
             <div class="grid grid-cols-1 gap-4 md:grid-cols-3" data-reveal-group="100">
                 <div class="es-wire-card flex flex-col p-7" data-reveal="panel">
                     <div class="mb-4 flex flex-wrap items-center gap-2">
-                        <span class="es-wire-port" aria-hidden="true">04</span>
+                        <span class="es-wire-port" aria-hidden="true">{{ $portNo['stripe'] }}</span>
                         <h3 class="es-wire-ink text-xl font-bold">Stripe</h3>
-                        <span class="es-wire-plan">Free</span>
+                        <span class="es-wire-plan es-wire-plan-pro">Pro</span>
                     </div>
                     <p class="es-wire-muted mb-5 text-sm">Checkout runs on Stripe's own page. On the hosted platform the charge is created on your connected account, so payouts arrive on your Stripe schedule, and the confirmation returns to us as a signed webhook.</p>
                     <div class="es-wire-spec mb-5">
@@ -1112,9 +1381,9 @@
 
                 <div class="es-wire-card flex flex-col p-7" data-reveal="panel">
                     <div class="mb-4 flex flex-wrap items-center gap-2">
-                        <span class="es-wire-port" aria-hidden="true">05</span>
+                        <span class="es-wire-port" aria-hidden="true">{{ $portNo['invoiceninja'] }}</span>
                         <h3 class="es-wire-ink text-xl font-bold">Invoice Ninja</h3>
-                        <span class="es-wire-plan">Free</span>
+                        <span class="es-wire-plan es-wire-plan-pro">Pro</span>
                     </div>
                     <p class="es-wire-muted mb-5 text-sm">Point Event Schedule at your Invoice Ninja install with an API token and URL. Useful when the buyer is an organisation that needs a document rather than a receipt.</p>
                     <div class="es-wire-spec mb-5">
@@ -1154,15 +1423,15 @@
                     {{-- Separate chips, not one reading "06 · 07 · 08": .es-wire-port is a fixed 1.45rem
                          circle with no overflow, sized for the two characters every other row
                          uses, so a seven-glyph label spills out of it and into this heading. --}}
-                    <span class="es-wire-port" aria-hidden="true">06</span>
-                    <span class="es-wire-port" aria-hidden="true">07</span>
-                    <span class="es-wire-port" aria-hidden="true">08</span>
+                    <span class="es-wire-port" aria-hidden="true">{{ $portNo['paypal'] }}</span>
+                    <span class="es-wire-port" aria-hidden="true">{{ $portNo['payfast'] }}</span>
+                    <span class="es-wire-port" aria-hidden="true">{{ $portNo['razorpay'] }}</span>
                     <h3 class="es-wire-ink text-lg font-bold">PayPal, Payfast and Razorpay</h3>
                     <span class="es-wire-dir">both</span>
-                    <span class="es-wire-plan">Free</span>
+                    <span class="es-wire-plan es-wire-plan-pro">Pro</span>
                 </div>
                 <p class="es-wire-muted mb-5 text-sm">
-                    Three more ports out to a buyer and back again, open on every plan like the rest of them. All three let a selfhost operator supply one account for the whole install, which an owner who connects their own keeps overriding.
+                    Three more ports out to a buyer and back again, which come with Pro like the rest of the money ports. All three let a selfhost operator supply one account for the whole install, which an owner who connects their own keeps overriding.
                 </p>
                 <div class="es-wire-spec mb-5">
                     <span class="es-wire-spec-k">PayPal</span>
@@ -1180,7 +1449,7 @@
 
             <div id="eventbrite" class="es-wire-card mx-auto mt-6 max-w-4xl scroll-mt-24 p-7" data-reveal="panel">
                 <div class="mb-4 flex flex-wrap items-center gap-2">
-                    <span class="es-wire-port" aria-hidden="true">11</span>
+                    <span class="es-wire-port" aria-hidden="true">{{ $portNo['eventbrite'] }}</span>
                     <h3 class="es-wire-ink text-lg font-bold">If the money currently lands at Eventbrite</h3>
                     <span class="es-wire-dir">in</span>
                     <span class="es-wire-plan es-wire-plan-pro">Pro</span>
@@ -1205,7 +1474,7 @@
     </section>
 
     <!-- ============================================================ -->
-    <!-- 6. The terminal block (fixed-dark band)                      -->
+    <!-- 8. The terminal block (fixed-dark band)                      -->
     <!-- ============================================================ -->
     <section id="block" class="relative scroll-mt-24 px-2 py-14 sm:px-4 lg:py-20">
         <div class="es-wire-band noise relative overflow-hidden rounded-[2.5rem] border border-white/[0.06] px-4 py-16 sm:px-6 lg:px-8 lg:py-20 2xl:mx-auto 2xl:max-w-[100rem]">
@@ -1216,7 +1485,7 @@
 
             <div class="relative z-10 mx-auto max-w-5xl">
                 <div class="mx-auto mb-12 max-w-3xl text-center">
-                    <div class="es-wire-corner mb-6" data-reveal aria-hidden="true"><span>06</span></div>
+                    <div class="es-wire-corner mb-6" data-reveal aria-hidden="true"><span>08</span></div>
                     <p class="es-wire-tag mb-4" data-reveal style="--reveal-delay: 0.05s;">The terminal block</p>
                     <h2 class="es-balance text-3xl font-black tracking-tight text-white md:text-5xl" data-reveal style="--reveal-delay: 0.1s;">
                         Two spare terminals, <span class="es-wire-lit">for wires we did not build.</span>
@@ -1229,7 +1498,7 @@
                 <div class="grid gap-6 lg:grid-cols-2" data-reveal-group="110">
                     <div class="es-wire-card p-7" data-reveal="panel">
                         <div class="mb-4 flex flex-wrap items-center gap-2">
-                            <span class="es-wire-port" aria-hidden="true">09</span>
+                            <span class="es-wire-port" aria-hidden="true">{{ $portNo['webhooks'] }}</span>
                             <span class="es-wire-dir">out</span>
                             <h3 class="text-xl font-bold es-wire-onband">Webhooks</h3>
                             <span class="es-wire-plan es-wire-plan-pro">Pro</span>
@@ -1258,7 +1527,7 @@
 
                     <div class="es-wire-card p-7" data-reveal="panel">
                         <div class="mb-4 flex flex-wrap items-center gap-2">
-                            <span class="es-wire-port" aria-hidden="true">10</span>
+                            <span class="es-wire-port" aria-hidden="true">{{ $portNo['api'] }}</span>
                             <span class="es-wire-dir">in</span>
                             <h3 class="text-xl font-bold es-wire-onband">REST API</h3>
                             <span class="es-wire-plan es-wire-plan-pro">Pro</span>
@@ -1271,7 +1540,7 @@
                         </div>
                         <div class="es-wire-spec">
                             <span class="es-wire-spec-k">Auth</span>
-                            <span class="es-wire-spec-v es-wire-onband-muted">A key in an <span class="es-wire-mono">X-API-Key</span> header. Only a hash of it is stored, and you can give the key an expiry date.</span>
+                            <span class="es-wire-spec-v es-wire-onband-muted">A key in an <span class="es-wire-mono">X-API-Key</span> header. Only a hash of it is stored, and it expires a year after it is issued.</span>
                             <span class="es-wire-spec-k">Rate</span>
                             <span class="es-wire-spec-v es-wire-onband-muted">Three hundred reads and thirty writes a minute, counted per account.</span>
                             <span class="es-wire-spec-k">Shape</span>
@@ -1290,25 +1559,28 @@
     </section>
 
     <!-- ============================================================ -->
-    <!-- 7. Operator ports                                            -->
+    <!-- 9. Operator ports                                            -->
     <!-- ============================================================ -->
     <section id="edges" class="scroll-mt-24 es-wire-rule border-t py-20 lg:py-28">
         <div class="mx-auto max-w-6xl px-4 sm:px-6 lg:px-8">
             <div class="mx-auto mb-14 max-w-3xl text-center">
-                <div class="es-wire-corner mb-6" data-reveal aria-hidden="true"><span>07</span></div>
+                <div class="es-wire-corner mb-6" data-reveal aria-hidden="true"><span>09</span></div>
                 <p class="es-wire-tag mb-4" data-reveal style="--reveal-delay: 0.05s;">Operator ports</p>
                 <h2 class="es-balance es-wire-ink text-3xl font-black tracking-tight md:text-5xl" data-reveal style="--reveal-delay: 0.1s;">
-                    Five ports the site operator <span class="es-wire-accent">holds the key to.</span>
+                    {{ $edgeWord }} ports the site operator <span class="es-wire-accent">holds the key to.</span>
                 </h2>
                 <p class="es-wire-muted mt-5 text-lg" data-reveal style="--reveal-delay: 0.15s;">
-                    These five need a credential that belongs to whoever runs the Event Schedule site, not to your schedule. If one of them is missing, that is why.
+                    These {{ strtolower($edgeWord) }} need a credential that belongs to whoever runs the Event Schedule site, not to your schedule. If one of them is missing, that is why.
                 </p>
             </div>
 
+            {{-- Two columns: when exactly one of web push and the accommodation map is set up the
+                 count is odd, and the WhatsApp card spans the last row so no hole is left. --}}
             <div class="grid grid-cols-1 gap-4 md:grid-cols-2" data-reveal-group="100">
+                @if ($pushLive)
                 <div id="web-push" class="es-wire-card flex scroll-mt-24 flex-col p-7" data-reveal="panel">
                     <div class="mb-4 flex flex-wrap items-center gap-2">
-                        <span class="es-wire-port" aria-hidden="true">12</span>
+                        <span class="es-wire-port" aria-hidden="true">{{ $portNo['push'] }}</span>
                         <span class="es-wire-dir">out</span>
                         <h3 class="es-wire-ink text-xl font-bold">Web push</h3>
                         <span class="es-wire-plan es-wire-plan-pro">Pro</span>
@@ -1320,10 +1592,12 @@
                         <li class="es-wire-li">On iPhone and iPad, the site has to be on the home screen first</li>
                     </ul>
                 </div>
+                @endif
 
+                @if ($stayLive)
                 <div id="accommodation-map" class="es-wire-card flex scroll-mt-24 flex-col p-7" data-reveal="panel">
                     <div class="mb-4 flex flex-wrap items-center gap-2">
-                        <span class="es-wire-port" aria-hidden="true">13</span>
+                        <span class="es-wire-port" aria-hidden="true">{{ $portNo['stay22'] }}</span>
                         <span class="es-wire-dir">out</span>
                         <h3 class="es-wire-ink text-xl font-bold">Accommodation map</h3>
                         <span class="es-wire-plan">Free</span>
@@ -1335,10 +1609,11 @@
                         <li class="es-wire-li">Add your own affiliate ID and the commission is yours</li>
                     </ul>
                 </div>
+                @endif
 
                 <div class="es-wire-card flex flex-col p-7" data-reveal="panel">
                     <div class="mb-4 flex flex-wrap items-center gap-2">
-                        <span class="es-wire-port" aria-hidden="true">14</span>
+                        <span class="es-wire-port" aria-hidden="true">{{ $portNo['meta'] }}</span>
                         <span class="es-wire-dir">out</span>
                         <h3 class="es-wire-ink text-xl font-bold">Facebook and Instagram ads</h3>
                         <span class="es-wire-plan es-wire-plan-pro">Pro</span>
@@ -1354,9 +1629,9 @@
                     </p>
                 </div>
 
-                <div class="es-wire-card flex flex-col p-7" data-reveal="panel">
+                <div class="es-wire-card flex flex-col p-7{{ $pushLive xor $stayLive ? ' md:col-span-2' : '' }}" data-reveal="panel">
                     <div class="mb-4 flex flex-wrap items-center gap-2">
-                        <span class="es-wire-port" aria-hidden="true">15</span>
+                        <span class="es-wire-port" aria-hidden="true">{{ $portNo['whatsapp'] }}</span>
                         <span class="es-wire-dir">in</span>
                         <h3 class="es-wire-ink text-xl font-bold">WhatsApp</h3>
                         <span class="es-wire-plan es-wire-plan-pro">Ent</span>
@@ -1373,21 +1648,22 @@
                 </div>
             </div>
 
+            @if ($walletLive)
             <div id="google-wallet" class="es-wire-card mx-auto mt-6 max-w-4xl scroll-mt-24 p-7" data-reveal="panel">
                 <div class="mb-4 flex flex-wrap items-center gap-2">
-                    <span class="es-wire-port" aria-hidden="true">16</span>
+                    <span class="es-wire-port" aria-hidden="true">{{ $portNo['wallet'] }}</span>
                     <span class="es-wire-dir">out</span>
-                    <h3 class="es-wire-ink text-lg font-bold">Google Wallet</h3>
+                    <h3 class="es-wire-ink text-lg font-bold">{{ $walletTitle }}</h3>
                     <span class="es-wire-plan">Free</span>
                 </div>
                 <p class="es-wire-muted mb-5 text-sm">
-                    A convenience for the people holding your tickets. Buyers get an Add to Google Wallet button on their ticket page, their order page and the confirmation email, and the pass carries the same QR code as the ticket, so the free door scanner reads it like any other.
+                    A convenience for the people holding your tickets. Buyers get {{ $walletButtons }} on their ticket page, their order page and the confirmation email, and the pass carries the same QR code as the ticket, so the free door scanner reads it like any other.
                 </p>
                 <div class="es-wire-spec">
                     <span class="es-wire-spec-k">Credential</span>
-                    <span class="es-wire-spec-v es-wire-muted">A Google Wallet issuer account belonging to the site operator. Without one, no button appears and nothing is sent to Google.</span>
+                    <span class="es-wire-spec-v es-wire-muted">@if ($gWalletLive && $aWalletLive)A Google Wallet issuer account for Google's, an Apple Developer Program membership for Apple's, each belonging to the site operator. A wallet that is not set up shows no button and nothing is sent anywhere.@else{{ $gWalletLive ? 'A Google Wallet issuer account' : 'An Apple Developer Program membership' }}, belonging to the site operator.@endif</span>
                     <span class="es-wire-spec-k">Trigger</span>
-                    <span class="es-wire-spec-v es-wire-muted">The buyer tapping the button. The call to Google happens then, never while a page or an email is being rendered.</span>
+                    <span class="es-wire-spec-v es-wire-muted">The buyer tapping the button. The pass is made then, never while a page or an email is being rendered.</span>
                     <span class="es-wire-spec-k">After saving</span>
                     <span class="es-wire-spec-v es-wire-muted">The pass is a snapshot. A cancelled or refunded ticket stays on the phone but is refused at the door, because the scanner checks the live sale.</span>
                 </div>
@@ -1395,11 +1671,12 @@
                     <a href="{{ route('marketing.docs.tickets') }}#wallet-passes" class="es-wire-link font-semibold hover:underline">Wallet passes in the user guide</a>
                 </p>
             </div>
+            @endif
 
             <div class="es-wire-card mx-auto mt-6 max-w-4xl p-7" data-reveal="panel">
                 <p class="es-wire-tag mb-4">Or hold the keys yourself</p>
                 <h3 class="es-wire-ink mb-3 text-lg font-bold">Selfhosting? You are the operator</h3>
-                <p class="es-wire-muted mb-4 text-sm">Run your own install and all five of those keys are yours to add, alongside your own Google, Microsoft and Stripe credentials. Every port in the register is on, because a selfhosted install resolves to the top tier. An install that is not eventschedule.com can also share its public events with the eventschedule.com listings, which an admin switches on and each schedule's team then chooses to join.</p>
+                <p class="es-wire-muted mb-4 text-sm">Run your own install and {{ $pushLive && $stayLive && $walletLive ? 'all five of those keys are' : 'every operator key, web push, the accommodation map and wallet passes included, is' }} yours to add, alongside your own Google, Microsoft and Stripe credentials. Every port in the register is on, because a selfhosted install resolves to the top tier. An install that is not eventschedule.com can also share its public events with the eventschedule.com listings, which an admin switches on and each schedule's team then chooses to join.</p>
                 <p class="es-wire-muted text-sm">
                     <a href="{{ route('marketing.docs.selfhost.installation') }}" class="es-wire-link font-semibold hover:underline">Selfhost installation guide</a>
                 </p>
@@ -1407,13 +1684,68 @@
         </div>
     </section>
 
+    {{-- ============================================================
+         10. Partner apps: built on the wires, not a port of their own.
+         Kept out of the sixteen ports above on purpose: nothing here is
+         a connection Event Schedule makes. The Stackapella connection is
+         being built (stackapella docs/event-schedule-integration-plan.md);
+         when it opens, the "being built" words here and on /stackapella
+         are the ones to change.
+         ============================================================ --}}
+    <section id="partners" class="scroll-mt-24 es-wire-rule border-t py-20 lg:py-28">
+        <div class="mx-auto max-w-5xl px-4 sm:px-6 lg:px-8">
+            <div class="mx-auto mb-14 max-w-3xl text-center">
+                <div class="es-wire-corner mb-6" data-reveal aria-hidden="true"><span>10</span></div>
+                <p class="es-wire-tag mb-4" data-reveal style="--reveal-delay: 0.05s;">Partner apps</p>
+                <h2 class="es-balance es-wire-ink text-3xl font-black tracking-tight md:text-5xl" data-reveal style="--reveal-delay: 0.1s;">
+                    Apps that plug in <span class="es-wire-accent">from the other end.</span>
+                </h2>
+                <p class="es-wire-muted mt-5 text-lg" data-reveal style="--reveal-delay: 0.15s;">
+                    Not a port of ours, so not one of the {{ $portWord }}: an app on the far side of the wire, which reads your schedule and books into it.
+                </p>
+            </div>
+
+            <div class="es-wire-card p-7 sm:p-9" data-reveal="panel">
+                <div class="mb-5 flex flex-wrap items-center gap-3">
+                    @include('marketing.partials.integration-logo', ['name' => 'stackapella', 'class' => 'h-9 w-9 shrink-0'])
+                    <h3 class="es-wire-ink text-xl font-bold">Stackapella</h3>
+                    <span class="es-wire-dir">both</span>
+                    <span class="es-wire-dir">being built</span>
+                </div>
+                <p class="es-wire-muted mb-6 text-sm">
+                    A web app where singers learn their part from a guide voice and record every part of a song in time. Voice teachers and choirs can use the two side by side today: the lessons, rehearsals and concerts here, the practice there. The connection being built puts them together.
+                </p>
+                <div class="es-wire-spec mb-6">
+                    <span class="es-wire-spec-k">Connecting</span>
+                    <span class="es-wire-spec-v es-wire-muted">From Stackapella's settings: sign in to Event Schedule, approve, pick a schedule. A selfhosted install connects with an API key and its address.</span>
+                    <span class="es-wire-spec-k">Lessons</span>
+                    <span class="es-wire-spec-v es-wire-muted">Singers book your appointment types from inside Stackapella, at the times your hours leave open, and a move or a cancel in either app reaches the other.</span>
+                    <span class="es-wire-spec-k">Choirs</span>
+                    <span class="es-wire-spec-v es-wire-muted">A Stackapella choir group shows your next rehearsals and concerts with what to practise, and the songs appear on the event page.</span>
+                    <span class="es-wire-spec-k">Stays here</span>
+                    <span class="es-wire-spec-v es-wire-muted">Your hours, buffers, calendar sync, reminders and public pages. Stackapella reads them and keeps no second copy.</span>
+                </div>
+                <div class="flex flex-wrap gap-x-6 gap-y-2">
+                    <a href="{{ marketing_url('/stackapella') }}" class="es-wire-link inline-flex items-center gap-1 text-sm font-semibold hover:underline">
+                        Event Schedule and Stackapella
+                        <svg aria-hidden="true" class="h-4 w-4 rtl:rotate-180" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M13 7l5 5m0 0l-5 5m5-5H6" /></svg>
+                    </a>
+                    <a href="https://stackapella.com/?ref=eventschedule" target="_blank" rel="noopener" class="es-wire-link inline-flex items-center gap-1 text-sm font-semibold hover:underline">
+                        stackapella.com
+                        <svg aria-hidden="true" class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14" /></svg>
+                    </a>
+                </div>
+            </div>
+        </div>
+    </section>
+
     <!-- ============================================================ -->
-    <!-- 8. Unterminated: what is honestly not here                   -->
+    <!-- 11. Unterminated: what is honestly not here                  -->
     <!-- ============================================================ -->
     <section id="open" class="scroll-mt-24 py-20 lg:py-28">
         <div class="mx-auto max-w-5xl px-4 sm:px-6 lg:px-8">
             <div class="mx-auto mb-14 max-w-3xl text-center">
-                <div class="es-wire-corner mb-6" data-reveal aria-hidden="true"><span>08</span></div>
+                <div class="es-wire-corner mb-6" data-reveal aria-hidden="true"><span>11</span></div>
                 <p class="es-wire-tag mb-4" data-reveal style="--reveal-delay: 0.05s;">Unterminated</p>
                 <h2 class="es-balance es-wire-ink text-3xl font-black tracking-tight md:text-5xl" data-reveal style="--reveal-delay: 0.1s;">
                     Ports that <span class="es-wire-accent">are not there.</span>
@@ -1430,7 +1762,7 @@
                         <h3 class="es-wire-ink text-lg font-bold">No streaming-platform integrations</h3>
                     </div>
                     <p class="es-wire-muted text-sm">
-                        An online event carries one link field. Mark the event as online and paste the URL to wherever you are streaming, whether that is Zoom, Meet, YouTube or something else entirely. Nothing is created for you and nothing is read back. The single exception is Outlook: turn on Teams meetings and the join link is written into that same field for events with no venue.
+                        An online event carries one link field. Mark the event as online and paste the URL to wherever you are streaming, whether that is Zoom, Meet, YouTube or something else entirely. Nothing is created for you and nothing is read back.@if ($outlookLive) The single exception is Outlook: turn on Teams meetings and the join link is written into that same field for events with no venue.@endif
                     </p>
                 </div>
 
@@ -1470,14 +1802,14 @@
     @include('marketing.partials.pricing-nudge')
 
     <!-- ============================================================ -->
-    <!-- 9. FAQ                                                       -->
+    <!-- 12. FAQ                                                      -->
     <!-- ============================================================ -->
     <x-seo.faq-schema :items="$faqs" />
 
     <section id="faq" class="scroll-mt-24 py-20 lg:py-28">
         <div class="mx-auto max-w-3xl px-4 sm:px-6 lg:px-8">
             <div class="mb-12 text-center">
-                <div class="es-wire-corner mb-6" data-reveal aria-hidden="true"><span>09</span></div>
+                <div class="es-wire-corner mb-6" data-reveal aria-hidden="true"><span>12</span></div>
                 <h2 class="es-balance es-wire-ink mb-4 text-3xl font-black tracking-tight md:text-4xl" data-reveal style="--reveal-delay: 0.05s;">
                     Frequently asked questions
                 </h2>
@@ -1504,7 +1836,7 @@
     <x-marketing.related-pages />
 
     <!-- ============================================================ -->
-    <!-- 10. Finale                                                   -->
+    <!-- 13. Finale                                                   -->
     <!-- ============================================================ -->
     <section id="claim" class="relative scroll-mt-24 px-2 py-16 sm:px-4 lg:py-24">
         <div class="mx-auto max-w-6xl">
@@ -1518,7 +1850,7 @@
                         Pick a port. <span class="es-wire-lit">Wire it up.</span>
                     </h2>
                     <p class="mx-auto mb-10 max-w-2xl text-lg es-wire-onband-muted">
-                        Calendar sync, the accommodation map and free registration with no ceiling on it are free forever. {{ plan_price($proMonthly) }} a month buys paid ticket sales and adds webhooks, the API, push and the imports. Nothing is taken from the door on any plan.
+                        Calendar sync{{ $stayLive ? ', the accommodation map' : '' }} and free registration with no ceiling on it are free forever. {{ plan_price($proMonthly) }} a month buys paid ticket sales and adds webhooks, the API{{ $pushLive ? ', push' : '' }} and the imports. Nothing is taken from the door on any plan.
                     </p>
 
                     {{-- The last port on the panel is the reader's own, and it is the only
@@ -1529,7 +1861,7 @@
                         <span class="es-wire-screw" style="bottom: 0.5rem; left: 0.5rem;"></span>
                         <span class="es-wire-screw" style="bottom: 0.5rem; right: 0.5rem;"></span>
                         <div class="mb-1.5 flex items-baseline justify-between gap-3 px-1">
-                            <p class="es-wire-tag">Port 17</p>
+                            <p class="es-wire-tag">Port {{ $portCount + 1 }}</p>
                             <p class="es-wire-dir">open</p>
                         </div>
                         <div class="es-wire-bar mb-1"></div>

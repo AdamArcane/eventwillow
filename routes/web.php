@@ -3,10 +3,12 @@
 use App\Http\Controllers\AdminBlockController;
 use App\Http\Controllers\AdminCalendarPrivacyController;
 use App\Http\Controllers\AdminController;
+use App\Http\Controllers\AdminCopyController;
 use App\Http\Controllers\AdminDashboardController;
 use App\Http\Controllers\AdminFederationController;
 use App\Http\Controllers\AdminFeedController;
 use App\Http\Controllers\AdminLegalController;
+use App\Http\Controllers\AdminMailReviewController;
 use App\Http\Controllers\AdminNewsletterController;
 use App\Http\Controllers\AdminRealtimeController;
 use App\Http\Controllers\AdminTranslationController;
@@ -27,6 +29,7 @@ use App\Http\Controllers\CalDAVController;
 use App\Http\Controllers\CalendarReviewController;
 use App\Http\Controllers\CarpoolController;
 use App\Http\Controllers\CheckInController;
+use App\Http\Controllers\EmbedScriptController;
 use App\Http\Controllers\EventbriteController;
 use App\Http\Controllers\EventController;
 use App\Http\Controllers\EventFeedController;
@@ -54,6 +57,7 @@ use App\Http\Controllers\PaymentGatewayController;
 use App\Http\Controllers\PaymentWebhookController;
 use App\Http\Controllers\ProfileController;
 use App\Http\Controllers\PromoCodeController;
+use App\Http\Controllers\PromoterLinkController;
 use App\Http\Controllers\PromotionController;
 use App\Http\Controllers\PushController;
 use App\Http\Controllers\RealtimeController;
@@ -70,9 +74,13 @@ use App\Http\Controllers\SubscriptionWebhookController;
 use App\Http\Controllers\SupportChatController;
 use App\Http\Controllers\SupportChatGuestController;
 use App\Http\Controllers\TicketController;
+use App\Http\Controllers\VenueMapController;
 use App\Http\Controllers\WaitlistController;
 use App\Http\Controllers\WebhookSettingsController;
 use App\Http\Controllers\WhatsAppWebhookController;
+use App\Services\GraphicLink;
+use Illuminate\Foundation\Http\Middleware\ValidateCsrfToken;
+use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Route;
 
 // Outside 'web' for the reason the sitemap routes are: crawler traffic never needs a session, and
@@ -119,7 +127,7 @@ if (config('app.hosted') && ! config('app.is_testing')) {
         Route::get('/api/calendar-events', [RoleController::class, 'calendarEvents'])->name('role.calendar_events');
         // The venue map's venues (App\Services\VenueMap). Its own named bucket: an unnamed throttle
         // shares one with every other throttled route on the host.
-        Route::get('/api/venue-map', [\App\Http\Controllers\VenueMapController::class, 'show'])->name('role.venue_map')->middleware('throttle:60,1,venue_map');
+        Route::get('/api/venue-map', [VenueMapController::class, 'show'])->name('role.venue_map')->middleware('throttle:60,1,venue_map');
         Route::get('/request', [RoleController::class, 'request'])->name('role.request');
         Route::post('/follow', [RoleController::class, 'follow'])->name('role.follow');
         Route::get('/follow', [RoleController::class, 'followLanding']);
@@ -384,6 +392,12 @@ Route::get('/user/unsubscribe', [RoleController::class, 'showUnsubscribeUser'])-
 Route::post('/user/unsubscribe', [RoleController::class, 'unsubscribeUser'])->name('user.unsubscribe.confirm')->middleware('throttle:user_unsubscribe');
 Route::post('/clear-pending-request', [EventController::class, 'clearPendingRequest'])->name('event.clear_pending_request');
 
+// The Events graphic at its public address, for a screen or a website (GraphicLink). Outside the
+// web group: a screen keeps no cookie, so every request would otherwise start a session. Under
+// /events, which no schedule can be named (Role::RESERVED_SUBDOMAINS), so on a selfhost install it
+// cannot answer for a schedule's own /{subdomain}/... pages.
+Route::get('/events/graphic/{key}.png', [GraphicController::class, 'publicImage'])->name('graphic.link')->where('key', GraphicLink::KEY_PATTERN)->withoutMiddleware('web')->middleware('throttle:60,1,graphic_link');
+
 // Newsletter tracking routes (public, no auth)
 Route::get('/nl/o/{token}', [NewsletterTrackingController::class, 'trackOpen'])->name('newsletter.track_open')->middleware('throttle:60,1');
 // The link a newsletter carries is signed for its own address. Ahead of the older form below,
@@ -520,6 +534,12 @@ Route::post('/api/whatsapp/webhook', [WhatsAppWebhookController::class, 'handle'
 Route::get('/release_tickets', [TicketController::class, 'release'])->name('release_tickets')->middleware('throttle:5,1,cron_release');
 Route::get('/translate_data', [AppController::class, 'translateData'])->name('translate_data')->middleware('throttle:5,1,cron_translate');
 
+// embed.js: the script beside an embedded calendar that shows its events over the organizer's own
+// page (EmbedScriptController says why it is a route and not a file in public/). Outside 'web',
+// as the sitemaps are, so it never sets a cookie. Domain-less, like the routes around it: the
+// copied code names it on the app host (app_url('/embed.js')).
+Route::get('/embed.js', EmbedScriptController::class)->withoutMiddleware('web')->name('embed.script');
+
 Route::get('/ticket/qr_code/{event_id}/{secret}', [TicketController::class, 'qrCode'])->name('ticket.qr_code')->middleware('throttle:100,1');
 Route::get('/ticket/view/{event_id}/{secret}', [TicketController::class, 'view'])->name('ticket.view')->middleware('throttle:100,1');
 // What a ticket waiting on its payment asks while it waits. A named limiter of its own (keyed on
@@ -536,6 +556,9 @@ Route::get('/ticket/status/{event_id}/{secret}', [TicketController::class, 'stat
 // at whichever limit is tightest. Note ThrottleRequests short-circuits when app.is_testing, so no
 // test can catch a regression here.
 Route::get('/ticket/wallet/google/{event_id}/{secret}', [TicketController::class, 'googleWalletPass'])->name('ticket.wallet.google')->middleware('throttle:60,1,wallet_pass');
+// "Add to Apple Wallet": the signed .pkpass file itself, built on tap. Same credential and the same
+// prefixed throttle bucket as Google's. A 404 while Apple Wallet is not configured.
+Route::get('/ticket/wallet/apple/{event_id}/{secret}', [TicketController::class, 'appleWalletPass'])->name('ticket.wallet.apple')->middleware('throttle:60,1,wallet_pass');
 // One checkout that spanned several events. Keyed on the order primary's own secret, so it grants
 // no more than the ticket page that secret already opens.
 Route::get('/ticket/order/{order_id}/{secret}', [TicketController::class, 'viewOrder'])->name('ticket.order')->middleware('throttle:100,1');
@@ -595,6 +618,8 @@ Route::middleware(['auth', 'verified', 'app_subdomain', 'active_day'])->group(fu
     Route::get('/dashboard/api/calendar-events', [HomeController::class, 'calendarEvents'])->name('home.calendar_events');
     Route::post('/dashboard/config', [HomeController::class, 'saveDashboardConfig'])->name('home.save_config');
     Route::post('/dashboard/federation-prompt/dismiss', [HomeController::class, 'dismissFederationPrompt'])->name('home.federation_prompt_dismiss');
+    Route::post('/dashboard/federation-prompt/later', [HomeController::class, 'laterFederationPrompt'])->name('home.federation_prompt_later');
+    Route::post('/dashboard/home-schedule-prompt/dismiss', [HomeController::class, 'dismissHomeSchedulePrompt'])->name('home.home_schedule_prompt_dismiss');
     Route::post('/dashboard/federation/list', [HomeController::class, 'listOnFederation'])->name('home.federation_list');
     Route::post('/dashboard/federation/list/dismiss', [HomeController::class, 'dismissFederationListing'])->name('home.federation_list_dismiss');
     Route::post('/dashboard/next-steps/dismiss', [HomeController::class, 'dismissNextStep'])->name('home.next_steps_dismiss');
@@ -618,6 +643,12 @@ Route::middleware(['auth', 'verified', 'app_subdomain', 'active_day'])->group(fu
     Route::get('/following/merge-venues/preview', [RoleController::class, 'mergeMyVenuesPreview'])->name('following.merge_venues_preview');
     Route::post('/following/merge-venues', [RoleController::class, 'mergeMyVenuesGroup'])->name('following.merge_venues_group');
     Route::post('/following/merge-venues/dismiss', [RoleController::class, 'dismissMyVenueMergeSuggestion'])->name('following.merge_venues_dismiss');
+    // The same page for participant schedules (talent), which a curator typing a team in as
+    // "Someone new" for every game piles up the same way. Ahead of /{subdomain}/{slug} too.
+    Route::get('/following/merge-participants', [RoleController::class, 'mergeMyParticipants'])->name('following.merge_participants');
+    Route::get('/following/merge-participants/preview', [RoleController::class, 'mergeMyParticipantsPreview'])->name('following.merge_participants_preview');
+    Route::post('/following/merge-participants', [RoleController::class, 'mergeMyParticipantsGroup'])->name('following.merge_participants_group');
+    Route::post('/following/merge-participants/dismiss', [RoleController::class, 'dismissMyParticipantMergeSuggestion'])->name('following.merge_participants_dismiss');
     Route::get('/tickets', [TicketController::class, 'tickets'])->name('tickets');
     Route::get('/my-carpools', [CarpoolController::class, 'myCarpools'])->name('my_carpools');
     Route::get('/sales', [TicketController::class, 'sales'])->name('sales');
@@ -649,7 +680,7 @@ Route::middleware(['auth', 'verified', 'app_subdomain', 'active_day'])->group(fu
     // The view had a page of its own at /realtime when it first landed on main (2026-10-06),
     // before it became a tab. Kept as a way in for a bookmark or a dashboard left open since, so the name stays
     // in Role::RESERVED_SUBDOMAINS. The old `?schedule=` is the Analytics page's `role_id`.
-    Route::get('/realtime', fn (\Illuminate\Http\Request $request) => redirect()->route('analytics', array_filter([
+    Route::get('/realtime', fn (Request $request) => redirect()->route('analytics', array_filter([
         'tab' => 'realtime',
         'role_id' => is_string($request->query('schedule')) ? $request->query('schedule') : null,
     ])));
@@ -682,6 +713,7 @@ Route::middleware(['auth', 'verified', 'app_subdomain', 'active_day'])->group(fu
     Route::post('/newsletter-segments/{hash}/users', [NewsletterController::class, 'storeSegmentUser'])->name('newsletter.segment.user.store');
     Route::put('/newsletter-segments/{hash}/users/{userHash}', [NewsletterController::class, 'updateSegmentUser'])->name('newsletter.segment.user.update');
     Route::delete('/newsletter-segments/{hash}/users/{userHash}', [NewsletterController::class, 'deleteSegmentUser'])->name('newsletter.segment.user.delete');
+    Route::post('/newsletters/request-mail-access', [NewsletterController::class, 'requestMailAccess'])->name('newsletter.request_mail_access');
     Route::get('/newsletter-import', [NewsletterController::class, 'importForm'])->name('newsletter.import');
     Route::post('/newsletter-import', [NewsletterController::class, 'importStore'])->name('newsletter.import.store');
     Route::get('/newsletter-templates', [NewsletterController::class, 'templates'])->name('newsletter.templates');
@@ -834,13 +866,16 @@ Route::middleware(['auth', 'verified', 'app_subdomain', 'active_day'])->group(fu
     Route::get('/{subdomain}/subscription/portal', [SubscriptionController::class, 'portal'])->name('subscription.portal');
     Route::post('/{subdomain}/subscription/cancel', [SubscriptionController::class, 'cancel'])->name('subscription.cancel');
     Route::post('/{subdomain}/subscription/resume', [SubscriptionController::class, 'resume'])->name('subscription.resume');
+    Route::post('/{subdomain}/subscription/end-trial', [SubscriptionController::class, 'endTrial'])->name('subscription.end_trial');
     Route::post('/{subdomain}/subscription/swap', [SubscriptionController::class, 'swap'])->name('subscription.swap');
     Route::post('/{subdomain}/unfollow', [RoleController::class, 'unfollow'])->name('role.unfollow');
     Route::put('/{subdomain}/update', [RoleController::class, 'update'])->name('role.update');
+    // The ticket reminder as the schedule's guests will get it (Tickets > Reminders), for its editors.
+    Route::get('/{subdomain}/ticket-reminder-preview', [RoleController::class, 'ticketReminderPreview'])->name('role.ticket_reminder_preview')->middleware('throttle:30,1');
     // How a schedule's venues are placed on its venue map, for its editors.
-    Route::get('/{subdomain}/venue-map/status', [\App\Http\Controllers\VenueMapController::class, 'status'])->name('role.venue_map.status');
-    Route::put('/{subdomain}/venue-map/marks/{venue}', [\App\Http\Controllers\VenueMapController::class, 'mark'])->name('role.venue_map.mark');
-    Route::delete('/{subdomain}/venue-map/marks/{venue}', [\App\Http\Controllers\VenueMapController::class, 'unmark'])->name('role.venue_map.unmark');
+    Route::get('/{subdomain}/venue-map/status', [VenueMapController::class, 'status'])->name('role.venue_map.status');
+    Route::put('/{subdomain}/venue-map/marks/{venue}', [VenueMapController::class, 'mark'])->name('role.venue_map.mark');
+    Route::delete('/{subdomain}/venue-map/marks/{venue}', [VenueMapController::class, 'unmark'])->name('role.venue_map.unmark');
     Route::post('/{subdomain}/test-email', [RoleController::class, 'testEmail'])->name('role.test_email')->middleware('throttle:10,1');
     Route::post('/{subdomain}/notification-email/resend', [NotificationEmailController::class, 'resend'])->name('role.notification_email.resend')->middleware('throttle:5,1');
     Route::post('/{subdomain}/test-feedback-email', [RoleController::class, 'testFeedbackEmail'])->name('role.test_feedback_email');
@@ -948,6 +983,12 @@ Route::middleware(['auth', 'verified', 'app_subdomain', 'active_day'])->group(fu
     Route::post('/{subdomain}/team/transfer', [RoleController::class, 'storeTransfer'])->name('role.transfer.store')->middleware('throttle:5,1');
     Route::post('/{subdomain}/team/transfer/cancel', [RoleController::class, 'cancelTransfer'])->name('role.transfer.cancel');
     Route::post('/{subdomain}/team/transfer/resend', [RoleController::class, 'resendTransfer'])->name('role.transfer.resend')->middleware('throttle:5,1');
+    // Promoter links: their list is a tab of the schedule (role.view_admin, tab "promoters");
+    // these answer its forms. For the owner and the admins, checked in the controller.
+    Route::post('/{subdomain}/promoters', [PromoterLinkController::class, 'store'])->name('role.promoters.store')->where('subdomain', '(?!admin(?=/|$))[^/]+');
+    Route::put('/{subdomain}/promoters/{hash}', [PromoterLinkController::class, 'update'])->name('role.promoters.update')->where('subdomain', '(?!admin(?=/|$))[^/]+');
+    Route::post('/{subdomain}/promoters/{hash}/archive', [PromoterLinkController::class, 'archive'])->name('role.promoters.archive')->where('subdomain', '(?!admin(?=/|$))[^/]+');
+    Route::post('/{subdomain}/promoters/{hash}/restore', [PromoterLinkController::class, 'restore'])->name('role.promoters.restore')->where('subdomain', '(?!admin(?=/|$))[^/]+');
     // Feeds: the addresses a schedule keeps reading for events. Their list is a tab of the
     // schedule (role.view_admin, tab "feeds"); these are what changes one. For the owner and the
     // admins, checked in the controller. The check is throttled: it fetches somebody else's server.
@@ -1048,7 +1089,7 @@ Route::middleware(['auth', 'verified', 'app_subdomain', 'active_day'])->group(fu
     $adminTabSubdomain = config('app.is_nexus')
         ? '(?!docs(?=/|$)|features(?=/|$)|admin(?=/|$))[^/]+'
         : '(?!docs(?=/|$)|admin(?=/|$))[^/]+';
-    Route::get('/{subdomain}/{tab}', [RoleController::class, 'viewAdmin'])->name('role.view_admin')->where('tab', 'schedule|templates|availability|appointments|seating|requests|feeds|followers|team|plan|videos')->where('subdomain', $adminTabSubdomain);
+    Route::get('/{subdomain}/{tab}', [RoleController::class, 'viewAdmin'])->name('role.view_admin')->where('tab', 'schedule|templates|availability|appointments|seating|requests|feeds|followers|team|promoters|plan|videos')->where('subdomain', $adminTabSubdomain);
 
     Route::post('/{subdomain}/upload-image', [EventController::class, 'uploadImage'])->name('event.upload_image')->middleware('throttle:60,1');
 
@@ -1109,9 +1150,11 @@ Route::middleware(['auth', 'verified', 'app_subdomain', 'active_day'])->group(fu
         Route::redirect('/admin', '/admin/dashboard');
         // Realtime was a page of its own until 2026-10. Its filters and ?trend= are bookmarked,
         // which Route::redirect() would drop.
-        Route::get('/admin/realtime', fn (\Illuminate\Http\Request $request) => redirect()->to(route('admin.dashboard').($request->getQueryString() ? '?'.$request->getQueryString() : '')))->name('admin.realtime');
+        Route::get('/admin/realtime', fn (Request $request) => redirect()->to(route('admin.dashboard').($request->getQueryString() ? '?'.$request->getQueryString() : '')))->name('admin.realtime');
         Route::get('/admin/realtime/data', [AdminRealtimeController::class, 'data'])->name('admin.realtime.data');
         Route::get('/admin/realtime/trends', [AdminRealtimeController::class, 'trends'])->name('admin.realtime.trends');
+        Route::get('/admin/realtime/so-far', [AdminRealtimeController::class, 'soFar'])->name('admin.realtime.so_far');
+        Route::get('/admin/realtime/breakdowns', [AdminRealtimeController::class, 'breakdowns'])->name('admin.realtime.breakdowns');
         Route::post('/admin/settings/realtime', [AdminRealtimeController::class, 'updateSettings'])->name('admin.settings.update_realtime');
         Route::get('/admin/users', [AdminController::class, 'users'])->name('admin.users');
         Route::get('/admin/revenue', [AdminController::class, 'revenue'])->name('admin.revenue');
@@ -1126,6 +1169,7 @@ Route::middleware(['auth', 'verified', 'app_subdomain', 'active_day'])->group(fu
         // phpunit leaves IS_HOSTED unset, so a registration-time gate would be untestable.
         Route::get('/admin/growth', [AdminController::class, 'growth'])->name('admin.growth');
         Route::post('/admin/growth/hero-test/reset', [AdminController::class, 'growthResetHeroTest'])->name('admin.growth.hero_test_reset');
+        Route::post('/admin/growth/hero-test/end', [AdminController::class, 'growthEndHeroTest'])->name('admin.growth.hero_test_end');
         Route::get('/admin/boost', [AdminController::class, 'boost'])->name('admin.boost');
         Route::post('/admin/boost/grant-credit', [AdminController::class, 'boostGrantCredit'])->name('admin.boost.grant_credit');
         Route::post('/admin/boost/set-limit', [AdminController::class, 'boostSetLimit'])->name('admin.boost.set_limit');
@@ -1153,6 +1197,7 @@ Route::middleware(['auth', 'verified', 'app_subdomain', 'active_day'])->group(fu
         Route::post('/admin/settings/accommodation', [AdminController::class, 'updateStay22Settings'])->name('admin.settings.update_stay22');
         Route::post('/admin/settings/home-quotes', [AdminController::class, 'updateHomeQuotes'])->name('admin.settings.update_home_quotes');
         Route::post('/admin/settings/currency', [AdminController::class, 'updateCurrencySettings'])->name('admin.settings.update_currency');
+        Route::post('/admin/settings/home-schedule', [AdminController::class, 'updateHomeSchedule'])->name('admin.settings.update_home_schedule');
         Route::post('/admin/settings/plan-pricing', [AdminController::class, 'updatePlanPricingSettings'])->name('admin.settings.update_plan_pricing');
 
         // Operator-authored privacy policy / terms / cookie policy. One endpoint per
@@ -1198,6 +1243,13 @@ Route::middleware(['auth', 'verified', 'app_subdomain', 'active_day'])->group(fu
         Route::post('/admin/feeds/{hash}/resume', [AdminFeedController::class, 'resume'])->name('admin.feeds.resume');
         // Shutting an account out, and the list of what new accounts are refused for. On every
         // install: a selfhost that opens registration has the same spam.
+        // Sites that may be serving a copy of the marketing pages. Nexus only, 404'd at runtime
+        // inside the controller as the federation pages are.
+        Route::get('/admin/copies', [AdminCopyController::class, 'index'])->name('admin.copies');
+        Route::post('/admin/copies/{hash}/decide', [AdminCopyController::class, 'decide'])->name('admin.copies.decide');
+        Route::post('/admin/copies/{hash}/check', [AdminCopyController::class, 'check'])
+            ->name('admin.copies.check')
+            ->middleware('throttle:10,1');
         Route::get('/admin/blocked', [AdminBlockController::class, 'index'])->name('admin.blocked');
         Route::post('/admin/blocked/list', [AdminBlockController::class, 'storeEntry'])->name('admin.blocked.entry.store');
         Route::post('/admin/blocked/list/{hash}/remove', [AdminBlockController::class, 'removeEntry'])->name('admin.blocked.entry.remove');
@@ -1207,6 +1259,16 @@ Route::middleware(['auth', 'verified', 'app_subdomain', 'active_day'])->group(fu
         Route::post('/admin/blocked/account/{hash}/not-spam', [AdminBlockController::class, 'notSpam'])->name('admin.blocked.not_spam');
         Route::post('/admin/blocked/account/{hash}/flag-again', [AdminBlockController::class, 'flagAgain'])->name('admin.blocked.flag_again');
         Route::post('/admin/blocked/words', [AdminBlockController::class, 'saveWords'])->name('admin.blocked.words');
+        // Newsletters held for review and accounts whose email sending is paused
+        // (AudienceMailGuard). Registered everywhere; the controller 404s off the hosted install.
+        Route::get('/admin/mail-review', [AdminMailReviewController::class, 'index'])->name('admin.mail_review');
+        Route::get('/admin/mail-review/newsletters/{hash}/preview', [AdminMailReviewController::class, 'preview'])->name('admin.mail_review.preview');
+        Route::post('/admin/mail-review/newsletters/{hash}/approve', [AdminMailReviewController::class, 'approve'])->name('admin.mail_review.approve');
+        Route::post('/admin/mail-review/newsletters/{hash}/reject', [AdminMailReviewController::class, 'reject'])->name('admin.mail_review.reject');
+        Route::post('/admin/mail-review/accounts/{hash}/pause', [AdminMailReviewController::class, 'pause'])->name('admin.mail_review.pause');
+        Route::post('/admin/mail-review/accounts/{hash}/enable', [AdminMailReviewController::class, 'enable'])->name('admin.mail_review.enable');
+        Route::post('/admin/mail-review/accounts/{hash}/keep-paused', [AdminMailReviewController::class, 'keepPaused'])->name('admin.mail_review.keep_paused');
+        Route::post('/admin/mail-review/accounts/{hash}/dismiss-flag', [AdminMailReviewController::class, 'dismissFlag'])->name('admin.mail_review.dismiss_flag');
         // Schedules a calendar sync made into somebody's private calendar (CalendarExposureWatch).
         // On every install: any install's owners can connect a calendar.
         Route::get('/admin/private-calendars', [AdminCalendarPrivacyController::class, 'index'])->name('admin.private_calendars');
@@ -1383,13 +1445,13 @@ if (config('app.is_nexus')) {
         Route::post('/marketing/visit', [MarketingController::class, 'recordVisit'])
             ->name('marketing.visit')
             ->middleware('throttle:120,1,marketing_visit')
-            ->withoutMiddleware(\Illuminate\Foundation\Http\Middleware\ValidateCsrfToken::class);
+            ->withoutMiddleware(ValidateCsrfToken::class);
         // The homepage headline test's beacon (App\Utils\HeroExperiment): a `view` on a visitor's
         // first assignment, a `click` on their first sign-up link click. Same reasoning as above.
         Route::post('/marketing/hero', [MarketingController::class, 'recordHeroEvent'])
             ->name('marketing.hero_event')
             ->middleware('throttle:120,1,marketing_hero')
-            ->withoutMiddleware(\Illuminate\Foundation\Http\Middleware\ValidateCsrfToken::class);
+            ->withoutMiddleware(ValidateCsrfToken::class);
         Route::get('/faq', [MarketingController::class, 'faq'])->name('marketing.faq');
         Route::get('/why-create-account', [MarketingController::class, 'whyCreateAccount'])->name('marketing.why_create_account');
         Route::get('/features/ticketing', [MarketingController::class, 'ticketing'])->name('marketing.ticketing');
@@ -1411,6 +1473,7 @@ if (config('app.is_nexus')) {
         Route::get('/stripe', [MarketingController::class, 'stripe'])->name('marketing.stripe');
         Route::get('/paypal', [MarketingController::class, 'paypal'])->name('marketing.paypal');
         Route::get('/invoiceninja', [MarketingController::class, 'invoiceninja'])->name('marketing.invoiceninja');
+        Route::get('/stackapella', [MarketingController::class, 'stackapella'])->name('marketing.stackapella');
         Route::get('/features/analytics', [MarketingController::class, 'analytics'])->name('marketing.analytics');
         Route::get('/features/integrations', [MarketingController::class, 'integrations'])->name('marketing.integrations');
         Route::get('/features/custom-fields', [MarketingController::class, 'customFields'])->name('marketing.custom_fields');
@@ -1601,9 +1664,11 @@ if (config('app.is_nexus')) {
         // Selfhost section
         Route::get('/docs/selfhost', [MarketingController::class, 'docsSelfhostIndex'])->name('marketing.docs.selfhost');
         Route::get('/docs/selfhost/installation', [MarketingController::class, 'docsSelfhostInstallation'])->name('marketing.docs.selfhost.installation');
+        Route::get('/docs/selfhost/docker', [MarketingController::class, 'docsSelfhostDocker'])->name('marketing.docs.selfhost.docker');
         Route::get('/docs/selfhost/stripe', [MarketingController::class, 'docsSelfhostStripe'])->name('marketing.docs.selfhost.stripe');
         Route::get('/docs/selfhost/google-calendar', [MarketingController::class, 'docsSelfhostGoogleCalendar'])->name('marketing.docs.selfhost.google_calendar');
         Route::get('/docs/selfhost/google-wallet', [MarketingController::class, 'docsSelfhostGoogleWallet'])->name('marketing.docs.selfhost.google_wallet');
+        Route::get('/docs/selfhost/apple-wallet', [MarketingController::class, 'docsSelfhostAppleWallet'])->name('marketing.docs.selfhost.apple_wallet');
         Route::get('/docs/selfhost/microsoft-calendar', [MarketingController::class, 'docsSelfhostMicrosoftCalendar'])->name('marketing.docs.selfhost.microsoft_calendar');
         Route::get('/docs/selfhost/boost', [MarketingController::class, 'docsSelfhostBoost'])->name('marketing.docs.selfhost.boost');
         Route::get('/docs/selfhost/admin', [MarketingController::class, 'docsSelfhostAdmin'])->name('marketing.docs.selfhost.admin');
@@ -1668,13 +1733,13 @@ if (config('app.is_nexus')) {
             Route::post('/marketing/visit', [MarketingController::class, 'recordVisit'])
                 ->name('marketing.visit')
                 ->middleware('throttle:120,1,marketing_visit')
-                ->withoutMiddleware(\Illuminate\Foundation\Http\Middleware\ValidateCsrfToken::class);
+                ->withoutMiddleware(ValidateCsrfToken::class);
             // The homepage headline test's beacon (App\Utils\HeroExperiment): a `view` on a visitor's
             // first assignment, a `click` on their first sign-up link click. Same reasoning as above.
             Route::post('/marketing/hero', [MarketingController::class, 'recordHeroEvent'])
                 ->name('marketing.hero_event')
                 ->middleware('throttle:120,1,marketing_hero')
-                ->withoutMiddleware(\Illuminate\Foundation\Http\Middleware\ValidateCsrfToken::class);
+                ->withoutMiddleware(ValidateCsrfToken::class);
             Route::get('/faq', [MarketingController::class, 'faq'])->name('marketing.faq');
             Route::get('/why-create-account', [MarketingController::class, 'whyCreateAccount'])->name('marketing.why_create_account');
             Route::get('/features/ticketing', [MarketingController::class, 'ticketing'])->name('marketing.ticketing');
@@ -1696,6 +1761,7 @@ if (config('app.is_nexus')) {
             Route::get('/stripe', [MarketingController::class, 'stripe'])->name('marketing.stripe');
             Route::get('/paypal', [MarketingController::class, 'paypal'])->name('marketing.paypal');
             Route::get('/invoiceninja', [MarketingController::class, 'invoiceninja'])->name('marketing.invoiceninja');
+            Route::get('/stackapella', [MarketingController::class, 'stackapella'])->name('marketing.stackapella');
             Route::get('/features/analytics', [MarketingController::class, 'analytics'])->name('marketing.analytics');
             Route::get('/features/integrations', [MarketingController::class, 'integrations'])->name('marketing.integrations');
             Route::get('/features/custom-fields', [MarketingController::class, 'customFields'])->name('marketing.custom_fields');
@@ -1888,9 +1954,11 @@ if (config('app.is_nexus')) {
             // Selfhost section
             Route::get('/docs/selfhost', [MarketingController::class, 'docsSelfhostIndex'])->name('marketing.docs.selfhost');
             Route::get('/docs/selfhost/installation', [MarketingController::class, 'docsSelfhostInstallation'])->name('marketing.docs.selfhost.installation');
+            Route::get('/docs/selfhost/docker', [MarketingController::class, 'docsSelfhostDocker'])->name('marketing.docs.selfhost.docker');
             Route::get('/docs/selfhost/stripe', [MarketingController::class, 'docsSelfhostStripe'])->name('marketing.docs.selfhost.stripe');
             Route::get('/docs/selfhost/google-calendar', [MarketingController::class, 'docsSelfhostGoogleCalendar'])->name('marketing.docs.selfhost.google_calendar');
             Route::get('/docs/selfhost/google-wallet', [MarketingController::class, 'docsSelfhostGoogleWallet'])->name('marketing.docs.selfhost.google_wallet');
+            Route::get('/docs/selfhost/apple-wallet', [MarketingController::class, 'docsSelfhostAppleWallet'])->name('marketing.docs.selfhost.apple_wallet');
             Route::get('/docs/selfhost/microsoft-calendar', [MarketingController::class, 'docsSelfhostMicrosoftCalendar'])->name('marketing.docs.selfhost.microsoft_calendar');
             Route::get('/docs/selfhost/boost', [MarketingController::class, 'docsSelfhostBoost'])->name('marketing.docs.selfhost.boost');
             Route::get('/docs/selfhost/admin', [MarketingController::class, 'docsSelfhostAdmin'])->name('marketing.docs.selfhost.admin');
@@ -1937,6 +2005,7 @@ if (config('app.is_nexus')) {
             Route::get('/caldav', fn () => redirect('https://'._base_domain().'/caldav', 301));
             Route::get('/stripe', fn () => redirect('https://'._base_domain().'/stripe', 301));
             Route::get('/invoiceninja', fn () => redirect('https://'._base_domain().'/invoiceninja', 301));
+            Route::get('/stackapella', fn () => redirect('https://'._base_domain().'/stackapella', 301));
             Route::get('/analytics', fn () => redirect('https://'._base_domain().'/features/analytics', 301));
             Route::get('/integrations', fn () => redirect('https://'._base_domain().'/features/integrations', 301));
             Route::get('/custom-fields', fn () => redirect('https://'._base_domain().'/features/custom-fields', 301));
@@ -2099,10 +2168,12 @@ if (config('app.is_nexus')) {
             // Selfhost section
             Route::get('/docs/selfhost', fn () => redirect('https://'._base_domain().'/docs/selfhost', 301));
             Route::get('/docs/selfhost/installation', fn () => redirect('https://'._base_domain().'/docs/selfhost/installation', 301));
+            Route::get('/docs/selfhost/docker', fn () => redirect('https://'._base_domain().'/docs/selfhost/docker', 301));
             Route::get('/docs/selfhost/saas', fn () => redirect('https://'._base_domain().'/docs/saas', 301));
             Route::get('/docs/selfhost/stripe', fn () => redirect('https://'._base_domain().'/docs/selfhost/stripe', 301));
             Route::get('/docs/selfhost/google-calendar', fn () => redirect('https://'._base_domain().'/docs/selfhost/google-calendar', 301));
             Route::get('/docs/selfhost/google-wallet', fn () => redirect('https://'._base_domain().'/docs/selfhost/google-wallet', 301));
+            Route::get('/docs/selfhost/apple-wallet', fn () => redirect('https://'._base_domain().'/docs/selfhost/apple-wallet', 301));
             Route::get('/docs/selfhost/microsoft-calendar', fn () => redirect('https://'._base_domain().'/docs/selfhost/microsoft-calendar', 301));
             Route::get('/docs/selfhost/boost', fn () => redirect('https://'._base_domain().'/docs/selfhost/boost', 301));
             Route::get('/docs/selfhost/admin', fn () => redirect('https://'._base_domain().'/docs/selfhost/admin', 301));
@@ -2148,6 +2219,7 @@ if (config('app.is_nexus')) {
     Route::get('/caldav', fn () => redirect()->route('home'));
     Route::get('/stripe', fn () => redirect()->route('home'));
     Route::get('/invoiceninja', fn () => redirect()->route('home'));
+    Route::get('/stackapella', fn () => redirect()->route('home'));
     Route::get('/features/integrations', fn () => redirect()->route('home'));
     Route::get('/features/custom-fields', fn () => redirect()->route('home'));
     Route::get('/features/custom-labels', fn () => redirect()->route('home'));
@@ -2275,10 +2347,12 @@ if (config('app.is_nexus')) {
     // Selfhost section
     Route::get('/docs/selfhost', fn () => redirect()->route('home'))->name('marketing.docs.selfhost');
     Route::get('/docs/selfhost/installation', fn () => redirect()->route('home'))->name('marketing.docs.selfhost.installation');
+    Route::get('/docs/selfhost/docker', fn () => redirect()->route('home'))->name('marketing.docs.selfhost.docker');
     Route::get('/docs/selfhost/saas', fn () => redirect()->route('home'));
     Route::get('/docs/selfhost/stripe', fn () => redirect()->route('home'))->name('marketing.docs.selfhost.stripe');
     Route::get('/docs/selfhost/google-calendar', fn () => redirect()->route('home'))->name('marketing.docs.selfhost.google_calendar');
     Route::get('/docs/selfhost/google-wallet', fn () => redirect()->route('home'))->name('marketing.docs.selfhost.google_wallet');
+    Route::get('/docs/selfhost/apple-wallet', fn () => redirect()->route('home'))->name('marketing.docs.selfhost.apple_wallet');
     Route::get('/docs/selfhost/microsoft-calendar', fn () => redirect()->route('home'))->name('marketing.docs.selfhost.microsoft_calendar');
     Route::get('/docs/selfhost/boost', fn () => redirect()->route('home'))->name('marketing.docs.selfhost.boost');
     Route::get('/docs/selfhost/admin', fn () => redirect()->route('home'))->name('marketing.docs.selfhost.admin');
@@ -2323,15 +2397,15 @@ if (config('app.hosted') && config('app.is_nexus')) {
         Route::post('/support-chat/guest/messages', [SupportChatGuestController::class, 'send'])
             ->name('support-chat.guest.send')
             ->middleware('throttle:20,1,support_guest_send')
-            ->withoutMiddleware(\Illuminate\Foundation\Http\Middleware\ValidateCsrfToken::class);
+            ->withoutMiddleware(ValidateCsrfToken::class);
         Route::post('/support-chat/guest/contact', [SupportChatGuestController::class, 'contact'])
             ->name('support-chat.guest.contact')
             ->middleware('throttle:10,1,support_guest_contact')
-            ->withoutMiddleware(\Illuminate\Foundation\Http\Middleware\ValidateCsrfToken::class);
+            ->withoutMiddleware(ValidateCsrfToken::class);
         Route::post('/support-chat/guest/read', [SupportChatGuestController::class, 'read'])
             ->name('support-chat.guest.read')
             ->middleware('throttle:60,1,support_guest_read')
-            ->withoutMiddleware(\Illuminate\Foundation\Http\Middleware\ValidateCsrfToken::class);
+            ->withoutMiddleware(ValidateCsrfToken::class);
     };
 
     if (config('app.is_testing')) {
@@ -2365,7 +2439,7 @@ if (! config('app.hosted') || config('app.is_testing')) {
         ->withoutMiddleware('web');
     Route::get('/{subdomain}/api/past-events', [RoleController::class, 'listPastEvents'])->name('role.list_past_events');
     Route::get('/{subdomain}/api/calendar-events', [RoleController::class, 'calendarEvents'])->name('role.calendar_events');
-    Route::get('/{subdomain}/api/venue-map', [\App\Http\Controllers\VenueMapController::class, 'show'])->name('role.venue_map')->middleware('throttle:60,1,venue_map');
+    Route::get('/{subdomain}/api/venue-map', [VenueMapController::class, 'show'])->name('role.venue_map')->middleware('throttle:60,1,venue_map');
     Route::get('/{subdomain}/request', [RoleController::class, 'request'])->name('role.request');
     Route::post('/{subdomain}/follow', [RoleController::class, 'follow'])->name('role.follow');
     Route::get('/{subdomain}/follow', [RoleController::class, 'followLanding']);

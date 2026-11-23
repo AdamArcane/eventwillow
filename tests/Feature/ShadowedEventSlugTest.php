@@ -144,7 +144,7 @@ class ShadowedEventSlugTest extends TestCase
 
         // The hosted tenant group is gated on `hosted && ! is_testing`, so only a rebuilt app has
         // it. The sequence is RouteLoadTest::test_hosted_gp_routes_load()'s.
-        $this->app['db']->connection()->rollBack();
+        $this->leaveTestTransaction();
         $this->forceEnv('IS_HOSTED', 'true');
         $this->forceEnv('APP_TESTING', 'false');
         $this->refreshApplication();
@@ -274,7 +274,8 @@ class ShadowedEventSlugTest extends TestCase
         $board = $this->get(route('carpool.index', ['subdomain' => $venue->subdomain, 'event_hash' => UrlUtils::encodeId($rides->id)]))
             ->assertOk()
             ->getContent();
-        $back = '~<a href="([^"]+)"[^>]*>\s*(?:←|→)\s*'.preg_quote(__('messages.carpool_back_to_event'), '~').'~u';
+        // The arrow is an icon now, so anything inside the link may come before its words.
+        $back = '~<a href="([^"]+)"[^>]*>(?:(?!</a>).)*?'.preg_quote(__('messages.carpool_back_to_event'), '~').'~us';
         $this->assertSame(1, preg_match($back, $board, $m), 'the carpool page links back to its event');
         $this->get(html_entity_decode($m[1]))->assertOk()->assertViewIs('event.show-guest')->assertSee('Ride Share Night');
 

@@ -2,6 +2,7 @@
 
 namespace Tests\Feature;
 
+use App\Models\GalleryImage;
 use App\Models\Role;
 use App\Utils\UrlUtils;
 use Illuminate\Foundation\Testing\RefreshDatabase;
@@ -75,75 +76,31 @@ class GuestImagePerformanceTest extends TestCase
 
     // ------------------------------------------------------------ schedule page
 
-    public function test_a_schedule_with_an_uploaded_background_preloads_its_phone_derivative(): void
-    {
-        $role = $this->scheduleWithUploadedBackground();
-        $this->recordBackgroundVariants($role);
-
-        $html = $this->page('/'.$role->subdomain);
-        $phone = url('/storage/background_abc_w960.webp');
-
-        $this->assertStringContainsString(
-            '<link rel="preload" as="image" href="'.$phone.'" media="(max-width: 767px)" fetchpriority="high">',
-            $html
-        );
-        // The banner a phone paints is that same file, so the preload is not a second download...
-        $this->assertStringContainsString("background-image: url('".$phone."');", $html);
-        // ...and the desktop background is the 1920 derivative. Neither is the original.
-        $this->assertStringContainsString('url("'.url('/storage/background_abc_w1920.webp').'")', $html);
-        $this->assertStringNotContainsString("url('".url('/storage/background_abc.png')."')", $html);
-        $this->assertStringNotContainsString('url("'.url('/storage/background_abc.png').'")', $html);
-    }
-
-    public function test_until_the_derivatives_exist_the_original_is_what_is_preloaded(): void
-    {
-        $role = $this->scheduleWithUploadedBackground();
-
-        $html = $this->page('/'.$role->subdomain);
-        $original = url('/storage/background_abc.png');
-
-        $this->assertStringContainsString('<link rel="preload" as="image" href="'.$original.'"', $html);
-        $this->assertStringContainsString("background-image: url('".$original."');", $html);
-    }
-
-    public function test_a_built_in_background_preloads_its_bundled_webp(): void
-    {
-        $role = $this->createRole($this->createOwner(), 'venue', [
-            'name' => 'Blue Room',
-            'background' => 'image',
-            'background_image' => 'Abstract_Sunrise',
-        ]);
-
-        $html = $this->page('/'.$role->subdomain);
-
-        $this->assertStringContainsString(
-            '<link rel="preload" as="image" href="'.asset('images/backgrounds/Abstract_Sunrise.webp').'" media="(max-width: 767px)" fetchpriority="high">',
-            $html
-        );
-    }
-
     /**
-     * The preload names the banner role/show-guest paints, so only that page carries it: an event
-     * page paints its background differently, and an embed or a graphic paints no banner at all.
+     * Since the 2026-11 redesign the background is the glow across the top of the page, and a
+     * photo there is still the schedule page's largest paint on a phone (measured: some 2.5s later
+     * without the preload), so the schedule page preloads the phone's derivative. An event page's
+     * flyer is its LCP, and an embed draws no glow. The glow uses the derivatives, never the
+     * original.
      */
-    public function test_only_the_schedule_page_preloads_the_banner(): void
+    public function test_the_schedule_page_preloads_its_glow_photo_for_a_phone(): void
     {
         $role = $this->scheduleWithUploadedBackground();
         $this->recordBackgroundVariants($role);
         $event = $this->createEvent($role, ['name' => 'Autumn Session', 'creator_role_id' => $role->id]);
 
-        $this->assertStringContainsString('rel="preload" as="image"', $this->page('/'.$role->subdomain), 'fixture: the schedule page does');
-
-        foreach ([
-            'the event page' => $this->guestEventUrl($role, $event),
-            'the embed' => '/'.$role->subdomain.'?embed=true',
-            'the graphic' => '/'.$role->subdomain.'?graphic=1',
-        ] as $label => $path) {
-            $this->assertStringNotContainsString('rel="preload" as="image"', $this->page($path), $label);
+        $this->assertStringContainsString(
+            '<link rel="preload" as="image" href="'.url('/storage/background_abc_w960.webp').'" media="(max-width: 767px)" fetchpriority="high">',
+            $this->page('/'.$role->subdomain)
+        );
+        foreach ([$this->guestEventUrl($role, $event), '/'.$role->subdomain.'?embed=true'] as $path) {
+            $this->assertStringNotContainsString('rel="preload" as="image"', $this->page($path), $path);
         }
 
-        $solid = $this->createRole($this->createOwner(), 'venue', ['name' => 'Plain Room', 'background' => 'solid', 'background_color' => '#223344']);
-        $this->assertStringNotContainsString('rel="preload" as="image"', $this->page('/'.$solid->subdomain), 'no image background');
+        $html = $this->page('/'.$role->subdomain);
+        $this->assertStringContainsString('url("'.url('/storage/background_abc_w1920.webp').'")', $html);
+        $this->assertStringNotContainsString('url("'.url('/storage/background_abc.png').'")', $html);
+        $this->assertStringNotContainsString("url('".url('/storage/background_abc.png')."')", $html);
     }
 
     /** An event page paints its background at every width: the phone's derivative, then md up. */
@@ -334,8 +291,8 @@ class GuestImagePerformanceTest extends TestCase
 
         $both = $this->scheduleWithUploadedBackground(['header_image' => '', 'header_image_url' => 'header_abc.png']);
         $html = $this->page('/'.$both->subdomain);
-        $this->assertSame(1, $this->highPriorityCount($html), 'schedule with an image background: the preload');
-        $this->assertStringNotContainsString('fetchpriority', $this->imgTag($html, 'header_abc.png'));
+        $this->assertSame(1, $this->highPriorityCount($html), 'schedule with an image background: the header, the background being only a glow');
+        $this->assertStringContainsString('fetchpriority="high"', $this->imgTag($html, 'header_abc.png'));
 
         $event = $this->createEvent($headerOnly, ['name' => 'Autumn Session', 'creator_role_id' => $headerOnly->id, 'flyer_image_url' => 'flyer_abc.png']);
         $html = $this->page($this->guestEventUrl($headerOnly, $event));
@@ -348,7 +305,7 @@ class GuestImagePerformanceTest extends TestCase
         // With a gallery and no flyer, the gallery leads the page, so its first photo takes the
         // hero's high priority rather than adding a second.
         foreach ([0, 1] as $i) {
-            \App\Models\GalleryImage::withoutEvents(fn () => \App\Models\GalleryImage::create([
+            GalleryImage::withoutEvents(fn () => GalleryImage::create([
                 'role_id' => $headerOnly->id, 'event_id' => $plain->id, 'filename' => 'gallery_'.$i.'.jpg',
                 'width' => 1200, 'height' => 800, 'sort_order' => $i,
             ]));
@@ -614,9 +571,9 @@ class GuestImagePerformanceTest extends TestCase
             $this->assertStringNotContainsString('background_anim_w', $html, $label);
         }
 
+        // The schedule page preloads its glow for a phone, and an animated upload is its original.
         $html = $this->page('/'.$act->subdomain);
-        $this->assertStringContainsString('<link rel="preload" as="image" href="'.$original.'" media="(max-width: 767px)" fetchpriority="high">', $html);
-        $this->assertStringContainsString("background-image: url('".$original."');", $html);
+        $this->assertStringContainsString('<link rel="preload" as="image" href="'.$original.'" media="(max-width: 767px)"', $html);
 
         // The layout's last rule, another schedule's background for a page with no phone banner.
         // No page hands the layout another schedule without one today, so it is rendered directly.

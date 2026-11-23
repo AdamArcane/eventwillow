@@ -2,12 +2,17 @@
 
 namespace Tests\Feature;
 
+use App\Models\Event;
 use App\Models\MarketingExperimentStat;
+use App\Models\Role;
 use App\Models\Setting;
 use App\Models\User;
 use App\Utils\HeroExperiment;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\Cache;
+use Illuminate\Support\Str;
+use Laravel\Socialite\Contracts\Provider;
+use Laravel\Socialite\Facades\Socialite;
 use Tests\TestCase;
 
 /**
@@ -524,11 +529,11 @@ class HeroExperimentTest extends TestCase
         $socialUser->shouldReceive('getAvatar')->andReturn(null);
         $socialUser->user = ['locale' => 'en'];
 
-        $provider = \Mockery::mock(\Laravel\Socialite\Contracts\Provider::class);
+        $provider = \Mockery::mock(Provider::class);
         $provider->shouldReceive('redirectUrl')->andReturnSelf();
         $provider->shouldReceive('user')->andReturn($socialUser);
 
-        \Laravel\Socialite\Facades\Socialite::shouldReceive('driver')->with('google')->andReturn($provider);
+        Socialite::shouldReceive('driver')->with('google')->andReturn($provider);
     }
 
     /**
@@ -714,20 +719,31 @@ class HeroExperimentTest extends TestCase
         $this->assertSame(1, MarketingExperimentStat::count());
     }
 
-    /**
-     * The site as it ships: one headline, 'promote_sell', served by the server and still put
-     * through the picker, so its visitors, clicks and signups keep being counted.
-     */
-    public function test_the_site_serves_promote_sell_alone_and_keeps_counting(): void
-    {
-        HeroExperiment::useVariants(null);
+    /** One headline alone, as the site ran from 2026-10-22 and runs again now. */
+    private const ONE_ARM = ['promote_sell' => self::ROUND_THREE['promote_sell']];
 
-        $this->assertSame(['promote_sell'], array_keys(HeroExperiment::VARIANTS));
-        $this->assertSame('promote_sell', HeroExperiment::DEFAULT);
+    /**
+     * The page round waiting to go live (HeroExperiment::NEW_PAGE_ROUND): today's page against the
+     * new homepage, each with its own hero. Until it is approved the site runs ONE_ARM, so these
+     * tests run it through useVariants().
+     */
+    private const PAGE_ROUND = HeroExperiment::NEW_PAGE_ROUND;
+
+    /**
+     * One headline: served by the server and still put through the picker, so its visitors,
+     * clicks and signups keep being counted.
+     */
+    public function test_one_headline_is_served_alone_and_keeps_counting(): void
+    {
+        HeroExperiment::useVariants(self::ONE_ARM);
 
         $response = $this->get('/')->assertOk();
 
-        $response->assertSee('data-hero="l1">'.e(HeroExperiment::VARIANTS['promote_sell']['line1']).'<', false);
+        $response->assertSee('data-hero="l1">'.e(self::ONE_ARM['promote_sell']['line1']).'<', false);
+        // No page round: today's page alone, with no new page and nothing that hides one.
+        $response->assertDontSee('class="hn"', false);
+        $response->assertDontSee('data-home="new"', false);
+        $response->assertSee('class="hp-full"', false);
         $response->assertSee('var variants =', false);
         $response->assertDontSee('Plan, promote, and sell');
         $this->assertSame(['promote_sell' => 1.0], HeroExperiment::forPage()['weights']);
@@ -753,7 +769,7 @@ class HeroExperimentTest extends TestCase
      */
     public function test_a_single_headline_never_becomes_the_winner(): void
     {
-        HeroExperiment::useVariants(null);
+        HeroExperiment::useVariants(self::ONE_ARM);
 
         $this->travelTo('2026-11-01 12:00:00');
         MarketingExperimentStat::create(['experiment' => HeroExperiment::EXPERIMENT, 'variant' => 'promote_sell', 'date' => '2026-10-20', 'visitors' => HeroExperiment::WIN_MIN_VISITORS * 5, 'clicks' => 400]);
@@ -773,7 +789,7 @@ class HeroExperimentTest extends TestCase
 
     public function test_the_growth_page_shows_a_single_headline_as_a_baseline(): void
     {
-        HeroExperiment::useVariants(null);
+        HeroExperiment::useVariants(self::ONE_ARM);
         config(['app.hosted' => true]);
 
         $admin = User::factory()->create(['email_verified_at' => now()]);
@@ -784,8 +800,324 @@ class HeroExperimentTest extends TestCase
             ->get('/admin/growth')
             ->assertOk()
             ->assertSee(__('messages.hero_test_phase_baseline'))
-            ->assertSee(HeroExperiment::VARIANTS['promote_sell']['line1'])
+            ->assertSee(self::ONE_ARM['promote_sell']['line1'])
             ->assertDontSee(__('messages.hero_test_chance_best'));
+    }
+
+    /*
+     * The page round, on the site's own variants: one headline on two homepages.
+     */
+
+    /** The two arms differ in their page and in nothing a visitor reads above the fold. */
+    /**
+     * The site runs round four: today's page against the new one, split evenly, both printed in
+     * the one stored copy of the page with today's on show. Mutation: put promote_sell back as
+     * the only arm, or make 'home_new' the default.
+     */
+    public function test_the_site_runs_todays_page_against_the_new_one(): void
+    {
+        HeroExperiment::useVariants(null);
+
+        $this->assertSame(['home_today', 'home_new'], array_keys(HeroExperiment::VARIANTS));
+        $this->assertSame(HeroExperiment::NEW_PAGE_ROUND, HeroExperiment::VARIANTS);
+        $this->assertSame('home_today', HeroExperiment::DEFAULT);
+        $this->assertSame(['home_today' => 'full', 'home_new' => 'new'], HeroExperiment::forPage()['pages']);
+        $this->assertSame(['home_today' => 0.5, 'home_new' => 0.5], HeroExperiment::forPage()['weights']);
+        $this->assertTrue(HeroExperiment::isFixed());
+
+        $html = $this->get('/')->assertOk()->getContent();
+        $this->assertStringContainsString('<div class="hn">', $html);
+        $this->assertStringContainsString('class="hp-full"', $html);
+        $this->assertDoesNotMatchRegularExpression('/<div id="hp"[^>]*data-home/', $html);
+        // A retired key is no longer counted.
+        $this->beacon(['variant' => 'promote_sell', 'event' => 'view'])->assertStatus(422);
+    }
+
+    /**
+     * The round waiting to go live: today's page, word for word under a new key (so that nobody
+     * is carried into it from the baseline), against the new page with its own headline.
+     */
+    public function test_the_new_page_round_is_todays_page_against_the_new_one(): void
+    {
+        HeroExperiment::useVariants(self::PAGE_ROUND);
+
+        $this->assertSame(HeroExperiment::copyOf('home_today'), self::ONE_ARM['promote_sell']);
+        $this->assertNotSame(HeroExperiment::copyOf('home_today'), HeroExperiment::copyOf('home_new'));
+        $this->assertSame(['home_today' => 'full', 'home_new' => 'new'], HeroExperiment::forPage()['pages']);
+        $this->assertTrue(HeroExperiment::isFixed());
+    }
+
+    /**
+     * Both pages in one document, today's on show. The new one is hidden by a rule that is in the
+     * head, ahead of the content it hides, and the picker, the first thing inside #hp, says which
+     * page a visitor gets before either is parsed. Mutation: move the picker back into today's
+     * hero, or print a second h1.
+     */
+    public function test_a_running_page_round_prints_both_pages_with_todays_on_show(): void
+    {
+        HeroExperiment::useVariants(self::PAGE_ROUND);
+
+        $response = $this->get('/')->assertOk();
+        $html = $response->getContent();
+
+        $this->assertSame(['home_today' => 0.5, 'home_new' => 0.5], HeroExperiment::forPage()['weights']);
+        $response->assertSee('var pages = {"home_today":"full","home_new":"new"};', false);
+        $response->assertSee("root.setAttribute('data-home', 'new')", false);
+
+        $this->assertSame(1, substr_count($html, 'class="hp-full"'));
+        $this->assertSame(1, substr_count($html, '<div class="hn">'));
+        $this->assertDoesNotMatchRegularExpression('/<div id="hp"[^>]*data-home/', $html, 'the server put the new page on show while the round runs');
+
+        // Each page is hidden by a rule in the head: the new one unless #hp says new, and every
+        // part of today's (the dock at the foot of a phone's screen serves both) when it does.
+        $rule = strpos($html, '#hp:not([data-home="new"]) > .hn {');
+        $this->assertNotFalse($rule, 'nothing hides the new page');
+        $this->assertStringContainsString('#hp[data-home="new"] > :not(.hn):not(.hp-dock)', $html);
+        $this->assertLessThan(strpos($html, '<div id="hp"'), $rule, 'the rule that hides a page arrives after the page');
+
+        // The picker is the first thing inside #hp, ahead of both heroes.
+        $picker = strpos($html, 'var pages =');
+        $this->assertLessThan(strpos($html, 'id="top"'), $picker);
+        $this->assertLessThan(strpos($html, 'id="hn-top"'), $picker);
+        $this->assertGreaterThan(strpos($html, '<div id="hp"'), $picker);
+
+        // One h1 (today's hero; the new one is a heading by role while both are printed), one
+        // closing panel each, and one film.
+        $this->assertSame(1, substr_count($html, '<h1'));
+        $this->assertStringContainsString('<p class="hn-h1"  role="heading" aria-level="1"', $html);
+        $this->assertSame(1, substr_count($html, 'id="claim"'));
+        $this->assertSame(1, substr_count($html, 'id="hn-claim"'));
+        $this->assertSame(1, substr_count($html, 'id="showcase"'));
+
+        // The new hero prints its own variant's words.
+        $this->assertStringContainsString(e(self::PAGE_ROUND['home_new']['subtitle']), $html);
+
+        // Its wall shows today's posters and asks for none eagerly: today's page, hidden or not,
+        // already does, so neither page costs the other a download.
+        $new = substr($html, strpos($html, '<div class="hn">'));
+        $this->assertStringNotContainsString('loading="eager"', substr($new, 0, strpos($new, 'id="hn-claim"')));
+
+        // And no id twice, which two copies of a section would bring.
+        preg_match_all('/\sid="([^"]+)"/', $html, $ids);
+        $twice = array_keys(array_filter(array_count_values($ids[1]), fn ($n) => $n > 1));
+        $this->assertSame([], $twice);
+
+        // The page is still stored at the edge as one copy for everyone.
+        $this->assertStringContainsString('s-maxage=600', (string) $response->headers->get('Cache-Control'));
+        $this->assertSame([], $response->headers->getCookies());
+    }
+
+    /** ?home= shows a page to whoever asks, and is out of the way before anything is counted. */
+    public function test_the_preview_parameter_comes_before_the_pick_and_the_beacon(): void
+    {
+        HeroExperiment::useVariants(self::PAGE_ROUND);
+
+        $html = $this->get('/')->assertOk()->getContent();
+
+        $forced = strpos($html, 'var forced =');
+        $this->assertNotFalse($forced);
+        $this->assertLessThan(strpos($html, 'window.esHero ='), $forced);
+        $this->assertLessThan(strpos($html, "send('view')"), $forced);
+    }
+
+    /** An even split, whatever the counts say, and nothing the code locks. */
+    public function test_a_page_round_is_split_evenly_and_never_locks_itself(): void
+    {
+        HeroExperiment::useVariants(self::PAGE_ROUND);
+
+        $this->travelTo('2026-11-01 12:00:00');
+        MarketingExperimentStat::create(['experiment' => HeroExperiment::EXPERIMENT, 'variant' => 'home_new', 'date' => '2026-10-20', 'visitors' => HeroExperiment::WIN_MIN_VISITORS * 5, 'clicks' => 900]);
+        MarketingExperimentStat::create(['experiment' => HeroExperiment::EXPERIMENT, 'variant' => 'home_today', 'date' => '2026-10-20', 'visitors' => HeroExperiment::WIN_MIN_VISITORS * 5, 'clicks' => 20]);
+        User::factory()->count(HeroExperiment::WIN_MIN_SIGNUPS * 4)->create(['hero_variant' => 'home_new']);
+
+        foreach (['2026-11-01', '2026-11-12', '2026-12-30'] as $day) {
+            $this->travelTo($day.' 12:00:00');
+            Cache::flush();
+
+            $this->assertSame(['home_today' => 0.5, 'home_new' => 0.5], HeroExperiment::forPage()['weights'], "the split moved by {$day}");
+        }
+
+        $this->assertNull(Setting::get(HeroExperiment::CANDIDATE_SETTING));
+        $this->assertNull(Setting::get(HeroExperiment::WINNER_SETTING));
+
+        $report = HeroExperiment::report();
+        $this->assertSame('fixed', $report['phase']);
+        $this->assertSame('even', $report['split']);
+        $this->assertGreaterThan(0.99, $report['p_new_better']);
+        // Looked at 4, 7 and 10 weeks after the first day counted.
+        $this->assertSame(['2026-11-17', '2026-12-08', '2026-12-29'], $report['looks']);
+        $this->assertSame(['home_today', 'home_new'], array_column($report['rows'], 'key'));
+
+        // The same counts read the same chance: a person decides on this figure.
+        Cache::flush();
+        $this->assertSame($report['p_new_better'], HeroExperiment::report()['p_new_better']);
+    }
+
+    /** What each page's signups went on to save, counted over the accounts the signups are. */
+    public function test_a_page_round_reports_what_its_signups_went_on_to_save(): void
+    {
+        HeroExperiment::useVariants(self::PAGE_ROUND);
+
+        [$saver, $maker] = User::factory()->count(2)->create(['hero_variant' => 'home_new']);
+        User::factory()->create(['hero_variant' => 'home_new']);
+        User::factory()->create(['hero_variant' => 'home_today']);
+
+        $schedules = [];
+        foreach ([$saver, $maker] as $owner) {
+            $role = new Role;
+            $role->subdomain = 'act'.strtolower(Str::random(10));
+            $role->type = 'talent';
+            $role->name = 'The Wandering Few';
+            $role->timezone = 'America/New_York';
+            $role->plan_type = 'free';
+            $role->user_id = $owner->id;
+            $role->save();
+            $schedules[] = $role;
+        }
+
+        $event = new Event;
+        $event->name = 'First night';
+        $event->starts_at = now()->addDays(3)->format('Y-m-d H:i:s');
+        $event->duration = 2;
+        $event->timezone = 'America/New_York';
+        $event->creator_role_id = $schedules[1]->id;
+        $event->user_id = $maker->id;
+        $event->slug = 'x-'.strtolower(Str::random(8));
+        $event->save();
+
+        $rows = collect(HeroExperiment::report()['rows'])->keyBy('key');
+
+        $this->assertSame([3, 2, 1], [$rows['home_new']['signups'], $rows['home_new']['saved_schedule'], $rows['home_new']['saved_event']]);
+        $this->assertSame([1, 0, 0], [$rows['home_today']['signups'], $rows['home_today']['saved_schedule'], $rows['home_today']['saved_event']]);
+        $this->assertSame('new', $rows['home_new']['page']);
+    }
+
+    /**
+     * Ended on today's page: the new page is gone from the document at the next request, and
+     * the page that was kept is still picked and counted. This is also the off switch.
+     */
+    public function test_ending_on_todays_page_takes_the_new_page_out_at_once(): void
+    {
+        HeroExperiment::useVariants(self::PAGE_ROUND);
+        $this->get('/')->assertOk()->assertSee('<div class="hn">', false);
+
+        $this->endAsAdmin(['variant' => 'home_today'])->assertRedirect()->assertSessionHas('message', __('messages.hero_test_ended_done'));
+        auth()->logout();
+        $this->flushSession();
+
+        // No cache flush: the state's key moves with the End.
+        $response = $this->get('/')->assertOk();
+        $response->assertDontSee('<div class="hn">', false);
+        $response->assertDontSee('data-home="new"', false);
+        $response->assertSee('class="hp-full"', false);
+        $response->assertSee('var pages = {"home_today":"full"};', false);
+
+        $this->assertSame(['home_today' => 1.0], HeroExperiment::forPage()['weights']);
+        $this->assertSame('ended', HeroExperiment::report()['phase']);
+        $this->beacon(['variant' => 'home_today', 'event' => 'view'])->assertNoContent();
+        $this->assertSame(1, MarketingExperimentStat::where('variant', 'home_today')->value('visitors'));
+    }
+
+    /** Ended on the new page: it is the homepage, and none of today's page is sent. */
+    public function test_ending_on_the_new_page_makes_it_the_homepage(): void
+    {
+        HeroExperiment::useVariants(self::PAGE_ROUND);
+        $this->assertTrue(HeroExperiment::end('home_new'));
+
+        $response = $this->get('/')->assertOk();
+        $html = $response->getContent();
+
+        $this->assertMatchesRegularExpression('/<div id="hp"\s+data-home="new"/', $html);
+        $response->assertSee('<div class="hn">', false);
+        $response->assertDontSee('class="hp-full"', false);
+        $response->assertDontSee('id="top"', false);
+        $response->assertDontSee('id="showcase"', false);
+        $response->assertDontSee('<video', false);
+        $response->assertDontSee('data-video-facade', false);
+        // The posters still learn the address to print, from the page's own hidden note.
+        $response->assertSee('<span data-claim-echo hidden>', false);
+        $response->assertSee('var pages = {"home_new":"new"};', false);
+        // Its own closing panel, and its headline is now the page's one h1.
+        $this->assertSame(1, substr_count($html, 'id="hn-claim"'));
+        $this->assertSame(0, substr_count($html, 'id="claim"'));
+        $this->assertSame(1, substr_count($html, '<h1'));
+        $this->assertStringContainsString('<h1 class="hn-h1"', $html);
+    }
+
+    /** An End outlives a change of copy: it is a bare key, not a fingerprint of the set. */
+    public function test_an_ended_round_is_not_restarted_by_an_edit_to_the_copy(): void
+    {
+        HeroExperiment::useVariants(self::PAGE_ROUND);
+        HeroExperiment::end('home_today');
+
+        $edited = self::PAGE_ROUND;
+        $edited['home_today']['subtitle'] .= ' Free to start.';
+        $edited['home_new']['subtitle'] .= ' Free to start.';
+        HeroExperiment::useVariants($edited, 'home_today');
+
+        $this->assertSame('home_today', HeroExperiment::ended());
+        $this->assertFalse(HeroExperiment::forPage()['both']);
+    }
+
+    /** Reset starts the round over, both pages again. */
+    public function test_a_reset_starts_an_ended_round_over(): void
+    {
+        HeroExperiment::useVariants(self::PAGE_ROUND);
+        HeroExperiment::end('home_new');
+
+        HeroExperiment::reset();
+
+        $this->assertNull(HeroExperiment::ended());
+        $this->assertTrue(HeroExperiment::forPage()['both']);
+    }
+
+    /** Only an admin ends it, only on a variant of the round, and a round of headlines cannot be. */
+    public function test_only_an_admin_ends_a_round_and_only_on_one_of_its_pages(): void
+    {
+        HeroExperiment::useVariants(self::PAGE_ROUND);
+
+        $user = User::factory()->create(['email_verified_at' => now()]);
+        $this->actingAs($user)->post('/admin/growth/hero-test/end', ['variant' => 'home_new']);
+        $this->assertNull(HeroExperiment::ended());
+
+        $this->endAsAdmin(['variant' => 'promote_sell'])->assertSessionHas('error');
+        $this->assertNull(HeroExperiment::ended());
+
+        HeroExperiment::useVariants(self::ROUND_THREE, 'plan_sell');
+        $this->assertFalse(HeroExperiment::end('plan_sell'));
+        $this->assertFalse(HeroExperiment::isFixed());
+    }
+
+    public function test_the_growth_page_shows_a_page_round(): void
+    {
+        HeroExperiment::useVariants(self::PAGE_ROUND);
+        config(['app.hosted' => true]);
+
+        $admin = User::factory()->create(['email_verified_at' => now()]);
+        $admin->forceFill(['is_admin' => true])->save();
+
+        $this->withSession(['admin_password_confirmed_at' => now()->timestamp])
+            ->actingAs($admin)
+            ->get('/admin/growth')
+            ->assertOk()
+            ->assertSee(__('messages.home_test'))
+            ->assertSee(__('messages.home_test_page_new'))
+            ->assertSee(__('messages.home_test_schedules'))
+            ->assertSee(__('messages.home_test_end_new'))
+            ->assertSee(__('messages.home_test_end_full'))
+            ->assertDontSee(__('messages.hero_test_chance_best'));
+    }
+
+    private function endAsAdmin(array $data)
+    {
+        config(['app.hosted' => true]);
+
+        $admin = User::factory()->create(['email_verified_at' => now()]);
+        $admin->forceFill(['is_admin' => true])->save();
+
+        return $this->withSession(['admin_password_confirmed_at' => now()->timestamp])
+            ->actingAs($admin)
+            ->post('/admin/growth/hero-test/end', $data);
     }
 
     private function resetAsAdmin(array $data = [], bool $hosted = true)

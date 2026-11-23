@@ -75,7 +75,11 @@ class AdminController extends Controller
             return redirect()->route('home');
         }
 
-        return view('admin.confirm-password');
+        // Arriving from the invitation to join the network: say why a password is asked for.
+        $intended = (string) session('url.intended', '');
+        $fromInvite = str_contains($intended, 'card=federation') && str_contains($intended, 'from=invite');
+
+        return view('admin.confirm-password', ['fromFederationInvite' => $fromInvite]);
     }
 
     /**
@@ -223,6 +227,22 @@ class AdminController extends Controller
             ->whereBetween('created_at', [$startDate, $endDate])
             ->count();
 
+        // The same three for organizers alone, for the "Signups by method" card's choice of
+        // Organizers, Other accounts or All. An organizer is the funnel's: no sign-up intent (the
+        // accounts from before it was recorded) or "organizer"; the others came to follow, buy,
+        // subscribe or send a request. Other accounts are All minus these, in the page.
+        $organizerMethods = User::whereNotNull('email_verified_at')
+            ->where('email', '!=', DemoService::DEMO_EMAIL)
+            ->where(fn ($q) => $q->whereNull('signup_intent')->orWhere('signup_intent', 'organizer'))
+            ->whereBetween('created_at', [$startDate, $endDate])
+            ->selectRaw('SUM(password IS NOT NULL AND google_oauth_id IS NULL) as email, '
+                .'SUM(google_oauth_id IS NOT NULL AND password IS NULL) as google, '
+                .'SUM(password IS NOT NULL AND google_oauth_id IS NOT NULL) as hybrid')
+            ->first();
+        $emailOrganizersInPeriod = (int) ($organizerMethods->email ?? 0);
+        $googleOrganizersInPeriod = (int) ($organizerMethods->google ?? 0);
+        $hybridOrganizersInPeriod = (int) ($organizerMethods->hybrid ?? 0);
+
         // Trends data for signup methods
         $trendData = $this->getTrendData($startDate, $endDate);
 
@@ -320,6 +340,9 @@ class AdminController extends Controller
             'emailUsersInPeriod',
             'googleUsersInPeriod',
             'hybridUsersInPeriod',
+            'emailOrganizersInPeriod',
+            'googleOrganizersInPeriod',
+            'hybridOrganizersInPeriod',
             'trendData',
             'range',
             'topUtmSources',
@@ -1096,6 +1119,39 @@ class AdminController extends Controller
     }
 
     /**
+     * End the homepage's page round on one of its two pages (HeroExperiment::end()): from then on
+     * every visitor is given that page and the other is no longer printed. Ending it on today's
+     * page is also the switch that takes the light page off at once. Reset starts the round over.
+     */
+    public function growthEndHeroTest(Request $request): RedirectResponse
+    {
+        if (! auth()->user()->isAdmin()) {
+            return redirect()->back()->with('error', __('messages.not_authorized'));
+        }
+        abort_unless(config('app.hosted') && config('app.is_nexus'), 404);
+
+        $key = $request->input('variant');
+        $range = $request->input('range');
+        $back = route('admin.growth', is_string($range) && $range !== '' ? ['range' => $range] : []).'#hero-test';
+
+        if (! is_string($key) || ! HeroExperiment::end($key)) {
+            return redirect($back)->with('error', __('messages.invalid_request'));
+        }
+
+        AuditService::log(
+            AuditService::ADMIN_UPDATE,
+            auth()->id(),
+            null,
+            null,
+            null,
+            null,
+            'Ended the homepage test on '.$key,
+        );
+
+        return redirect($back)->with('message', __('messages.hero_test_ended_done'));
+    }
+
+    /**
      * Get date range based on selection. See AdminDateRange, which the growth endpoint and
      * app:export-growth share so a range means the same window everywhere.
      */
@@ -1151,10 +1207,12 @@ class AdminController extends Controller
             ->orderBy('period')
             ->get();
 
-        // Email users trend (users with password, no google_oauth_id)
+        // Email users trend (users with password, no google_oauth_id), and how many of them are
+        // organizers (the users page's Signups by method card can show either, or the rest).
         $emailUsersTrend = User::select(
             $dateFormatExpr,
-            DB::raw('COUNT(*) as count')
+            DB::raw('COUNT(*) as count'),
+            DB::raw("SUM(signup_intent IS NULL OR signup_intent = 'organizer') as organizers")
         )
             ->whereNotNull('email_verified_at')
             ->where('email', '!=', DemoService::DEMO_EMAIL)
@@ -1172,7 +1230,8 @@ class AdminController extends Controller
                 'weekly' => DB::raw("DATE_FORMAT(created_at, '%Y-%u') as period"),
                 'monthly' => DB::raw("DATE_FORMAT(created_at, '%Y-%m') as period"),
             },
-            DB::raw('COUNT(*) as count')
+            DB::raw('COUNT(*) as count'),
+            DB::raw("SUM(signup_intent IS NULL OR signup_intent = 'organizer') as organizers")
         )
             ->whereNotNull('email_verified_at')
             ->where('email', '!=', DemoService::DEMO_EMAIL)
@@ -1190,7 +1249,8 @@ class AdminController extends Controller
                 'weekly' => DB::raw("DATE_FORMAT(created_at, '%Y-%u') as period"),
                 'monthly' => DB::raw("DATE_FORMAT(created_at, '%Y-%m') as period"),
             },
-            DB::raw('COUNT(*) as count')
+            DB::raw('COUNT(*) as count'),
+            DB::raw("SUM(signup_intent IS NULL OR signup_intent = 'organizer') as organizers")
         )
             ->whereNotNull('email_verified_at')
             ->where('email', '!=', DemoService::DEMO_EMAIL)
@@ -1288,6 +1348,7 @@ class AdminController extends Controller
         $emailUsersData = $allPeriods->map(fn ($period) => $emailUsersTrend->firstWhere('period', $period)?->count ?? 0)->toArray();
         $googleUsersData = $allPeriods->map(fn ($period) => $googleUsersTrend->firstWhere('period', $period)?->count ?? 0)->toArray();
         $hybridUsersData = $allPeriods->map(fn ($period) => $hybridUsersTrend->firstWhere('period', $period)?->count ?? 0)->toArray();
+        $organizers = fn ($trend) => $allPeriods->map(fn ($period) => (int) ($trend->firstWhere('period', $period)?->organizers ?? 0))->toArray();
 
         $revenueData = $allPeriods->map(fn ($period) => (float) ($revenueTrend->firstWhere('period', $period)?->total ?? 0))->toArray();
 
@@ -1299,6 +1360,9 @@ class AdminController extends Controller
             'emailUsers' => $emailUsersData,
             'googleUsers' => $googleUsersData,
             'hybridUsers' => $hybridUsersData,
+            'emailOrganizers' => $organizers($emailUsersTrend),
+            'googleOrganizers' => $organizers($googleUsersTrend),
+            'hybridOrganizers' => $organizers($hybridUsersTrend),
             'revenue' => $revenueData,
         ];
     }
@@ -2878,8 +2942,14 @@ class AdminController extends Controller
         // docs) ask for the network card with a query string: intended() keeps it, where it
         // drops a #fragment. Browsers do keep a fragment from a Location header, so turn it
         // back into the anchor here.
-        if ($request->query('card') === 'federation') {
-            return redirect()->to(route('admin.settings').'#federation');
+        if (in_array($request->query('card'), ['federation', 'home-schedule'], true)) {
+            // From the dashboard's invitation to join the network: the card is marked and says
+            // what happens next, once (admin/settings).
+            $redirect = redirect()->to(route('admin.settings').'#'.$request->query('card'));
+
+            return $request->query('card') === 'federation' && $request->query('from') === 'invite'
+                ? $redirect->with('federation_from_invite', true)
+                : $redirect;
         }
 
         // The nexus never renders the federation card, so skip the queries that feed
@@ -2947,6 +3017,18 @@ class AdminController extends Controller
             'federationLastSyncedAt' => Setting::get('federation_last_synced_at'),
             'federationLastError' => Setting::get('federation_last_error'),
             'federationListingsUrl' => Setting::get('federation_listings_url'),
+            // Visits the network sent here in the last 30 days, as its last answer said. Null
+            // until a network that counts them has answered.
+            'federationVisits' => Setting::get('federation_visits_30d') === null ? null : (int) Setting::get('federation_visits_30d'),
+            'federationFromInvite' => (bool) session('federation_from_invite'),
+            // The schedule a selfhost install shows at its own address (App\Support\HomeSchedule).
+            'homeScheduleAvailable' => \App\Support\HomeSchedule::available(),
+            'homeScheduleId' => \App\Support\HomeSchedule::id(),
+            'homeScheduleChoices' => \App\Support\HomeSchedule::available() ? \App\Support\HomeSchedule::choices() : collect(),
+            // The network has this install at an older address: events wait until it has the new one.
+            'federationAddressPending' => $federation->addressPending(),
+            'federationNetworkUrl' => Setting::get('federation_network_url'),
+            'federationOwnUrl' => $federation->ownUrl(),
             // The whole point of enabling this is knowing exactly what leaves your
             // install, so show it rather than describing it - including why a listed
             // event has not gone yet.
@@ -3073,6 +3155,48 @@ class AdminController extends Controller
         );
 
         return redirect()->route('admin.settings')->with('success', __('messages.settings_saved'));
+    }
+
+    /**
+     * Which schedule a selfhost install shows at its own address, if any (App\Support\HomeSchedule).
+     * Its own endpoint, like the other cards: a shared one would have to carry this through.
+     */
+    public function updateHomeSchedule(Request $request): RedirectResponse
+    {
+        if (! auth()->user()->isAdmin() || ! \App\Support\HomeSchedule::available()) {
+            return redirect()->back()->with('error', __('messages.not_authorized'));
+        }
+
+        // Only from the set the card offers, by encoded id like every id the page prints.
+        $offered = \App\Support\HomeSchedule::choices()
+            ->mapWithKeys(fn ($role) => [UrlUtils::encodeId($role->id) => $role->id]);
+
+        $request->validate([
+            'home_schedule' => ['nullable', 'string', Rule::in($offered->keys()->all())],
+        ]);
+
+        if (is_demo_mode()) {
+            return redirect()->route('admin.settings')->with('error', __('messages.demo_mode_settings_disabled'));
+        }
+
+        $old = ['home_schedule_id' => \App\Support\HomeSchedule::id()];
+        $new = ['home_schedule_id' => $request->filled('home_schedule') ? $offered[$request->input('home_schedule')] : null];
+
+        if ($old !== $new) {
+            \App\Support\HomeSchedule::set($new['home_schedule_id']);
+
+            AuditService::log(
+                AuditService::ADMIN_SETTINGS_UPDATE,
+                auth()->id(),
+                null,
+                null,
+                $old,
+                $new,
+                'Updated home schedule',
+            );
+        }
+
+        return redirect()->to(route('admin.settings').'#home-schedule')->with('success', __('messages.settings_saved'));
     }
 
     /**
@@ -4023,6 +4147,11 @@ class AdminController extends Controller
         if (config('app.is_nexus')) {
             abort(404);
         }
+
+        // The website's PHP, for an update later run from the command line; and what an update
+        // left undone, for an install whose cron does not run (finishUpdate()).
+        AppUpdateService::recordPhp('web');
+        AppUpdateService::finishUpdate(fromPage: true);
 
         return view('admin.app-update', [
             'version_installed' => $appUpdate->versionInstalled(),

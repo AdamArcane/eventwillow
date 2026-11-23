@@ -2,11 +2,14 @@
 
 namespace App\Utils;
 
+use App\Exceptions\ContentModerationException;
 use App\Models\Event;
 use App\Models\Role;
 use App\Services\UsageTrackingService;
 use Carbon\Carbon;
 use Illuminate\Support\Str;
+use Sentry\Severity;
+use Sentry\State\Scope;
 
 class GeminiUtils
 {
@@ -45,6 +48,26 @@ class GeminiUtils
         'performer_website' => 255,
         'category_name' => 100,           // events.category_name
     ];
+
+    /**
+     * The text model when GEMINI_TRANSLATION_MODEL / GEMINI_CONTENT_MODEL name none (config/services.php
+     * reads this too). gemini-2.5-flash stops on 2026-12-01 and is redirected to 3.5 Flash-Lite, which
+     * on our own prompts misspelled a venue's name in Hebrew and dated an Israeli flyer's "7.8" in
+     * the past (8 July); 3.5 Flash got both right.
+     */
+    public const DEFAULT_MODEL = 'gemini-3.5-flash';
+
+    /**
+     * How hard a Gemini 3+ model thinks, by purpose. Left to its default it thinks at length on
+     * every call: a three-word venue name took 2 to 8 seconds where 2.5 Flash took 1 to 2.
+     */
+    private const THINKING_LEVEL = [
+        'translation' => 'low',
+        'content' => 'low',
+    ];
+
+    /** A 'thinking_level' that sends none, so the model thinks as long as it likes (the blog). */
+    public const THINKING_MODEL_DEFAULT = 'model-default';
 
     /** Set by fakeResponses(). Never consulted outside a test run. */
     private static ?\Closure $fakeResponder = null;
@@ -134,6 +157,33 @@ class GeminiUtils
         return $v;
     }
 
+    /**
+     * The generationConfig a caller asked for, fitted to the model it goes to.
+     *
+     * From Gemini 3 a model ignores temperature, top_p and top_k (Google: "deprecated and ignored")
+     * and is steered by a thinking level instead, which 2.x refuses with a 400. So on 3+ the sampling
+     * keys are dropped and a thinking level is set, unless the caller set one ('thinking_level' in
+     * $options, or thinkingConfig in generation_config) or asked for THINKING_MODEL_DEFAULT; on 2.x,
+     * or any name that is not "gemini-<n>", the caller's config goes as it is, which keeps an
+     * operator's own model working.
+     */
+    public static function generationConfigFor(string $model, array $generation, string $purpose, ?string $thinkingLevel = null): array
+    {
+        if (! preg_match('/^gemini-(\d+)/', $model, $m) || (int) $m[1] < 3) {
+            return $generation;
+        }
+
+        unset($generation['temperature'], $generation['top_p'], $generation['topP'], $generation['top_k'], $generation['topK']);
+
+        if ($thinkingLevel !== self::THINKING_MODEL_DEFAULT && ! isset($generation['thinkingConfig']) && ! isset($generation['thinking_config'])) {
+            $generation['thinkingConfig'] = [
+                'thinkingLevel' => $thinkingLevel ?? self::THINKING_LEVEL[$purpose] ?? self::THINKING_LEVEL['content'],
+            ];
+        }
+
+        return $generation;
+    }
+
     private static function sendRequest($prompt, $imageData = null, $purpose = 'content', $options = [])
     {
         if (self::$fakeResponder !== null && app()->runningUnitTests()) {
@@ -166,7 +216,7 @@ class GeminiUtils
             $model = $options['model'];
         } else {
             $modelKey = $purpose === 'translation' ? 'gemini_translation_model' : 'gemini_content_model';
-            $model = config("services.google.{$modelKey}", 'gemini-2.5-flash');
+            $model = config("services.google.{$modelKey}") ?: self::DEFAULT_MODEL;
         }
 
         if (config('app.is_testing')) {
@@ -185,7 +235,7 @@ class GeminiUtils
             // Callers may add to this (translate() pins temperature to 0); they cannot drop the
             // JSON mime type, which every response parser in this file depends on.
             'generationConfig' => array_merge(
-                $options['generation_config'] ?? [],
+                self::generationConfigFor($model, $options['generation_config'] ?? [], $purpose, $options['thinking_level'] ?? null),
                 ['response_mime_type' => 'application/json'],
             ),
         ];
@@ -232,8 +282,8 @@ class GeminiUtils
         if ($curlErrno === CURLE_OPERATION_TIMEDOUT) {
             $exception = new \Exception('Gemini API request timed out');
 
-            \Sentry\withScope(function (\Sentry\State\Scope $scope) use ($exception, $prompt): void {
-                $scope->setLevel(\Sentry\Severity::warning());
+            \Sentry\withScope(function (Scope $scope) use ($exception, $prompt): void {
+                $scope->setLevel(Severity::warning());
                 $scope->setTag('service', 'gemini');
                 $scope->setTag('error_type', 'timeout');
                 $scope->setContext('gemini_api', [
@@ -259,8 +309,8 @@ class GeminiUtils
                     // Log to Sentry but don't throw - return null so user doesn't see error
                     $exception = new \Exception('Gemini API quota exceeded: '.$errorMessage);
 
-                    \Sentry\withScope(function (\Sentry\State\Scope $scope) use ($exception, $httpCode, $response, $prompt): void {
-                        $scope->setLevel(\Sentry\Severity::error());
+                    \Sentry\withScope(function (Scope $scope) use ($exception, $httpCode, $response, $prompt): void {
+                        $scope->setLevel(Severity::error());
                         $scope->setTag('service', 'gemini');
                         $scope->setTag('error_type', 'quota_exceeded');
                         $scope->setContext('gemini_api', [
@@ -282,8 +332,8 @@ class GeminiUtils
                     // Log to Sentry but don't throw - return null so user doesn't see error
                     $exception = new \Exception('Gemini API model overloaded: '.$errorMessage);
 
-                    \Sentry\withScope(function (\Sentry\State\Scope $scope) use ($exception, $httpCode, $response, $prompt, $errorStatus): void {
-                        $scope->setLevel(\Sentry\Severity::warning());
+                    \Sentry\withScope(function (Scope $scope) use ($exception, $httpCode, $response, $prompt, $errorStatus): void {
+                        $scope->setLevel(Severity::warning());
                         $scope->setTag('service', 'gemini');
                         $scope->setTag('error_type', 'model_overloaded');
                         $scope->setContext('gemini_api', [
@@ -431,8 +481,8 @@ class GeminiUtils
         }
         // Add language preservation instruction
         if ($role->language_code && $role->language_code !== 'en') {
-            $langName = config('app.supported_languages')[$role->language_code] ?? $role->language_code;
-            $prompt .= "\nIMPORTANT: The input is in ".ucfirst($langName).'. Keep event_name, short_description, event_details, event_address, event_city, event_state, venue_name, and performer_name in the original '.ucfirst($langName).". Only the _en fields should contain English translations.\n";
+            $langName = self::languageName($role->language_code);
+            $prompt .= "\nIMPORTANT: The input is in ".$langName.'. Keep event_name, short_description, event_details, event_address, event_city, event_state, venue_name, and performer_name in the original '.$langName.". Only the _en fields should contain English translations.\n";
         }
 
         $prompt .= $details;
@@ -1254,9 +1304,10 @@ class GeminiUtils
         $prompt = self::buildTranslatePrompt((string) $text, (string) $from, (string) $to, $glossary, $options);
 
         $response = self::sendRequest($prompt, null, 'translation', [
-            // Translation is a determinism task. At the model default a flash model drifts from
+            // Translation is a determinism task. At the model default a 2.x flash model drifts from
             // "translate this" into "answer about this", which is how a venue name came back as a
-            // paragraph describing the venue.
+            // paragraph describing the venue. Gemini 3+ ignores temperature (generationConfigFor()
+            // drops it); there the prompt's rules hold it (three runs of each venue name agreed).
             'generation_config' => ['temperature' => 0],
         ]);
 
@@ -1303,17 +1354,17 @@ class GeminiUtils
     {
         $config = config('ai_prompts.translate');
 
-        $glossaryInstruction = '';
-        if (! empty($glossary)) {
-            $glossaryLines = [];
-            foreach ($glossary as $original => $translation) {
-                $glossaryLines[] = str_replace([':original', ':translation'], [$original, $translation], $config['glossary_line']);
-            }
-            $glossaryInstruction = $config['glossary_header'].implode("\n", $glossaryLines)."\n";
+        $glossaryInstruction = self::glossaryInstruction($glossary);
+
+        // A second asking, after the first answer lost a term the glossary keeps
+        // (Translate::translateText()): the terms it lost, named once more.
+        if (! empty($options['keep_reminder'])) {
+            $glossaryInstruction .= str_replace(':terms', implode(', ', array_map(fn ($term) => '"'.self::quoted($term).'"', (array) $options['keep_reminder'])), $config['glossary_reminder'])."\n";
         }
 
         $kind = $options['kind'] ?? null;
-        $kindInstruction = $kind ? ($config['kind_'.$kind] ?? '') : '';
+        // The variant's own rules lead (European Portuguese, say), then what kind of text it is.
+        $kindInstruction = self::languageVariantInstruction($to).($kind ? ($config['kind_'.$kind] ?? '') : '');
 
         $lengthInstruction = '';
         $hint = self::translationLengthHint($text, $options['max_length'] ?? null);
@@ -1335,6 +1386,57 @@ class GeminiUtils
         );
 
         return $prompt."\n".$text;
+    }
+
+    /**
+     * The glossary as an instruction: term => translation, where a null translation means the term
+     * is kept exactly as written (App\Services\TranslationGlossary). Fixed translations first, in
+     * the wording the prompt has always had, then the terms to keep under a header of their own,
+     * because "translate X as X" is read by a model as a suggestion and "keep X" as a rule.
+     */
+    public static function glossaryInstruction(array $glossary): string
+    {
+        $config = config('ai_prompts.translate');
+        $fixed = [];
+        $kept = [];
+
+        foreach ($glossary as $original => $translation) {
+            if ($translation === null || $translation === '') {
+                $kept[] = str_replace(':original', self::quoted($original), $config['glossary_keep_line']);
+            } else {
+                $fixed[] = str_replace([':original', ':translation'], [self::quoted($original), self::quoted($translation)], $config['glossary_line']);
+            }
+        }
+
+        $instruction = '';
+        if ($fixed) {
+            $instruction .= $config['glossary_header'].implode("\n", $fixed)."\n";
+        }
+        if ($kept) {
+            // Its leading space joins the prompt's first sentence; after the fixed list it would
+            // start a line with a space.
+            $header = $fixed ? ltrim($config['glossary_keep_header']) : $config['glossary_keep_header'];
+            $instruction .= $header.implode("\n", $kept)."\n";
+        }
+
+        return $instruction;
+    }
+
+    /**
+     * A term as it goes between the prompt's double quotes: a quote or a backslash in it is escaped,
+     * so a term cannot end its own line and start an instruction of its own.
+     */
+    private static function quoted(mixed $value): string
+    {
+        return addcslashes((string) $value, "\\\"");
+    }
+
+    /** The glossary ahead of a batch prompt (names, labels, options), where it is a block of its own. */
+    private static function withGlossary(string $prompt, array $glossary): string
+    {
+        $instruction = trim(self::glossaryInstruction($glossary));
+
+        return $instruction === '' ? $prompt : $instruction."\n\n".$prompt;
     }
 
     /**
@@ -1431,15 +1533,41 @@ class GeminiUtils
      */
     private static function languageName(string $code): string
     {
+        // A variant names itself: "Portuguese_portugal" is a translation key, not a language, and
+        // a model told "Portuguese" writes Brazilian Portuguese.
+        if (is_string($name = config('ai_prompts.language_variants.'.$code.'.name'))) {
+            return $name;
+        }
+
         $languages = config('app.supported_languages', []);
 
         return isset($languages[$code]) ? ucfirst($languages[$code]) : $code;
     }
 
     /**
+     * What a target that is one variant of a language needs said beyond its name (European
+     * Portuguese: a handful of the words and the grammar that tell it from Brazilian), with a
+     * leading space, or '' for every other language, whose prompts stay exactly as they were.
+     */
+    public static function languageVariantInstruction(string $to): string
+    {
+        $instruction = config('ai_prompts.language_variants.'.$to.'.instruction');
+
+        return is_string($instruction) ? $instruction : '';
+    }
+
+    /** The variant's rules ahead of a batch prompt (names, labels, options), as a block of their own. */
+    private static function withLanguageVariant(string $prompt, string $to): string
+    {
+        $instruction = trim(self::languageVariantInstruction($to));
+
+        return $instruction === '' ? $prompt : $instruction."\n\n".$prompt;
+    }
+
+    /**
      * Batch translate group names into the target language using Gemini API
      */
-    public static function translateGroupNames($groupNames, $fromLanguage = 'auto', $to = 'en')
+    public static function translateGroupNames($groupNames, $fromLanguage = 'auto', $to = 'en', array $glossary = [])
     {
         if (empty($groupNames)) {
             return [];
@@ -1447,6 +1575,8 @@ class GeminiUtils
 
         // Create a single prompt for batch translation
         $prompt = str_replace([':from', ':to', ':names'], [$fromLanguage, self::languageName($to), json_encode($groupNames)], config('ai_prompts.translate_group_names.base'));
+        $prompt = self::withLanguageVariant($prompt, (string) $to);
+        $prompt = self::withGlossary($prompt, $glossary);
 
         try {
             $response = self::sendRequest($prompt, null, 'translation');
@@ -1487,7 +1617,7 @@ class GeminiUtils
     /**
      * Batch translate custom field names into the target language using Gemini API
      */
-    public static function translateCustomFieldNames($fieldNames, $fromLanguage = 'auto', $to = 'en')
+    public static function translateCustomFieldNames($fieldNames, $fromLanguage = 'auto', $to = 'en', array $glossary = [])
     {
         if (empty($fieldNames)) {
             return [];
@@ -1495,6 +1625,8 @@ class GeminiUtils
 
         // Create a single prompt for batch translation
         $prompt = str_replace([':from', ':to', ':names'], [$fromLanguage, self::languageName($to), json_encode($fieldNames)], config('ai_prompts.translate_custom_field_names.base'));
+        $prompt = self::withLanguageVariant($prompt, (string) $to);
+        $prompt = self::withGlossary($prompt, $glossary);
 
         try {
             $response = self::sendRequest($prompt, null, 'translation');
@@ -1525,13 +1657,15 @@ class GeminiUtils
     /**
      * Batch translate custom field dropdown option values into the target language using Gemini API
      */
-    public static function translateCustomFieldOptions($optionValues, $fromLanguage = 'auto', $to = 'en')
+    public static function translateCustomFieldOptions($optionValues, $fromLanguage = 'auto', $to = 'en', array $glossary = [])
     {
         if (empty($optionValues)) {
             return [];
         }
 
         $prompt = str_replace([':from', ':to', ':values'], [$fromLanguage, self::languageName($to), json_encode($optionValues)], config('ai_prompts.translate_custom_field_options.base'));
+        $prompt = self::withLanguageVariant($prompt, (string) $to);
+        $prompt = self::withGlossary($prompt, $glossary);
 
         try {
             $response = self::sendRequest($prompt, null, 'translation');
@@ -1835,8 +1969,8 @@ class GeminiUtils
                 if (str_contains($errorMessage, 'quota') || str_contains($errorMessage, 'Quota exceeded')) {
                     $exception = new \Exception('Gemini image generation API quota exceeded: '.$errorMessage);
 
-                    \Sentry\withScope(function (\Sentry\State\Scope $scope) use ($exception, $httpCode, $response, $prompt): void {
-                        $scope->setLevel(\Sentry\Severity::error());
+                    \Sentry\withScope(function (Scope $scope) use ($exception, $httpCode, $response, $prompt): void {
+                        $scope->setLevel(Severity::error());
                         $scope->setTag('service', 'gemini');
                         $scope->setTag('error_type', 'quota_exceeded');
                         $scope->setContext('gemini_api', [
@@ -1856,8 +1990,8 @@ class GeminiUtils
                     str_contains(strtolower($errorMessage), 'overload')) {
                     $exception = new \Exception('Gemini image generation API model overloaded: '.$errorMessage);
 
-                    \Sentry\withScope(function (\Sentry\State\Scope $scope) use ($exception, $httpCode, $response, $prompt, $errorStatus): void {
-                        $scope->setLevel(\Sentry\Severity::warning());
+                    \Sentry\withScope(function (Scope $scope) use ($exception, $httpCode, $response, $prompt, $errorStatus): void {
+                        $scope->setLevel(Severity::warning());
                         $scope->setTag('service', 'gemini');
                         $scope->setTag('error_type', 'model_overloaded');
                         $scope->setContext('gemini_api', [
@@ -1888,7 +2022,7 @@ class GeminiUtils
         if ($prediction && isset($prediction['raiFilteredReason'])) {
             \Log::warning('Imagen image filtered by safety: '.$prediction['raiFilteredReason']);
 
-            throw new \App\Exceptions\ContentModerationException($prediction['raiFilteredReason']);
+            throw new ContentModerationException($prediction['raiFilteredReason']);
         }
 
         $imageData = $prediction['bytesBase64Encoded'] ?? null;
@@ -2523,7 +2657,7 @@ class GeminiUtils
         if ($prediction && isset($prediction['raiFilteredReason'])) {
             \Log::warning('Imagen image filtered by safety: '.$prediction['raiFilteredReason']);
 
-            throw new \App\Exceptions\ContentModerationException($prediction['raiFilteredReason']);
+            throw new ContentModerationException($prediction['raiFilteredReason']);
         }
 
         $imageData = $prediction['bytesBase64Encoded'] ?? null;
@@ -2606,7 +2740,8 @@ class GeminiUtils
      *   system       the system instruction
      *   schema       the answer's shape (Gemini's response_schema); with it the answer is always
      *                parseable, where "return ONLY raw JSON" in a prompt failed about one call in six
-     *   temperature  float
+     *   temperature  float (Gemini 2.x only; 3+ ignores it)
+     *   thinking_level  'minimal' | 'low' | 'medium' | 'high' | THINKING_MODEL_DEFAULT (3+ only)
      *   model        a model id, when this job wants another than the content model
      *   timeout      seconds
      *   stage        a name for this call, for a test's fake responder and nothing else
@@ -2620,6 +2755,9 @@ class GeminiUtils
 
         if (! empty($options['model'])) {
             $request['model'] = $options['model'];
+        }
+        if (! empty($options['thinking_level'])) {
+            $request['thinking_level'] = $options['thinking_level'];
         }
         if (trim((string) ($options['system'] ?? '')) !== '') {
             $request['system_instruction'] = trim((string) $options['system']);

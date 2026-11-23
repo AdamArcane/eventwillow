@@ -157,6 +157,27 @@ class TestEnvironmentTest extends TestCase
     }
 
     /**
+     * No test signs in to Search Console with the developer's service account, which reads the
+     * real site's search data. Mutation: drop the phpunit.xml entry on a machine with a key.
+     */
+    public function test_no_test_reads_search_console_with_the_developers_key(): void
+    {
+        $this->assertSame('', (string) config('services.search_console.credentials'), 'phpunit.xml must pin SEARCH_CONSOLE_CREDENTIALS empty.');
+        $this->assertFalse(app(\App\Services\SearchConsole::class)->configured());
+    }
+
+    /**
+     * No ticket page here draws an Apple Wallet button from the developer's own Pass Type ID
+     * certificate, which CI never has. Mutation: drop the phpunit.xml entries on a machine with one.
+     */
+    public function test_no_test_signs_apple_wallet_passes_with_the_developers_certificate(): void
+    {
+        $this->assertSame('', (string) config('services.apple.wallet_certificate'), 'phpunit.xml must pin APPLE_WALLET_CERTIFICATE empty.');
+        $this->assertSame('', (string) config('services.apple.wallet_pass_type_id'), 'phpunit.xml must pin APPLE_WALLET_PASS_TYPE_ID empty.');
+        $this->assertFalse(\App\Services\Wallet\AppleWalletService::isConfigured());
+    }
+
+    /**
      * The other half of the harness that only CI can disprove.
      *
      * public/build is gitignored and .github/workflows/test.yml never builds assets, so the real

@@ -3,19 +3,24 @@
 namespace App\Http\Controllers;
 
 use App\Jobs\EvaluateAbTestWinner;
+use App\Jobs\SendNewsletterBatch;
 use App\Models\Newsletter;
 use App\Models\NewsletterAbTest;
+use App\Models\NewsletterClick;
 use App\Models\NewsletterRecipient;
 use App\Models\NewsletterSegment;
 use App\Models\NewsletterSegmentUser;
 use App\Models\NewsletterTemplate;
 use App\Models\NewsletterUnsubscribe;
+use App\Models\Role;
 use App\Models\User;
+use App\Services\AudienceMailGuard;
 use App\Services\NewsletterService;
 use App\Utils\NewsletterBuilderRoutes;
 use App\Utils\UrlUtils;
 use Carbon\Carbon;
 use Illuminate\Http\Request;
+use Illuminate\Pagination\AbstractPaginator;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\RateLimiter;
 use Illuminate\Support\Str;
@@ -87,12 +92,51 @@ class NewsletterController extends Controller
     }
 
     /**
+     * Email sending paused on the owner's account or this person's (AudienceMailGuard, rule C).
+     * Asked before anything else on every send, because it holds whatever the audience is.
+     */
+    protected function mailPaused($role): bool
+    {
+        return AudienceMailGuard::mailPaused($role, auth()->user());
+    }
+
+    /**
+     * Why a send to these segments has nobody left to go to under rule A (everyone came from an
+     * import or was typed in by hand, and the owner has not paid), or null.
+     */
+    protected function onlyUnsolicited($role, array $segmentIds, int $count, NewsletterService $service): ?string
+    {
+        return $service->onlyUnsolicited($role, $segmentIds)
+            ? __('messages.newsletter_imported_unpaid')
+            : null;
+    }
+
+    /**
      * The clock a scheduled time is typed in: the person's own, else the schedule's. The builder
      * names it beside the field, so the two must be asked in one place.
      */
-    public static function scheduleTimezone(?\App\Models\Role $role): string
+    public static function scheduleTimezone(?Role $role): string
     {
         return auth()->user()->timezone ?: ($role?->timezone ?: 'UTC');
+    }
+
+    /**
+     * Why a repeat at $every to $count people could never go out on this plan, or null. A month
+     * holds up to five weekly runs. Only where there is a limit at all: newsletterLimit() is null
+     * on selfhost and with the schedule's own email settings.
+     */
+    protected function repeatTooBig(Role $role, int $count, string $every): ?string
+    {
+        $limit = $role->newsletterLimit();
+        if ($limit === null) {
+            return null;
+        }
+
+        $perMonth = $count * ($every === 'week' ? 5 : 1);
+
+        return $perMonth > $limit
+            ? __('messages.newsletter_repeat_too_big', ['count' => number_format($perMonth), 'limit' => number_format($limit)])
+            : null;
     }
 
     /** A variant of an A/B test that has not gone out yet. It is sent as a test, never on its own. */
@@ -156,6 +200,9 @@ class NewsletterController extends Controller
             $query = Newsletter::where('role_id', $selectedRoleId)
                 ->where('type', 'schedule')
                 ->where('status', '!=', 'cancelled')
+                // A repeating newsletter is pinned above the list ($repeating below), so a year of
+                // its own copies cannot push it to page 2.
+                ->where(fn ($q) => $q->whereNull('repeat')->orWhere('status', '!=', 'scheduled'))
                 // Variant B of a test is listed under its variant A, so the two read as one test.
                 // Without a live variant A it keeps a row of its own.
                 ->where(function ($q) {
@@ -183,15 +230,49 @@ class NewsletterController extends Controller
         }
 
         // Each variant B shown under its A, and how far every send in progress has got.
-        $variantsB = collect($newsletters instanceof \Illuminate\Pagination\AbstractPaginator ? $newsletters->items() : [])
+        $variantsB = collect($newsletters instanceof AbstractPaginator ? $newsletters->items() : [])
             ->filter(fn ($newsletter) => $newsletter->ab_variant === 'A' && $newsletter->abTest)
             ->mapWithKeys(fn ($newsletter) => [$newsletter->id => $newsletter->abTest->newsletters
                 ->first(fn ($variant) => $variant->ab_variant === 'B' && $variant->status !== 'cancelled')])
             ->filter();
-        $listed = collect($newsletters instanceof \Illuminate\Pagination\AbstractPaginator ? $newsletters->items() : [])->merge($variantsB->values());
+        $listed = collect($newsletters instanceof AbstractPaginator ? $newsletters->items() : [])->merge($variantsB->values());
         $progress = $this->sendingProgress($listed);
 
-        return view('newsletter.index', compact('roles', 'role', 'selectedRoleId', 'newsletters', 'sortBy', 'sortDir', 'variantsB', 'progress'));
+        // The repeating newsletters, on the first page only, each with the copy it last sent.
+        $repeating = collect();
+        $lastCopies = collect();
+        if ($role && (! $newsletters instanceof AbstractPaginator || $newsletters->currentPage() === 1)) {
+            $repeating = Newsletter::where('role_id', $role->id)
+                ->where('type', 'schedule')
+                ->where('status', 'scheduled')
+                ->whereNotNull('repeat')
+                ->orderBy('scheduled_at')
+                ->get()
+                ->filter(fn (Newsletter $newsletter) => $newsletter->isRepeating())
+                // repeatZone() reads the schedule, which is this one for every row.
+                ->each(fn (Newsletter $newsletter) => $newsletter->setRelation('role', $role))
+                ->values();
+
+            if ($repeating->isNotEmpty()) {
+                $lastCopies = Newsletter::whereIn('id', fn ($q) => $q->selectRaw('MAX(id)')
+                    ->from('newsletters')
+                    ->whereIn('repeat_parent_id', $repeating->pluck('id'))
+                    ->whereIn('status', ['sending', 'sent'])
+                    ->groupBy('repeat_parent_id'))
+                    ->get()
+                    ->keyBy('repeat_parent_id');
+            }
+        }
+
+        // Which of the copies on this page still have a repeating newsletter to lead back to.
+        $parentIds = $listed->pluck('repeat_parent_id')->filter()->unique()->values();
+        $liveParents = $parentIds->isEmpty() ? collect() : Newsletter::whereIn('id', $parentIds)
+            ->where('status', 'scheduled')
+            ->whereNotNull('repeat')
+            ->pluck('id')
+            ->flip();
+
+        return view('newsletter.index', compact('roles', 'role', 'selectedRoleId', 'newsletters', 'sortBy', 'sortDir', 'variantsB', 'progress', 'repeating', 'lastCopies', 'liveParents'));
     }
 
     public function create(Request $request)
@@ -325,6 +406,16 @@ class NewsletterController extends Controller
             return back()->with('error', __('messages.newsletter_already_sent'));
         }
 
+        // Waiting for review: what the operator reads is what goes, so it is not changed under
+        // them. Delete takes it out of the queue.
+        if ($newsletter->status === 'review') {
+            if ($request->header('X-Save-Before-Action')) {
+                return response()->json(['message' => __('messages.newsletter_in_review_locked')], 409);
+            }
+
+            return back()->with('error', __('messages.newsletter_in_review_locked'));
+        }
+
         $validated = $request->validate([
             'subject' => 'required|string|max:255',
             'blocks' => 'nullable|string',
@@ -337,6 +428,15 @@ class NewsletterController extends Controller
         $blocks = $this->parseBlocks($request);
         $service = app(NewsletterService::class);
 
+        // What an operator approved: its words and who it goes to. Read before the save.
+        $approvedAs = fn (Newsletter $n) => json_encode([
+            (string) $n->subject,
+            (string) (($n->style_settings ?? [])['previewText'] ?? ''),
+            $n->blocks ?? [],
+            array_values(array_map('intval', $n->segment_ids ?? [])),
+        ]);
+        $before = $newsletter->approved_at ? $approvedAs($newsletter) : null;
+
         $newsletter->update([
             'subject' => $validated['subject'],
             'blocks' => $blocks,
@@ -345,12 +445,25 @@ class NewsletterController extends Controller
             'segment_ids' => ! empty($validated['segment_ids']) ? array_map('intval', $validated['segment_ids']) : null,
         ]);
 
+        // An operator approved the newsletter they read: a change to what it says or who it goes
+        // to is not that one. A save that changed neither (the design, a re-save) keeps it.
+        if ($before !== null && $before !== $approvedAs($newsletter->fresh())) {
+            $newsletter->approved_at = null;
+        }
+
         // Derive event_ids from blocks
         $newsletter->event_ids = $service->deriveEventIds($newsletter);
         $newsletter->save();
 
         if ($request->header('X-Save-Before-Action')) {
             return response()->json(['saved' => true]);
+        }
+
+        // A repeating newsletter whose segments have grown past what the plan sends in a month
+        // would skip every run: saved, and said so now rather than in a mail on the day.
+        if ($newsletter->isRepeating()
+            && ($tooBig = $this->repeatTooBig($role, $service->resolveRecipients($role, $newsletter->segment_ids ?? [])->count(), $newsletter->repeatEvery()))) {
+            return back()->with('error', $tooBig);
         }
 
         return back()->with('status', __('messages.newsletter_saved'));
@@ -394,6 +507,10 @@ class NewsletterController extends Controller
             return back()->with('error', __('messages.ab_test_send_as_test'));
         }
 
+        if ($this->mailPaused($role)) {
+            return back()->with('error', __('messages.mail_paused_send'));
+        }
+
         if (! $role->canSendNewsletter()) {
             $limit = $role->newsletterLimit();
             $used = $role->newslettersSentThisMonth();
@@ -403,6 +520,10 @@ class NewsletterController extends Controller
 
         // Resolved once, and used by both checks below.
         $estimatedCount = $service->resolveRecipients($role, $newsletter->segment_ids ?? [])->count();
+
+        if ($refusal = $this->onlyUnsolicited($role, $newsletter->segment_ids ?? [], $estimatedCount, $service)) {
+            return back()->with('error', $refusal);
+        }
 
         // Trust gate, scaled to the size of the send. Checked here rather than before the
         // newsletter is loaded, because the recipient count is what decides it.
@@ -415,14 +536,37 @@ class NewsletterController extends Controller
             return back()->with('error', __('messages.newsletter_sync_queue_limit'));
         }
 
-        $result = $service->send($newsletter);
+        // A repeating newsletter is never sent itself, which would end the series: Send now
+        // sends one copy of it, by the person pressing it, and the series runs on.
+        $result = $newsletter->isRepeating()
+            ? $service->sendCopyNow($newsletter, auth()->user())
+            : $service->send($newsletter);
 
         if ($result === false) {
             return back()->with('error', __('messages.newsletter_send_failed'));
         }
 
+        if (is_array($result) && in_array($result[0], ['no_events', 'picked_passed'], true)) {
+            return back()->with('error', __('messages.newsletter_repeat_reason_'.$result[0]));
+        }
+
         if (is_array($result) && $result[0] === 'no_recipients') {
             return back()->with('error', __('messages.newsletter_no_recipients'));
+        }
+
+        if (is_array($result) && $result[0] === 'mail_paused') {
+            return back()->with('error', __('messages.mail_paused_send'));
+        }
+
+        if (is_array($result) && $result[0] === 'imported_unpaid') {
+            return back()->with('error', __('messages.newsletter_imported_unpaid'));
+        }
+
+        // Held for a quick review (AudienceMailGuard, rule B): said plainly, on the list where
+        // the newsletter now waits.
+        if (is_array($result) && $result[0] === 'review') {
+            return redirect()->route('newsletter.index', $this->roleIdParam($role))
+                ->with('status', __('messages.newsletter_held_for_review'));
         }
 
         if (is_array($result) && $result[0] === 'requires_verification') {
@@ -454,10 +598,18 @@ class NewsletterController extends Controller
             ->where('id', UrlUtils::decodeId($hash))
             ->firstOrFail();
 
+        if ($this->mailPaused($role)) {
+            return back()->with('error', __('messages.mail_paused_send'));
+        }
+
         // Scaled the same way as send(): the deferred send runs through NewsletterService::send(),
         // which applies this same gate, so refusing a small send here would be inconsistent.
-        $estimatedCount = app(NewsletterService::class)
-            ->resolveRecipients($role, $newsletter->segment_ids ?? [])->count();
+        $service = app(NewsletterService::class);
+        $estimatedCount = $service->resolveRecipients($role, $newsletter->segment_ids ?? [])->count();
+
+        if ($refusal = $this->onlyUnsolicited($role, $newsletter->segment_ids ?? [], $estimatedCount, $service)) {
+            return back()->with('error', $refusal);
+        }
 
         if ($this->requiresNewsletterVerification($role, $estimatedCount)) {
             return back()->with('error', __('messages.newsletter_requires_verification', ['limit' => (int) config('usage.audience_mail_unverified_max_recipients', 50)]));
@@ -480,21 +632,58 @@ class NewsletterController extends Controller
 
         $request->validate([
             'scheduled_at' => 'required|date',
+            'repeat' => 'nullable|in:'.implode(',', Newsletter::REPEAT_EVERY),
         ]);
 
-        $timezone = $this->scheduleTimezone($role);
-        $scheduledAtUtc = Carbon::parse($request->scheduled_at, $timezone)->setTimezone('UTC');
+        $every = $request->input('repeat') ?: null;
+
+        // A repeat runs on the schedule's clock, whoever sets it (Newsletter::repeatZone()), so
+        // the time typed for one is read there; a single send is read in the person's own. A
+        // newsletter that repeats now showed its time on the schedule's clock, and is read
+        // there when its repeat is turned off too, or the send would move by the difference.
+        $timezone = $every || $newsletter->isRepeating() ? Newsletter::zoneOf($role) : $this->scheduleTimezone($role);
+        $local = Carbon::parse($request->scheduled_at, $timezone);
+        $scheduledAtUtc = $local->copy()->setTimezone('UTC');
 
         if ($scheduledAtUtc->lte(now())) {
             return back()->withErrors(['scheduled_at' => __('messages.newsletter_schedule_in_past')]);
         }
 
-        $newsletter->update([
+        if (! $every) {
+            $newsletter->forceFill([
+                'status' => 'scheduled',
+                'scheduled_at' => $scheduledAtUtc,
+                'repeat' => null,
+            ])->save();
+
+            return back()->with('status', __('messages.newsletter_scheduled'));
+        }
+
+        if ($newsletter->ab_test_id) {
+            return back()->with('error', __('messages.newsletter_repeat_no_ab_test'));
+        }
+
+        if ($refusal = $this->repeatTooBig($role, $estimatedCount, $every)) {
+            return back()->with('error', $refusal);
+        }
+
+        // The anchor every run is counted from. Saving the dialog again with the time it shows
+        // (the NEXT run) and the same cadence keeps the one already stored: a monthly anchor on
+        // the 31st that shows Feb 28 must not become the 28th.
+        $typed = $local->format('Y-m-d H:i');
+        $stored = $newsletter->isRepeating() ? $newsletter->repeat : null;
+        $shownNext = $stored ? $newsletter->scheduled_at->copy()->setTimezone($timezone)->format('Y-m-d H:i') : null;
+        $anchor = $stored && $stored['every'] === $every && $shownNext === $typed ? $stored['at'] : $typed;
+
+        $newsletter->forceFill([
             'status' => 'scheduled',
             'scheduled_at' => $scheduledAtUtc,
-        ]);
+            'repeat' => ['every' => $every, 'at' => $anchor],
+        ])->save();
 
-        return back()->with('status', __('messages.newsletter_scheduled'));
+        return back()->with('status', __('messages.newsletter_repeat_started_'.$every, [
+            'date' => $local->copy()->locale(app()->getLocale())->translatedFormat(get_use_24_hour_time($role) ? 'M j, Y H:i' : 'M j, Y g:i A'),
+        ]));
     }
 
     public function cancel(Request $request, string $hash)
@@ -510,12 +699,16 @@ class NewsletterController extends Controller
             return back()->with('error', __('messages.newsletter_not_scheduled'));
         }
 
-        $newsletter->update([
+        $wasRepeating = $newsletter->isRepeating();
+
+        // forceFill: repeat is not fillable, and update() would leave it set without a word.
+        $newsletter->forceFill([
             'status' => 'draft',
             'scheduled_at' => null,
-        ]);
+            'repeat' => null,
+        ])->save();
 
-        return back()->with('status', __('messages.newsletter_cancelled'));
+        return back()->with('status', __($wasRepeating ? 'messages.newsletter_repeat_stopped' : 'messages.newsletter_cancelled'));
     }
 
     public function cloneNewsletter(Request $request, string $hash)
@@ -527,7 +720,8 @@ class NewsletterController extends Controller
             ->where('id', UrlUtils::decodeId($hash))
             ->firstOrFail();
 
-        $copy = $newsletter->replicate();
+        // A clone is a new draft: it does not repeat, and is not a copy a repeat sent.
+        $copy = $newsletter->replicate(['repeat', 'repeat_parent_id', 'events_as_of']);
         $copy->status = 'draft';
         $copy->scheduled_at = null;
         $copy->sent_at = null;
@@ -603,6 +797,10 @@ class NewsletterController extends Controller
             return back()->with($status === 200 ? 'status' : 'error', $message);
         };
 
+        if ($this->mailPaused($role)) {
+            return $answer(__('messages.mail_paused_send'), 422);
+        }
+
         if ($this->requiresNewsletterVerification($role, 1)) {
             return $answer(__('messages.newsletter_requires_verification', ['limit' => (int) config('usage.audience_mail_unverified_max_recipients', 50)]), 422);
         }
@@ -675,7 +873,7 @@ class NewsletterController extends Controller
             ->withQueryString();
 
         // Top clicked links
-        $topLinks = \App\Models\NewsletterClick::whereHas('recipient', function ($q) use ($newsletter) {
+        $topLinks = NewsletterClick::whereHas('recipient', function ($q) use ($newsletter) {
             $q->where('newsletter_id', $newsletter->id)->where('status', '!=', 'test');
         })
             ->selectRaw('url, COUNT(*) as click_count')
@@ -694,7 +892,7 @@ class NewsletterController extends Controller
             ->get();
 
         // Click timeline data
-        $clickTimeline = \App\Models\NewsletterClick::whereHas('recipient', function ($q) use ($newsletter) {
+        $clickTimeline = NewsletterClick::whereHas('recipient', function ($q) use ($newsletter) {
             $q->where('newsletter_id', $newsletter->id)->where('status', '!=', 'test');
         })
             ->selectRaw('DATE(clicked_at) as date, COUNT(*) as count')
@@ -770,9 +968,22 @@ class NewsletterController extends Controller
         $used = $limit !== null ? $role->newslettersSentThisMonth() : 0;
         $verificationLimit = (int) config('usage.audience_mail_unverified_max_recipients', 50);
 
+        $segmentIds = $segments->pluck('id')->all();
+        $leftOut = $service->unsolicitedLeftOut($role, $segmentIds);
+
         // What stops it altogether, then what stops only an immediate send.
         $refusal = null;
-        if (! $role->canSendNewsletter()) {
+        // Read-only: a GET never records a pause (AudienceMailGuard::mailPausedForDisplay()).
+        if (AudienceMailGuard::mailPausedForDisplay($role, auth()->user())) {
+            $refusal = ['message' => __('messages.mail_paused_send'), 'links' => [
+                ['label' => __('messages.mail_access_request'), 'url' => route('newsletter.index', ['role_id' => UrlUtils::encodeId($role->id)])],
+            ]];
+        } elseif ($service->onlyUnsolicited($role, $segmentIds)) {
+            $refusal = ['message' => __('messages.newsletter_imported_unpaid'), 'links' => array_values(array_filter([
+                config('cashier.key') ? ['label' => __('messages.newsletter_upgrade_plan'), 'url' => route('role.subscribe', ['subdomain' => $role->subdomain])] : null,
+                ['label' => __('messages.newsletter_use_own_email'), 'url' => route('role.edit', ['subdomain' => $role->subdomain]).'#integration-tab-email'],
+            ]))];
+        } elseif (! $role->canSendNewsletter()) {
             $refusal = [
                 'message' => __('messages.newsletter_limit_reached', ['used' => $used, 'limit' => $limit]),
                 'links' => config('cashier.key') && $role->actualPlanTier() !== 'enterprise'
@@ -801,6 +1012,28 @@ class NewsletterController extends Controller
             $nowRefusal = __('messages.newsletter_sync_queue_limit');
         }
 
+        // What will happen that the owner should know before pressing Send, without stopping it:
+        // addresses left out under rule A, and a review under rule B.
+        $notices = [];
+        // On a trial the allowance is the free plan's (Role::newsletterLimit()): said, with the
+        // way to start paying, which is on the Plan tab.
+        if ($limit !== null && $role->onSubscriptionTrial()) {
+            $notices[] = __('messages.newsletter_trial_limit', ['limit' => number_format($limit), 'plan_limit' => number_format((int) $role->planNewsletterLimit())]);
+            if ($refusal && (int) $role->user_id === (int) auth()->id() && $role->canEndTrial()) {
+                $refusal['links'][] = ['label' => __('messages.end_trial_now'), 'url' => route('role.view_admin', ['subdomain' => $role->subdomain, 'tab' => 'plan'])];
+            }
+        }
+        if (! $refusal && $leftOut > 0) {
+            $notices[] = trans_choice('messages.newsletter_imported_left_out', $leftOut, ['count' => number_format($leftOut)]);
+        }
+        if (! $refusal) {
+            $probe = $newsletter ?? (new Newsletter(['type' => 'schedule']))->setRelation('role', $role);
+            $probe->setRelation('role', $role);
+            if (AudienceMailGuard::reviewReason($probe, $count, auth()->user())) {
+                $notices[] = __('messages.newsletter_will_be_reviewed');
+            }
+        }
+
         $ab = null;
         if ($abTest) {
             $sample = (int) ceil($count * ($abTest->sample_percentage / 100));
@@ -821,8 +1054,16 @@ class NewsletterController extends Controller
             'allowance' => $limit !== null ? ['used' => $used, 'limit' => $limit, 'after' => max(0, $limit - $used - $count)] : null,
             'refusal' => $refusal,
             'now_refusal' => $nowRefusal,
+            'notices' => $notices,
             'ab' => $ab,
             'timezone' => self::scheduleTimezone($role),
+            // A repeat runs on the schedule's clock, whoever sets it (Newsletter::repeatZone()).
+            'schedule_timezone' => Newsletter::zoneOf($role),
+            // Per cadence, why a repeat to this audience could never go: null when it could.
+            'repeat_refusal' => [
+                'week' => $this->repeatTooBig($role, $count, 'week'),
+                'month' => $this->repeatTooBig($role, $count, 'month'),
+            ],
         ]);
     }
 
@@ -1162,6 +1403,12 @@ class NewsletterController extends Controller
             return back()->with('error', __('messages.ab_test_already_exists'));
         }
 
+        // Each run of a repeating newsletter is its own send; a test of it has nothing to pick
+        // a winner for.
+        if ($newsletter->isRepeating()) {
+            return back()->with('error', __('messages.newsletter_repeat_no_ab_test'));
+        }
+
         $validated = $request->validate([
             'test_field' => 'required|in:subject,blocks',
             'sample_percentage' => 'required|integer|min:5|max:50',
@@ -1186,7 +1433,7 @@ class NewsletterController extends Controller
         ]);
 
         // Create variant B as a copy
-        $variantB = $newsletter->replicate();
+        $variantB = $newsletter->replicate(['repeat', 'repeat_parent_id', 'events_as_of']);
         $variantB->ab_test_id = $abTest->id;
         $variantB->ab_variant = 'B';
         $variantB->status = 'draft';
@@ -1221,6 +1468,10 @@ class NewsletterController extends Controller
 
         if (! $newsletter->ab_test_id) {
             return back()->with('error', __('messages.no_ab_test'));
+        }
+
+        if ($this->mailPaused($role)) {
+            return back()->with('error', __('messages.mail_paused_send'));
         }
 
         $abTest = $newsletter->abTest;
@@ -1260,10 +1511,28 @@ class NewsletterController extends Controller
         $variantA = $variants->firstWhere('ab_variant', 'A') ?? $newsletter;
         $allRecipients = $service->resolveRecipients($role, $variantA->segment_ids ?? []);
 
+        if ($refusal = $this->onlyUnsolicited($role, $variantA->segment_ids ?? [], $allRecipients->count(), $service)) {
+            $abTest->update(['status' => 'pending']);
+
+            return back()->with('error', $refusal);
+        }
+
         if ($allRecipients->isEmpty()) {
             $abTest->update(['status' => 'pending']);
 
             return back()->with('error', __('messages.newsletter_no_recipients'));
+        }
+
+        // A test is two newsletters and a winner sent hours later, which a review cannot hold
+        // in one piece: while either variant would be held (AudienceMailGuard, rule B), it is
+        // refused, and the first newsletter goes as a plain one.
+        foreach ($variants->whereIn('ab_variant', ['A', 'B']) as $variant) {
+            $variant->setRelation('role', $role);
+            if (AudienceMailGuard::reviewReason($variant, $allRecipients->count(), auth()->user())) {
+                $abTest->update(['status' => 'pending']);
+
+                return back()->with('error', __('messages.ab_test_needs_review'));
+            }
         }
 
         // Scaled to the audience, exactly like send() and schedule(). Checked here rather than up
@@ -1305,6 +1574,10 @@ class NewsletterController extends Controller
             ['newsletter' => $variants->where('ab_variant', 'B')->first(), 'recipients' => $sampleB],
         ];
 
+        // One instant for both variants, which the remainder inherits (replicate()): an Events
+        // block with a date range lists the same events to every reader of the test.
+        $eventsAsOf = now()->format('Y-m-d H:i:s');
+
         DB::beginTransaction();
         try {
             foreach ($variantData as $variant) {
@@ -1313,7 +1586,8 @@ class NewsletterController extends Controller
                 // Atomic status update to prevent double-send on double-click
                 $updated = Newsletter::where('id', $vn->id)
                     ->whereIn('status', ['draft', 'scheduled'])
-                    ->update(['status' => 'sending', 'send_token' => Str::random(64)]);
+                    ->whereNull('repeat')
+                    ->update(['status' => 'sending', 'send_token' => Str::random(64), 'events_as_of' => $eventsAsOf]);
 
                 if ($updated === 0) {
                     continue;
@@ -1364,7 +1638,7 @@ class NewsletterController extends Controller
             NewsletterRecipient::where('newsletter_id', $vn->id)
                 ->where('status', 'pending')
                 ->chunkById(50, function ($recipientChunk) use ($vn, &$batchIndex) {
-                    \App\Jobs\SendNewsletterBatch::dispatch($vn->id, $recipientChunk->pluck('id')->toArray())
+                    SendNewsletterBatch::dispatch($vn->id, $recipientChunk->pluck('id')->toArray())
                         ->delay(now()->addSeconds($batchIndex * 15));
                     $batchIndex++;
                 });
@@ -1376,6 +1650,31 @@ class NewsletterController extends Controller
 
         return redirect()->route('newsletter.index', $this->roleIdParam($role))
             ->with('status', __('messages.ab_test_sending'));
+    }
+
+    /**
+     * "Request access": the person whose email sending is paused asks to have it back. Once a day
+     * at most; an operator answers it on /admin/mail-review.
+     */
+    public function requestMailAccess(Request $request)
+    {
+        $this->authorizeAccess();
+        $user = $request->user();
+
+        // A watched word the page only reported ("would pause") is recorded now, on this POST,
+        // so the request has a pause to answer.
+        AudienceMailGuard::accountPaused($user);
+        $user->refresh();
+
+        if (! $user->mail_disabled_at) {
+            return back();
+        }
+
+        if (! AudienceMailGuard::requestAccess($user)) {
+            return back()->with('error', __('messages.mail_access_requested_recently'));
+        }
+
+        return back()->with('status', __('messages.mail_access_requested'));
     }
 
     public function importForm(Request $request)

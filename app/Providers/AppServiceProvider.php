@@ -12,6 +12,7 @@ use App\Support\BladeJson;
 use App\Support\SafeTranslationLoader;
 use Illuminate\Cache\RateLimiting\Limit;
 use Illuminate\Console\Events\CommandFinished;
+use Illuminate\Console\Events\CommandStarting;
 use Illuminate\Console\Events\ScheduledTaskFailed;
 use Illuminate\Console\Events\ScheduledTaskFinished;
 use Illuminate\Console\Events\ScheduledTaskSkipped;
@@ -55,6 +56,13 @@ class AppServiceProvider extends ServiceProvider
             return SafeTranslationLoader::wrap($loader, $app['files']);
         });
 
+        // A deadlock on the database cache's limiter row is retried rather than thrown (see the
+        // class). Extended for the same reason as the loader above: RateLimiter is a deferred
+        // binding of CacheServiceProvider.
+        $this->app->extend(\Illuminate\Cache\RateLimiter::class, function ($limiter) {
+            return \App\Support\RetryingRateLimiter::wrap($limiter);
+        });
+
         $this->callAfterResolving('translator', function ($translator) {
             $translator->getLoader()->addPath(config('app.lang_overrides_path'));
         });
@@ -83,6 +91,17 @@ class AppServiceProvider extends ServiceProvider
      */
     public function boot(): void
     {
+        // $date->localDate(): a date in the reader's own word order (App\Support\LocalDate).
+        \Carbon\Carbon::macro('localDate', function (bool $withYear = true, bool $withWeekday = true, bool $shortMonth = false) {
+            return \App\Support\LocalDate::format($this, $withYear, $withWeekday, $shortMonth);
+        });
+
+        // Plural rules for a hyphenated regional locale (pt-PT); see RegionalMessageSelector.
+        $this->app->afterResolving('translator', fn ($translator) => $translator->setSelector(new \App\Support\RegionalMessageSelector));
+        if ($this->app->resolved('translator')) {
+            $this->app['translator']->setSelector(new \App\Support\RegionalMessageSelector);
+        }
+
         if (! config('app.hosted') && empty(config('app.key'))) {
             Artisan::call('key:generate', ['--force' => true]);
         }
@@ -95,6 +114,11 @@ class AppServiceProvider extends ServiceProvider
 
         // Laravel's own @json splits on every comma; see BladeJson.
         Blade::directive('json', fn ($expression) => BladeJson::compile($expression));
+
+        // Laravel 12's @context (Laravel's Context) would read every JSON-LD "@context" key in
+        // the views as the opening of an `if` with no end. The app never uses the directive, so
+        // the word is printed as written. A directive registered here is asked before Blade's own.
+        Blade::directive('context', fn () => '@context');
 
         // Register authorization policies
         Gate::policy(Event::class, EventPolicy::class);
@@ -285,6 +309,15 @@ class AppServiceProvider extends ServiceProvider
             return Limit::perMinute(30)->by('guest-count|'.hash_hmac('sha256', $ip.'|'.gmdate('Y-m-d'), (string) config('app.key')));
         });
 
+        // POST /api/marketing-page, the marketing site's per-page counters (MarketingPageDaily).
+        // Its own budget per real visitor address, for the same reasons. A page sends three posts
+        // at most, and a visitor reading fast opens a few pages a minute.
+        RateLimiter::for('marketing_page', function ($request) {
+            $ip = \App\Utils\RealtimeTracker::clientIp($request);
+
+            return Limit::perMinute(60)->by('marketing-page|'.hash_hmac('sha256', $ip.'|'.gmdate('Y-m-d'), (string) config('app.key')));
+        });
+
         // GET /ticket/status (a ticket waiting on its payment confirmation asks about eight times
         // in a minute and a half). Per visitor AND per ticket, for the same reasons as above.
         RateLimiter::for('ticket_status', function ($request) {
@@ -303,6 +336,15 @@ class AppServiceProvider extends ServiceProvider
             $ip = \App\Utils\RealtimeTracker::clientIp($request);
 
             return Limit::perMinute(10)->by('growth_data|'.hash_hmac('sha256', $ip, (string) config('app.key')));
+        });
+
+        // An update whose migrations did not run in the process that copied it is finished before
+        // the tick's own tasks run, so they meet the new schema (AppUpdateService::finishUpdate(),
+        // once per version; self-guarded, it never fails the tick).
+        EventFacade::listen(CommandStarting::class, function (CommandStarting $event) {
+            if ($event->command === 'schedule:run') {
+                \App\Services\AppUpdateService::finishUpdate();
+            }
         });
 
         // Scheduler heartbeat, read by AdminAlertService's scheduler_stalled row.
@@ -339,6 +381,10 @@ class AppServiceProvider extends ServiceProvider
             // A week, not a day: a rail retired last month should disappear from the card, but one
             // that died yesterday must still be visible AS stale rather than silently absent.
             Cache::put('scheduler.last_run_at.'.config('app.scheduler_rail', 'cron'), now()->timestamp, now()->addDays(7));
+
+            // Which PHP the scheduler runs on, so a self-update never installs a release that
+            // this PHP could not boot (AppUpdateService::PHP_SEEN_KEY).
+            \App\Services\AppUpdateService::recordPhp('scheduler');
 
             // The first tick after a deploy dates the release (growth payload meta.releases).
             // Guarded: a heartbeat must never fail because a stamp could not be written.

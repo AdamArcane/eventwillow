@@ -2,24 +2,37 @@
 
 namespace App\Repos;
 
+use App\Exceptions\EventCreationLimitException;
 use App\Jobs\NotifyEventChange;
 use App\Jobs\SendQueuedEmail;
 use App\Jobs\SendQueuedSms;
 use App\Jobs\SyncEventToGoogleCalendar;
 use App\Mail\ClaimRole;
 use App\Mail\ClaimVenue;
+use App\Models\CalendarExposure;
+use App\Models\DismissedVenueMergeSuggestion;
 use App\Models\Event;
 use App\Models\EventPart;
+use App\Models\Group;
 use App\Models\PromoCode;
 use App\Models\Role;
+use App\Models\SeatingPlan;
 use App\Models\Ticket;
+use App\Models\TicketPreset;
 use App\Models\User;
 use App\Services\AuditService;
 use App\Services\CalendarArrival;
 use App\Services\CalendarExposureWatch;
+use App\Services\CuratorSourceService;
 use App\Services\EventChangeNotifier;
+use App\Services\EventTranslationEdits;
+use App\Services\InstallmentService;
+use App\Services\SeatingMapService;
 use App\Services\SmsService;
+use App\Services\TicketPresets;
 use App\Services\TicketVolumeDiscount;
+use App\Services\TranslationGlossary;
+use App\Services\UsageTrackingService;
 use App\Services\WebhookService;
 use App\Utils\AiImageIssuance;
 use App\Utils\ColorUtils;
@@ -27,11 +40,13 @@ use App\Utils\GeminiUtils;
 use App\Utils\ImageUtils;
 use App\Utils\MoneyUtils;
 use App\Utils\SlugPatternUtils;
+use App\Utils\SlugUtils;
 use App\Utils\SponsorUtils;
 use App\Utils\UrlUtils;
 use Carbon\Carbon;
 use Illuminate\Database\QueryException;
 use Illuminate\Http\UploadedFile;
+use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Storage;
@@ -82,6 +97,7 @@ class EventRepo
         'coupon_code', 'coupon_discount_type', 'coupon_discount',
         'payment_method', 'payment_instructions',
         'installments_enabled', 'installment_count', 'installment_final_days_before', 'installment_min_order_amount',
+        'donations_enabled', 'donation_amounts', 'donation_custom', 'donation_line',
         'ask_phone', 'require_phone', 'country_code_phone',
         'individual_tickets', 'individual_ticket_fields',
         'sell_after_start', 'show_unavailable_tickets',
@@ -147,6 +163,10 @@ class EventRepo
         // Not fillable. Carried so a copy made by a team member the preset switch binds keeps the
         // preset (EventController::create() keeps it only if it is the copying schedule's own).
         $clonedEventData['ticket_preset_id'] = $event->ticket_preset_id;
+        // Not fillable. A copy keeps the translations a person corrected by hand (the name_en and
+        // friends ride in the fillable loop above): the create form posts them back as corrections,
+        // dated against the source's original (EventTranslationEdits, translation_basis).
+        $clonedEventData['translation_overrides'] = $event->translationOverrides() ?: null;
 
         // Reset fields that shouldn't be carried to a new event
         $clonedEventData['flyer_image_url'] = null;
@@ -341,7 +361,7 @@ class EventRepo
      * Returns: whether the person is bound, the preset applied, the owning schedule, and whether
      * the stored tickets are kept as they are.
      *
-     * @return array{0: bool, 1: ?\App\Models\TicketPreset, 2: ?Role, 3: bool}
+     * @return array{0: bool, 1: ?TicketPreset, 2: ?Role, 3: bool}
      */
     private function settleTicketPreset($currentRole, $request, ?Event $event, bool $mayEditTickets): array
     {
@@ -355,13 +375,13 @@ class EventRepo
             return [false, null, $owning, false];
         }
 
-        $locked = \App\Services\TicketPresets::lockedFor($request->user(), $owning);
+        $locked = TicketPresets::lockedFor($request->user(), $owning);
 
         if ($locked && $panel === 'full') {
             // The full Tickets tab was posted by someone the switch now binds: it was turned on
             // while their page was open. Their typed prices would be dropped without a word.
-            throw \Illuminate\Validation\ValidationException::withMessages([
-                'ticket_preset_id' => __('messages.ticket_preset_switched_on', ['owner' => \App\Services\TicketPresets::ownerName($owning)]),
+            throw ValidationException::withMessages([
+                'ticket_preset_id' => __('messages.ticket_preset_switched_on', ['owner' => TicketPresets::ownerName($owning)]),
             ]);
         }
 
@@ -383,20 +403,20 @@ class EventRepo
 
         // Pressed (or named) on an event a preset can no longer change, because a ticket sold or
         // a seating plan was attached while the page was open: said, never dropped without a word.
-        if (\App\Services\TicketPresets::frozen($event)) {
-            throw \Illuminate\Validation\ValidationException::withMessages([
+        if (TicketPresets::frozen($event)) {
+            throw ValidationException::withMessages([
                 'ticket_preset_id' => __('messages.ticket_preset_frozen_api'),
             ]);
         }
 
-        $preset = \App\Services\TicketPresets::find($owning, $postedId);
+        $preset = TicketPresets::find($owning, $postedId);
         if ($postedId && ! $preset) {
-            throw \Illuminate\Validation\ValidationException::withMessages([
+            throw ValidationException::withMessages([
                 'ticket_preset_id' => __('messages.ticket_preset_not_found'),
             ]);
         }
         if (! $preset && ! $event) {
-            $preset = \App\Services\TicketPresets::defaultFor($owning);
+            $preset = TicketPresets::defaultFor($owning);
         }
         if (! $preset) {
             if ($presetsTab && ! $locked) {
@@ -406,7 +426,7 @@ class EventRepo
                 return [false, null, $owning, true];
             }
 
-            throw \Illuminate\Validation\ValidationException::withMessages([
+            throw ValidationException::withMessages([
                 'ticket_preset_id' => __('messages.ticket_preset_choose'),
             ]);
         }
@@ -415,10 +435,10 @@ class EventRepo
         // an existing one keeps the account it has. One currency for the check and the fields.
         $payee = $event?->exists ? $event->user : ($locked ? $owning->user : $request->user());
         $fallbackCurrency = $event?->ticket_currency_code ?: MoneyUtils::getCurrencyForCountry($owning->country_code);
-        \App\Services\TicketPresets::assertPayable($preset, $payee, $fallbackCurrency);
+        TicketPresets::assertPayable($preset, $payee, $fallbackCurrency);
 
         $this->dropTicketPanelInput($request);
-        \App\Services\TicketPresets::applyTo($request, $preset, $fallbackCurrency);
+        TicketPresets::applyTo($request, $preset, $fallbackCurrency);
 
         return [$locked, $preset, $owning, false];
     }
@@ -616,6 +636,105 @@ class EventRepo
     }
 
     /**
+     * The same-name schedules existingParticipantNamed() found marked "Not duplicates", for the
+     * row it was last asked about, or null.
+     *
+     * @var array<int, int>|null
+     */
+    private ?array $keptApartIds = null;
+
+    /**
+     * A schedule made for a name its owner marked "Not duplicates" joins that dismissal.
+     *
+     * A dismissal is a hash of the exact set of schedules, and the new one is connected to the
+     * person like the rest, so without this the set is one larger, nobody dismissed it, the merge
+     * page offers it again and the next save lands on whichever of them has the most events: a
+     * schedule its owner said was somebody else.
+     */
+    private function keepApart(Role $role, User $user): void
+    {
+        if ($this->keptApartIds === null
+            || ! DB::table('role_user')->where('user_id', $user->id)->where('role_id', $role->id)->exists()) {
+            return;
+        }
+
+        DismissedVenueMergeSuggestion::firstOrCreate([
+            'user_id' => $user->id,
+            'role_id' => null,
+            'venue_ids_hash' => DismissedVenueMergeSuggestion::hashForVenueIds(array_merge($this->keptApartIds, [$role->id])),
+        ]);
+    }
+
+    /**
+     * The participant schedule a "Someone new" row names, when the person saving already has one
+     * by that name: any of their schedules (owner, admin or follower) of the same type, name and
+     * country that they may edit, so their own placeholders and schedules they run, never
+     * somebody else's real page they merely follow.
+     *
+     * Without it a curator posting a team's season through "Someone new" made a new placeholder
+     * per game, each with its own address (childress-lady-cats2, 3, ...), and the Following list
+     * and the event form's picker filled with copies. The venue side has had this safety net
+     * since name_normalized was added; this is the same lookup on the same column.
+     *
+     * A row that carries an email, a phone or a video is left to make its own schedule, because
+     * those are details of a particular person the existing one may not share, and an email sends
+     * an invitation. The account-wide merge page (RoleController::sameNameGroups()) groups on the
+     * same key, and a group the person marked "Not duplicates" there is two different people, so
+     * nothing is reused for that name: the save makes a schedule of its own, as it always did.
+     *
+     * $user is the person who is SAVING, never the owner standing in for an anonymous guest:
+     * a stranger's typed name must not land on the owner's own schedules (saveEvent() passes null
+     * for a guest submission).
+     *
+     * @param  array<string, mixed>  $member
+     */
+    private function existingParticipantNamed(array $member, string $type, ?string $countryCode, ?User $user): ?Role
+    {
+        $this->keptApartIds = null;
+
+        if (! $user || ! empty($member['email']) || ! empty($member['phone']) || ! empty($member['youtube_url'])) {
+            return null;
+        }
+
+        $name = GeminiUtils::normalizeForMatch($member['name'] ?? null);
+
+        if ($name === '') {
+            return null;
+        }
+
+        $countryCode = $countryCode ? strtolower($countryCode) : null;
+
+        // Deleted rows too, because the merge page's group (and so the hash a dismissal was
+        // stored under) includes them. An empty country is the merge page's key for null as well.
+        $sameName = Role::where('type', $type)
+            ->where('name_normalized', $name)
+            ->when(
+                $countryCode,
+                fn ($q) => $q->where('country_code', $countryCode),
+                fn ($q) => $q->where(fn ($q) => $q->whereNull('country_code')->orWhere('country_code', ''))
+            )
+            ->whereIn('id', DB::table('role_user')->where('user_id', $user->id)->select('role_id'))
+            ->withCount(['events' => fn ($q) => $q->select(DB::raw('count(distinct events.id)'))])
+            ->orderBy('events_count', 'desc')
+            ->orderBy('id')
+            ->get();
+
+        if ($sameName->count() > 1 && DismissedVenueMergeSuggestion::where('user_id', $user->id)
+            ->whereNull('role_id')
+            ->where('venue_ids_hash', DismissedVenueMergeSuggestion::hashForVenueIds($sameName->pluck('id')->all()))
+            ->exists()) {
+            // saveEvent() adds the schedule it makes to this dismissal (keepApart()).
+            $this->keptApartIds = $sameName->pluck('id')->all();
+
+            return null;
+        }
+
+        return $sameName
+            ->where('is_deleted', false)
+            ->first(fn (Role $role) => $role->isEditableBy($user));
+    }
+
+    /**
      * A venue schedule for a place no schedule stands for yet: unclaimed, with the look every
      * new venue gets, in the country and language of the schedule it is made for.
      *
@@ -778,7 +897,7 @@ class EventRepo
         $seatingAllowed = $currentRole && $currentRole->seatingEnabled();
 
         if ($event === null && $currentRole && ! $currentRole->canCreateEvent($user)) {
-            throw new \App\Exceptions\EventCreationLimitException;
+            throw new EventCreationLimitException;
         }
 
         // The timezone the entered wall-clock is anchored to, and the timezone any schedule created
@@ -1005,10 +1124,22 @@ class EventRepo
 
         $roles = [];
         $roleIds = [];
+        $reusedMemberIds = [];
 
         if ($request->members) {
             foreach ($request->members as $memberId => $member) {
-                if (! $memberId || strpos($memberId, 'new_') === 0) {
+                $isNewMember = ! $memberId || strpos($memberId, 'new_') === 0;
+                $existingParticipant = $isNewMember
+                    ? $this->existingParticipantNamed($member, $request->role_type ?: 'talent', $request->country_code ?: $currentRole?->country_code, $isGuestSubmission ? null : $user)
+                    : null;
+
+                if ($existingParticipant) {
+                    $role = $existingParticipant;
+                    // Counted as submitted by the later passes that keep what the form posted,
+                    // which read only real ids off the request: an attached schedule typed in
+                    // again as "Someone new" on an edit would otherwise be taken off the event.
+                    $reusedMemberIds[] = $role->id;
+                } elseif ($isNewMember) {
                     $role = new Role;
                     $role->name = $member['name'];
                     $role->email = isset($member['email']) && $member['email'] !== '' ? $member['email'] : null;
@@ -1065,6 +1196,10 @@ class EventRepo
                     if ($followNewRoles && (! $matchingUser || $matchingUser->id != $user->id)) {
                         $user->roles()->attach($role->id, ['level' => 'follower', 'created_at' => now()]);
                     }
+
+                    if (! $isGuestSubmission) {
+                        $this->keepApart($role, $user);
+                    }
                 } else {
                     $roleId = UrlUtils::decodeId($memberId);
                     $role = Role::findOrFail($roleId);
@@ -1114,6 +1249,11 @@ class EventRepo
 
                         $role->save();
                     }
+                }
+
+                // Two rows typed with one name in one save land on one schedule.
+                if (in_array($role->id, $roleIds)) {
+                    continue;
                 }
 
                 $roles[] = $role;
@@ -1223,7 +1363,8 @@ class EventRepo
                         $translations = GeminiUtils::translateCustomFieldNames(
                             array_values($fieldsNeedingTranslation),
                             $currentRole->language_code,
-                            $currentRole->translation_language_code
+                            $currentRole->translation_language_code,
+                            TranslationGlossary::relevant(TranslationGlossary::forRole($currentRole), array_values($fieldsNeedingTranslation))
                         );
 
                         foreach ($fieldsNeedingTranslation as $fieldKey => $fieldName) {
@@ -1286,13 +1427,20 @@ class EventRepo
         // Not the columns only the server writes: see SERVER_OWNED_FIELDS.
         $event->fill($request->except(self::SERVER_OWNED_FIELDS));
 
+        // A person's corrections to the automatic translation (the Translation row under About).
+        // Only a signed-in person's: the guest forms and the imports correct nothing. Absent says
+        // nothing, so an API update or a form without the row keeps every correction.
+        if (auth()->check()) {
+            EventTranslationEdits::apply($event, $request);
+        }
+
         // Which preset the event's tickets came from. Not fillable: a preset applied above names
         // itself; otherwise the event form names the preset its tab still matches (or none, after a
         // hand edit) and the API's carry-over never mentions it, so absent keeps what is stored.
         if ($appliedPreset) {
             $event->ticket_preset_id = $appliedPreset->id;
         } elseif (! $presetLocked && $mayEditTickets && $request->has('ticket_preset_id')) {
-            $presetNamed = \App\Services\TicketPresets::find($presetOwningRole, $request->input('ticket_preset_id'));
+            $presetNamed = TicketPresets::find($presetOwningRole, $request->input('ticket_preset_id'));
             // The link the event already has is kept as it is, even when the preset changed since:
             // that is what tells the team "older prices". Only a NEW link is checked against what
             // was saved.
@@ -1322,6 +1470,7 @@ class EventRepo
             'sell_after_start', 'show_unavailable_tickets',
             'is_draft', 'is_private', 'is_internal',
             'installments_enabled',
+            'donations_enabled', 'donation_custom',
         ] as $boolField) {
             if ($request->has($boolField)) {
                 $event->$boolField = $request->boolean($boolField);
@@ -1346,7 +1495,7 @@ class EventRepo
 
         if ($event->seating_plan_id != $event->getOriginal('seating_plan_id')) {
             $plan = $event->seating_plan_id
-                ? \App\Models\SeatingPlan::where('is_deleted', false)->find($event->seating_plan_id)
+                ? SeatingPlan::where('is_deleted', false)->find($event->seating_plan_id)
                 : null;
 
             $ownsPlan = $plan && $currentRole && (int) $plan->role_id === (int) $currentRole->id;
@@ -1365,6 +1514,28 @@ class EventRepo
             $event->installments_enabled = false;
         }
 
+        // Donations take money, so they are Pro on the same terms: only turning them ON is scrubbed,
+        // and checkout asks the plan again on every order (Event::offersDonations()).
+        if (! $ticketExtrasAllowed && $event->donations_enabled && ! $event->getOriginal('donations_enabled')) {
+            $event->donations_enabled = false;
+        }
+
+        // Up to three suggested amounts, positive, in what the currency can charge; anything else
+        // dropped rather than refusing the save. None at all reads as the currency's defaults.
+        if ($request->has('donation_amounts')) {
+            $decimals = MoneyUtils::decimalsFor($event->ticket_currency_code ?: 'USD');
+            $amounts = array_values(array_unique(array_filter(array_map(
+                fn ($amount) => Event::parseMoneyText(is_scalar($amount) ? $amount : '', $decimals) ?? 0,
+                (array) $request->input('donation_amounts', [])
+            ), fn ($amount) => $amount > 0 && $amount <= 100000000), SORT_REGULAR));
+            $event->donation_amounts = $amounts ? array_slice($amounts, 0, 3) : null;
+        }
+
+        if ($request->has('donation_line')) {
+            $line = trim(strip_tags((string) $request->input('donation_line')));
+            $event->donation_line = $line !== '' ? mb_substr($line, 0, 120) : null;
+        }
+
         // Clamp the collection runway. A zero here would let the final payment fall due the day
         // before the doors open with no time to chase a decline, which is precisely how a buyer
         // ends up refused at the door over a card problem nobody could act on.
@@ -1375,11 +1546,11 @@ class EventRepo
 
         $count = (int) $event->installment_count;
         $event->installment_count = max(
-            \App\Services\InstallmentService::MIN_COUNT,
-            min(\App\Services\InstallmentService::MAX_COUNT, $count ?: 4)
+            InstallmentService::MIN_COUNT,
+            min(InstallmentService::MAX_COUNT, $count ?: 4)
         );
         $event->installment_final_days_before = min(365, max(
-            \App\Services\InstallmentService::MIN_FINAL_DAYS_BEFORE,
+            InstallmentService::MIN_FINAL_DAYS_BEFORE,
             (int) $event->installment_final_days_before
         ));
 
@@ -1476,7 +1647,7 @@ class EventRepo
                 // success and silently changes nothing. A new slug a schedule route owns is stored
                 // with "-event" after it (Event::storableSlug()); the slug the event already has is
                 // left as it is, since the form posts it back whenever the field is open.
-                $typed = \App\Utils\SlugUtils::slugOrRomanize($request->slug);
+                $typed = SlugUtils::slugOrRomanize($request->slug);
                 $event->slug = match (true) {
                     $typed === '' => $event->getOriginal('slug'),
                     $typed === $event->getOriginal('slug') => $typed,
@@ -1742,14 +1913,14 @@ class EventRepo
         $event->save();
 
         if ($seatingOldDate) {
-            app(\App\Services\SeatingMapService::class)
+            app(SeatingMapService::class)
                 ->rekeyOccurrence($event, $seatingOldDate, $event->saleEventDateFromStartsAt());
         }
 
         // Anti-abuse: count this newly-created event toward the schedule's / user's daily cap.
         // Hosted-only and silent-fail inside track(); mirrors the enforcement guard above.
         if ($isNewEvent && $currentRole) {
-            \App\Services\UsageTrackingService::track(\App\Services\UsageTrackingService::EVENT_CREATE, $currentRole->id);
+            UsageTrackingService::track(UsageTrackingService::EVENT_CREATE, $currentRole->id);
         }
 
         if ($venue) {
@@ -1807,6 +1978,7 @@ class EventRepo
                 }
                 $submittedMemberRoleIds[] = UrlUtils::decodeId($memberId);
             }
+            $submittedMemberRoleIds = array_merge($submittedMemberRoleIds, $reusedMemberIds);
             $previousTalentIds = $event->roles()
                 ->where('roles.type', 'talent')
                 ->pluck('roles.id')
@@ -1875,6 +2047,7 @@ class EventRepo
                     $ownMemberIds[] = UrlUtils::decodeId($memberId);
                 }
             }
+            $ownMemberIds = array_merge($ownMemberIds, $reusedMemberIds);
         }
 
         if ($currentRole && ! empty($existingAttachedIds)) {
@@ -1974,7 +2147,7 @@ class EventRepo
         foreach ($roles as $role) {
             if (! in_array((int) $role->id, $acceptanceKeptFor, true) && $role->autoAcceptsEventFrom($actingUser, $currentRole)
                 && ! ($actingUser && $sellsOrSignsUp && (int) $role->id !== (int) $event->creator_role_id
-                    && \App\Services\TicketPresets::lockedFor($actingUser, $role))) {
+                    && TicketPresets::lockedFor($actingUser, $role))) {
                 $event->roles()->updateExistingPivot($role->id, ['is_accepted' => true]);
             }
 
@@ -2188,7 +2361,8 @@ class EventRepo
                             $translations = GeminiUtils::translateCustomFieldNames(
                                 array_values($fieldsNeedingTranslation),
                                 $currentRole->language_code,
-                                $currentRole->translation_language_code
+                                $currentRole->translation_language_code,
+                                TranslationGlossary::relevant(TranslationGlossary::forRole($currentRole), array_values($fieldsNeedingTranslation))
                             );
 
                             foreach ($fieldsNeedingTranslation as $fieldKey => $fieldName) {
@@ -2400,7 +2574,7 @@ class EventRepo
                     if ($band !== '') {
                         $seatingBand = $band;
                         // fall through to derive the quantity from the plan
-                        $seatingPlanForBands ??= \App\Models\SeatingPlan::where('is_deleted', false)
+                        $seatingPlanForBands ??= SeatingPlan::where('is_deleted', false)
                             ->find($event->seating_plan_id);
 
                         if ($seatingPlanForBands) {
@@ -2463,7 +2637,7 @@ class EventRepo
             // adding a ticket or deleting one would leave older dates selling at the old price -
             // or at no price at all. Cheap: one UPDATE per band, not per section.
             if ($event->seating_plan_id) {
-                app(\App\Services\SeatingMapService::class)->applyBandMapping($event->fresh());
+                app(SeatingMapService::class)->applyBandMapping($event->fresh());
             }
 
             // Subscriptions are single redeemable units; per-person individual
@@ -2728,7 +2902,7 @@ class EventRepo
         // An event the operator's page lists is read again when its text is saved, so taking the
         // passcode out here takes it off that list (CalendarExposureWatch). Only one already
         // listed: the sweep finds the rest.
-        if (CalendarExposureWatch::tablesReady() && \App\Models\CalendarExposure::where('event_id', $event->id)->exists()) {
+        if (CalendarExposureWatch::tablesReady() && CalendarExposure::where('event_id', $event->id)->exists()) {
             CalendarExposureWatch::record($event);
         }
 
@@ -2812,6 +2986,10 @@ class EventRepo
             }
         }
 
+        // The schedules are settled now: a correction written for another language than the one
+        // the event is now translated into (it moved venue) is given back to app:translate.
+        $event->dropCorrectionsInAnotherLanguage();
+
         return $event;
     }
 
@@ -2881,7 +3059,7 @@ class EventRepo
      * from app:sync-curator-sources; here it also repairs the rows roles()->sync() just
      * detached, which is why it has to run after that and after the accept loop.
      *
-     * @param  \Illuminate\Support\Collection  $autoSourcedBefore  role_id => is_accepted, as of before sync()
+     * @param  Collection  $autoSourcedBefore  role_id => is_accepted, as of before sync()
      */
     /**
      * Put back the pivot columns a detach-and-relink cycle would otherwise have reset.
@@ -2892,7 +3070,7 @@ class EventRepo
      * Only rows that came back are touched, and only columns that are now empty, so a value the
      * relink DID carry (group_id, taken from the source's configured sub-schedule) still wins.
      *
-     * @param  \Illuminate\Support\Collection  $pivotBefore  keyed by role_id
+     * @param  Collection  $pivotBefore  keyed by role_id
      */
     protected function restoreAutoSourcedPivots(Event $event, $pivotBefore): void
     {
@@ -2950,12 +3128,12 @@ class EventRepo
     /** A sub-schedule may only be used by the schedule that owns it. */
     protected function groupBelongsToRole($groupId, int $roleId): bool
     {
-        return $groupId && \App\Models\Group::where('id', $groupId)->where('role_id', $roleId)->exists();
+        return $groupId && Group::where('id', $groupId)->where('role_id', $roleId)->exists();
     }
 
     protected function syncCuratorSources(Event $event, $request, ?Role $currentRole, array $userVisibleIds, array $tickedCurators, $autoSourcedBefore): void
     {
-        app(\App\Services\CuratorSourceService::class)->syncEvent($event);
+        app(CuratorSourceService::class)->syncEvent($event);
 
         $tombstoned = [];
 
@@ -3099,10 +3277,10 @@ class EventRepo
      * The rows are in order, so the walk ends at the first one that has not begun: nothing
      * after it can be sooner, except a series met on the way.
      *
-     * @param  \Illuminate\Support\Collection<int, array{event: Event, date: string}>  $upcoming
+     * @param  Collection<int, array{event: Event, date: string}>  $upcoming
      * @return array{event: Event, date: string}|null
      */
-    public function leadOf(\Illuminate\Support\Collection $upcoming, string $category = ''): ?array
+    public function leadOf(Collection $upcoming, string $category = ''): ?array
     {
         $rows = $upcoming
             ->filter(fn (array $row) => $category === '' || (string) $row['event']->category_id === $category)
@@ -3136,6 +3314,72 @@ class EventRepo
         $lead = $ahead[0] ?? $rows->first();
 
         return $lead ? ['event' => $lead['event'], 'date' => $lead['date']] : null;
+    }
+
+    /**
+     * The next few events the month leads with (#gp-next-event): leadOf()'s first, then the ones
+     * after it, each event once (a weekly class is not three of the three) and at most one for
+     * each venue and performer, soonest first. The
+     * same rules as leadOf(): a series whose occurrence today has begun is counted by its next
+     * one, and a one-off that has begun only when nothing else is to come.
+     *
+     * @param  Collection<int, array{event: Event, date: string}>  $upcoming
+     * @return array<int, array{event: Event, date: string}>
+     */
+    public function leadRowsOf(Collection $upcoming, string $category = '', int $count = 3, ?int $ownRoleId = null): array
+    {
+        $first = $this->leadOf($upcoming, $category);
+        if (! $first) {
+            return [];
+        }
+
+        // At most one event for each venue and each performer, so three nights at one bar are
+        // not the three cards; the schedule's own page is no venue or act of the three (on a
+        // venue's page every event is there). From the roles the list already loaded.
+        $keysOf = fn (Event $event) => $event->relationLoaded('roles')
+            ? $event->roles->filter(fn ($role) => in_array($role->type, ['venue', 'talent'], true) && $role->id !== $ownRoleId)->pluck('id')->all()
+            : [];
+        $used = array_fill_keys($keysOf($first['event']), true);
+
+        $picked = [$first];
+        $seen = [$first['event']->id => true];
+        $rows = $upcoming
+            ->filter(fn (array $row) => $category === '' || (string) $row['event']->category_id === $category)
+            ->take(40);
+
+        $ahead = [];
+        foreach ($rows as $row) {
+            $event = $row['event'];
+            if (isset($seen[$event->id])) {
+                continue;
+            }
+            $zone = $event->scheduleTimezone();
+            $starts = $event->getStartDateTime($row['date'], true, $zone);
+            if ($starts->lte(Carbon::now($zone))) {
+                if (! $event->days_of_week || ! ($next = $this->occurrenceAfterToday($event))) {
+                    continue;
+                }
+                $row = ['event' => $event, 'date' => $next];
+                $starts = $event->getStartDateTime($next, true, $zone);
+            }
+            $seen[$event->id] = true;
+            $ahead[] = ['event' => $event, 'date' => $row['date'], 'at' => $starts->getTimestamp()];
+        }
+
+        usort($ahead, fn (array $a, array $b) => $a['at'] <=> $b['at']);
+        foreach ($ahead as $row) {
+            if (count($picked) >= $count) {
+                break;
+            }
+            $keys = array_fill_keys($keysOf($row['event']), true);
+            if (array_intersect_key($keys, $used)) {
+                continue;
+            }
+            $used += $keys;
+            $picked[] = ['event' => $row['event'], 'date' => $row['date']];
+        }
+
+        return $picked;
     }
 
     /**
@@ -3191,9 +3435,17 @@ class EventRepo
      * (the Events graphic asks for flyered events only, with their tickets and venue). It may only
      * narrow: the visibility rules above are the list's, whoever asks.
      *
-     * @return \Illuminate\Support\Collection<int, array{event: Event, date: string}>
+     * @return Collection<int, array{event: Event, date: string}>
      */
-    public function upcomingForGuest(Role $role, ?\App\Models\Group $group = null, int $limit = 50, int $seriesHorizonDays = 60, ?\Closure $narrow = null): \Illuminate\Support\Collection
+    /**
+     * @param  ?Carbon  $oneOffFrom  the instant a one-off must still be on at (now when null). A
+     *                               newsletter's date range reads its events as of the moment its send
+     *                               was claimed, which a batch sent an hour later is not.
+     * @param  ?\Closure  $narrowOneOff  narrows the ONE-OFF query only. $narrow reaches the series
+     *                                   query too, where a bound on starts_at (a series' FIRST date)
+     *                                   would drop every series that began before it.
+     */
+    public function upcomingForGuest(Role $role, ?Group $group = null, int $limit = 50, int $seriesHorizonDays = 60, ?\Closure $narrow = null, ?Carbon $oneOffFrom = null, ?\Closure $narrowOneOff = null): Collection
     {
         $base = fn () => Event::query()
             ->where('events.is_draft', false)
@@ -3216,7 +3468,8 @@ class EventRepo
 
         $oneOff = $base()
             ->whereNull('events.days_of_week')
-            ->upcomingOrOngoing(Carbon::now('UTC'))
+            ->upcomingOrOngoing(($oneOffFrom ?? Carbon::now('UTC'))->copy()->setTimezone('UTC'))
+            ->when($narrowOneOff, fn ($query) => $narrowOneOff($query))
             ->orderBy('events.starts_at')
             ->limit($limit)
             ->get()
@@ -3270,10 +3523,10 @@ class EventRepo
      * (excluding a date, moving the end) is never answered from the old map, and the schedule's
      * date, so yesterday's answer does not outlive midnight.
      *
-     * @param  \Illuminate\Support\Collection<int, Event>  $series
+     * @param  Collection<int, Event>  $series
      * @return array<int, ?string>
      */
-    private function upcomingSeriesDates(Role $role, ?\App\Models\Group $group, \Illuminate\Support\Collection $series, int $horizonDays = 60): array
+    private function upcomingSeriesDates(Role $role, ?Group $group, Collection $series, int $horizonDays = 60): array
     {
         if ($series->isEmpty()) {
             return [];

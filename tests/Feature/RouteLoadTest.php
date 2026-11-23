@@ -158,6 +158,7 @@ class RouteLoadTest extends TestCase
             '/caldav',
             '/stripe',
             '/invoiceninja',
+            '/stackapella',
 
             // Audience pages
             '/for-talent',
@@ -308,6 +309,7 @@ class RouteLoadTest extends TestCase
             '/settings',
             '/following',
             '/following/merge-venues',
+            '/following/merge-participants',
             '/tickets',
             '/my-carpools',
             '/sales',
@@ -461,8 +463,8 @@ class RouteLoadTest extends TestCase
 
     public function test_hosted_gp_routes_load(): void
     {
-        // Roll back RefreshDatabase transaction to release locks before app refresh
-        $this->app['db']->connection()->rollBack();
+        // Step out of RefreshDatabase's transaction to release its locks before the app is rebuilt
+        $this->leaveTestTransaction();
 
         // Switch to hosted mode and rebuild the app with subdomain routing.
         //
@@ -539,7 +541,7 @@ class RouteLoadTest extends TestCase
      */
     public function test_hosted_tenant_subdomains_that_start_with_app_or_www_reach_their_schedule(): void
     {
-        $this->app['db']->connection()->rollBack();
+        $this->leaveTestTransaction();
 
         $this->forceEnv('IS_HOSTED', 'true');
         $this->forceEnv('APP_TESTING', 'false');

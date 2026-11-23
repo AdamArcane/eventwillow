@@ -2,6 +2,14 @@
 
 namespace App\Utils;
 
+use GuzzleHttp\Exception\RequestException;
+use GuzzleHttp\Psr7\DroppingStream;
+use GuzzleHttp\Psr7\Response;
+use GuzzleHttp\Psr7\Utils;
+use Illuminate\Http\Client\ConnectionException;
+use Illuminate\Support\Facades\Http;
+use Illuminate\Support\Facades\Route;
+use Psr\Http\Message\StreamInterface;
 use Sqids\Sqids;
 
 class UrlUtils
@@ -432,7 +440,7 @@ class UrlUtils
 
         $slugs = [];
 
-        foreach (\Illuminate\Support\Facades\Route::getRoutes() as $route) {
+        foreach (Route::getRoutes() as $route) {
             $uri = $route->uri();
 
             if (str_starts_with($uri, '{subdomain}/')) {
@@ -463,6 +471,15 @@ class UrlUtils
     public static function getSocialSvgPath(string $platform): string
     {
         return self::PLATFORM_SVG_PATHS[$platform] ?? self::PLATFORM_SVG_PATHS['website'];
+    }
+
+    /**
+     * An address as words on a page: clean(), and without its query or fragment, which for a link
+     * shared from a social app is lines of tracking (?fbclid=...). The link keeps the whole address.
+     */
+    public static function shown($url): string
+    {
+        return self::clean(preg_replace('/[?#].*$/s', '', (string) $url));
     }
 
     public static function clean($url)
@@ -1317,6 +1334,28 @@ class UrlUtils
     }
 
     /**
+     * The Guzzle error behind a failed transfer that is NOT the other side being unreachable,
+     * or null when it was (or when nothing is known). Laravel 11 let a RequestException with no
+     * response (curl 23 when the guard's size cap cut a body off, a TLS failure) out raw, and
+     * wrapped only ConnectException in ConnectionException; Laravel 12 wraps both, so a caller
+     * that catches ConnectionException alone reads a cut-off body as "unreachable".
+     */
+    public static function transferFailure(\Throwable $e): ?RequestException
+    {
+        if ($e instanceof ConnectionException) {
+            $e = $e->getPrevious();
+        }
+
+        return $e instanceof RequestException ? $e : null;
+    }
+
+    /** Whether a transfer was stopped by the guard's size cap: a stated length over it, or a body that ran past it. */
+    public static function stoppedBySizeCap(RequestException $e): bool
+    {
+        return in_array($e->getHandlerContext()['errno'] ?? null, [CURLE_WRITE_ERROR, CURLE_FILESIZE_EXCEEDED], true);
+    }
+
+    /**
      * Bounded, SSRF-safe redirect following. Every hop - including each redirect
      * target - is re-validated and IP-pinned, so a validated host that 30x's to an
      * internal address is stopped at the unsafe hop (Guzzle's own redirect follower
@@ -1359,7 +1398,7 @@ class UrlUtils
             // inflates as it reads, and 200 KB of gzip is 200 MB by the time it is a string: so
             // none is asked for, and none is undone here. A server that compresses anyway is
             // inflated by self::inflated(), which stops at the cap.
-            $response = \Illuminate\Support\Facades\Http::timeout(max(1, (int) ceil($remaining)))
+            $response = Http::timeout(max(1, (int) ceil($remaining)))
                 ->withHeaders(array_merge($headers, ['Accept-Encoding' => 'identity']))
                 ->withOptions([
                     'allow_redirects' => false,
@@ -1404,9 +1443,9 @@ class UrlUtils
      * do the same, but Guzzle 7.15 deprecates that option passed raw (8.0 is to reject it) and
      * its own "progress" option ignores what the callback answers.
      */
-    public static function cappedSink(int $bytes): \Psr\Http\Message\StreamInterface
+    public static function cappedSink(int $bytes): StreamInterface
     {
-        return new \GuzzleHttp\Psr7\DroppingStream(\GuzzleHttp\Psr7\Utils::streamFor(fopen('php://temp', 'w+')), $bytes);
+        return new DroppingStream(Utils::streamFor(fopen('php://temp', 'w+')), $bytes);
     }
 
     /**
@@ -1452,7 +1491,7 @@ class UrlUtils
             ARRAY_FILTER_USE_KEY
         );
 
-        return new \Illuminate\Http\Client\Response(new \GuzzleHttp\Psr7\Response($response->status(), $headers, $body));
+        return new \Illuminate\Http\Client\Response(new Response($response->status(), $headers, $body));
     }
 
     /**

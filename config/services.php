@@ -1,5 +1,7 @@
 <?php
 
+use App\Utils\GeminiUtils;
+
 return [
 
     /*
@@ -61,6 +63,15 @@ return [
         'attribution_url' => env('MAP_ATTRIBUTION_URL') ?: 'https://www.openstreetmap.org/copyright',
     ],
 
+    // Read-only Search Console for `php artisan app:pull-search-console`, run on a developer's
+    // machine (App\Services\SearchConsole). The credentials are a service account's JSON key, raw or
+    // base64; the property is how Search Console names the site. ?: because .env.example ships both
+    // blank, and a default argument would not fire for a blank value.
+    'search_console' => [
+        'credentials' => env('SEARCH_CONSOLE_CREDENTIALS'),
+        'property' => env('SEARCH_CONSOLE_PROPERTY') ?: 'sc-domain:eventschedule.com',
+    ],
+
     'google' => [
         'backend' => env('BACKEND_GOOGLE_KEY'),
         'maps' => env('MAPS_API_KEY'),
@@ -68,8 +79,8 @@ return [
         'gemini_key' => env('GEMINI_API_KEY'),
         // ?: because .env.example ships these empty; a default argument would not fire and
         // the model name would be sent to the API blank. Same reason as the plan prices below.
-        'gemini_translation_model' => env('GEMINI_TRANSLATION_MODEL') ?: 'gemini-2.5-flash',
-        'gemini_content_model' => env('GEMINI_CONTENT_MODEL') ?: 'gemini-2.5-flash',
+        'gemini_translation_model' => env('GEMINI_TRANSLATION_MODEL') ?: GeminiUtils::DEFAULT_MODEL,
+        'gemini_content_model' => env('GEMINI_CONTENT_MODEL') ?: GeminiUtils::DEFAULT_MODEL,
         // The blog's writer (App\Services\Blog\BlogWriter) alone: it follows a long brief, and a newer
         // model kept every rule where the content model needed a second attempt. Empty: the content model.
         'gemini_blog_model' => env('GEMINI_BLOG_MODEL') ?: null,
@@ -92,6 +103,24 @@ return [
         'wallet_issuer_id' => env('GOOGLE_WALLET_ISSUER_ID'),
         'wallet_service_account' => env('GOOGLE_WALLET_SERVICE_ACCOUNT'),
         'wallet_id_prefix' => env('GOOGLE_WALLET_ID_PREFIX') ?: 'es',
+    ],
+
+    // Apple Wallet passes ("Add to Apple Wallet" on a ticket, a signed .pkpass file). Unset = the
+    // feature is off: no button, no link in an email, and the pass address answers 404; see
+    // App\Services\Wallet\AppleWalletService::isConfigured(). Nothing is ever sent to Apple: the
+    // pass is a file the buyer's device opens, and it carries no web service for live updates.
+    //
+    // wallet_certificate holds the Pass Type ID certificate WITH its private key, as EITHER an
+    // absolute path to the .p12 (or a PEM file holding both) OR that file base64-encoded, because
+    // hosted production config is the DigitalOcean app spec and it has no writable file mount.
+    // wallet_wwdr overrides the Apple WWDR G4 intermediate the repository ships
+    // (resources/wallet/AppleWWDRCAG4.pem). Setup: docs/APPLE_WALLET_SETUP.md.
+    'apple' => [
+        'wallet_pass_type_id' => env('APPLE_WALLET_PASS_TYPE_ID'),
+        'wallet_team_id' => env('APPLE_WALLET_TEAM_ID'),
+        'wallet_certificate' => env('APPLE_WALLET_CERTIFICATE'),
+        'wallet_certificate_password' => env('APPLE_WALLET_CERTIFICATE_PASSWORD'),
+        'wallet_wwdr' => env('APPLE_WALLET_WWDR_CERTIFICATE'),
     ],
 
     'microsoft' => [

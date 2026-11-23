@@ -108,6 +108,17 @@
                 'sources' => __('messages.realtime_sources'),
                 'countries' => __('messages.realtime_countries'),
                 'geoCredit' => __('messages.realtime_geo_credit'),
+                'range30m' => __('messages.realtime_range_30m'),
+                'cardsRange' => __('messages.realtime_cards_range'),
+                'unitViews' => ['24h' => __('messages.realtime_unit_views_24h'), '7d' => __('messages.realtime_unit_views_7d'), '30d' => __('messages.realtime_unit_views_30d')],
+                'unitVisits' => ['24h' => __('messages.realtime_unit_visits_24h'), '7d' => __('messages.realtime_unit_visits_7d'), '30d' => __('messages.realtime_unit_visits_30d')],
+                // The menu beside a country: refuse new sign-ups from it (/admin/blocked).
+                'blockCountry' => __('messages.realtime_block_country', ['country' => ':label']),
+                'countryRefused' => __('messages.realtime_country_refused', ['country' => ':label']),
+                'refusedUntil' => __('messages.blocklist_until', ['date' => ':label']),
+                'refusedForever' => __('messages.blocklist_for_forever'),
+                'openBlocked' => __('messages.realtime_open_blocked'),
+                'durations' => collect(array_keys(\App\Services\Blocklist::DURATIONS))->map(fn ($key) => ['key' => $key, 'label' => __('messages.blocklist_for_'.$key)])->all(),
                 'views' => __('messages.realtime_views'),
                 'visits' => __('messages.realtime_visits'),
                 'unitViews30' => __('messages.realtime_unit_views_30'),
@@ -138,15 +149,52 @@
                 'details' => __('messages.details'),
                 'paying' => __('messages.admin_dash_paying'),
                 'inTrial' => __('messages.admin_dash_in_trial'),
-                'ifConvert' => __('messages.admin_dash_if_convert'),
                 'atRisk' => __('messages.admin_dash_at_risk'),
                 // :label is what fill() swaps for the amount.
                 'ofMrr' => __('messages.admin_dash_of_mrr', ['amount' => ':label']),
                 'cardFailed' => __('messages.admin_dash_card_failed'),
+                // The active users chart in the Revenue card (hosted).
+                'activeUsers' => __('messages.active_users_7_days'),
+                'last12Weeks' => __('messages.admin_dash_last_12_weeks'),
+                'last3Months' => __('messages.admin_dash_last_3_months'),
+                'mrrRebuilt' => __('messages.admin_dash_mrr_rebuilt'),
+                'organizers' => __('messages.admin_dash_organizers'),
+                'countOfTotal' => __('messages.admin_dash_count_of_total', ['count' => ':count', 'total' => ':total']),
+                'active30' => __('messages.admin_dash_active_30_days'),
+                'estimate' => __('messages.admin_dash_estimate'),
+                'exact' => __('messages.admin_dash_exact'),
+                // The "So far today, against before" card (_so-far) and the verdict every comparison
+                // on the page is said with (fairVerdict in _script).
+                'soFar' => collect([
+                    'title', 'clock', 'yesterday', 'usual', 'projected_legend', 'projected', 'at_now', 'now',
+                    'before_had', 'hidden_early', 'hidden_too_few', 'hidden_no_history', 'show_table',
+                    'show_chart', 'table_caption', 'col_by', 'col_usual', 'col_projected', 'tip_by',
+                    'tip_today', 'tip_yesterday', 'tip_usual', 'tip_projected', 'yesterday_by', 'usual_by',
+                    'usually', 'times', 'summary', 'summary_alone', 'no_count', 'how', 'range',
+                    'periods', 'this_period', 'period_had', 'last_month_had', 'so_far', 'projected_period',
+                    'projected_month', 'hidden_month_early', 'col_day', 'tip_before', 'today_so_far',
+                    'summary_period', 'previous_7d', 'previous_28d', 'previous_month', 'previous_month_scaled',
+                    'usual_week', 'before_7d', 'before_28d', 'before_month', 'hidden_too_few_month',
+                ])->mapWithKeys(fn ($key) => [$key => __('messages.realtime_so_far_'.$key)])->all() + [
+                    'today' => __('messages.today'),
+                    'collecting' => __('messages.realtime_trend_collecting'),
+                    'period' => collect(\App\Services\RealtimeSoFar::PERIODS)->mapWithKeys(fn ($period) => [$period => __('messages.realtime_so_far_period_'.$period)])->all(),
+                ],
+                'verdict' => [
+                    'up' => __('messages.realtime_verdict_up'),
+                    'down' => __('messages.realtime_verdict_down'),
+                    'maybeUp' => __('messages.realtime_verdict_maybe_up'),
+                    'maybeDown' => __('messages.realtime_verdict_maybe_down'),
+                    'same' => __('messages.realtime_verdict_same'),
+                    'tooFew' => __('messages.realtime_verdict_too_few'),
+                    'none' => __('messages.realtime_verdict_none'),
+                    'new' => __('messages.realtime_verdict_from_none'),
+                ],
             ];
             $realtimeConfig = [
                 'url' => route('admin.realtime.data'),
                 'trendsUrl' => route('admin.realtime.trends'),
+                'soFarUrl' => route('admin.realtime.so_far'),
                 // Hosted only, where there is billing: elsewhere the corner is the Now card's.
                 'revenueUrl' => config('app.hosted') ? route('admin.dashboard.revenue').($sample ? '?sample=1' : '') : null,
                 'pageUrl' => route('admin.dashboard'),
@@ -159,6 +207,9 @@
                 'timezone' => \App\Services\RealtimeTrends::viewerZone(auth()->user()->timezone),
                 // The range Trends opens on, from the address (?trend=), so a bookmark keeps it.
                 'trend' => \App\Services\RealtimeTrends::range(request()->query('trend')),
+                // The breakdown cards' span, from the address (?cards=), and where a longer one is read.
+                'cards' => \App\Services\RealtimeDashboard::cardsRange(request()->query('cards')),
+                'breakdownsUrl' => route('admin.realtime.breakdowns'),
                 'rtl' => is_rtl(),
                 'icons' => \App\Utils\RealtimeIcons::PATHS,
             ];
@@ -171,10 +222,11 @@
                 @include('admin.realtime._toolbar')
             </template>
 
-            {{-- The Now card and, on hosted, Revenue in the corner. From xl the two take the three
-                 columns of the Today grid below (realtime-top in _script), so the corner card stands
-                 over the Activity rail, and the board of who is where runs the full width under
-                 both. With tracking off, the card that says how to turn it on takes the Now card's
+            {{-- Four panels: Visitors (the Now card) and Sign-ups, and on hosted Revenue and Active
+                 users in the corner beside them. From xl they take the three columns of the Today
+                 grid below, two rows (realtime-top in _script), so the corner stands over the
+                 Activity rail, and the board of who is where runs the full width under them. With
+                 tracking off, the card that says how to turn it on takes the Visitors panel's
                  place. --}}
             <div class="realtime-top grid grid-cols-1 gap-4" @if (config('app.hosted')) data-corner @endif>
                 @include('admin.realtime._off')
@@ -193,9 +245,19 @@
                 @if (config('app.hosted'))
                     @include('admin.realtime._revenue')
                 @endif
+
+                <template v-if="p.state === 'ok' || p.state === 'waiting'">
+                    @include('admin.realtime._signups-panel')
+                </template>
+
+                @if (config('app.hosted'))
+                    @include('admin.realtime._active')
+                @endif
             </div>
 
             <template v-if="p.state === 'ok' || p.state === 'waiting'">
+                @include('admin.realtime._so-far')
+
                 @include('admin.realtime._board')
 
                 {{-- Activity first in the single column below xl; at xl Sign-ups takes two columns
@@ -207,7 +269,22 @@
 
                 @include('admin.realtime._trends')
 
-                <div v-if="hasAnyone" class="realtime-breakdowns grid gap-4">
+                {{-- The cards' span: the live half hour, or the hourly totals' 24 hours, 7 days or
+                     30 days (RealtimeDashboard::rangeBreakdowns()). Shown while nobody is here too,
+                     since a longer range has something to show then. --}}
+                <div class="flex flex-wrap items-center justify-end gap-x-3 gap-y-2">
+                    <span v-if="cardsSince" class="text-xs text-gray-500 dark:text-gray-400">@{{ cardsSince }}</span>
+                    <div class="inline-flex flex-wrap items-center gap-1 rounded-xl bg-gray-100 dark:bg-gray-800 p-1" role="group" :aria-label="msg.cardsRange">
+                        <button v-for="option in cardsRangeOptions" :key="option.value" type="button" @click="setCardsRange(option.value)"
+                                :aria-pressed="cardsRange === option.value ? 'true' : 'false'"
+                                class="rounded-lg px-3 py-1.5 text-sm font-medium transition-all duration-200 focus:outline-none focus-visible:ring-2 focus-visible:ring-[var(--brand-blue)]"
+                                :class="cardsRange === option.value
+                                    ? 'bg-white dark:bg-gray-900 text-gray-900 dark:text-white shadow-[inset_0_2px_4px_rgba(0,0,0,0.08)]'
+                                    : 'text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-300'">@{{ option.label }}</button>
+                    </div>
+                </div>
+
+                <div v-if="cardsShown" class="realtime-breakdowns grid gap-4">
                     @include('admin.realtime._breakdown')
                 </div>
 
@@ -224,7 +301,7 @@
              data-failed="{{ __('messages.admin_dash_card_failed') }}"
              data-retry="{{ __('messages.retry') }}"
              data-reauth="{{ __('messages.realtime_reauth') }}"
-             data-confirm="{{ __('messages.realtime_confirm_password') }}"
+             data-reauth-action="{{ __('messages.realtime_confirm_password') }}"
              @if ($sample) data-sample @endif>
             @foreach (['recent' => '36rem', 'growth' => '52rem', 'platform' => '16rem'] as $panel => $height)
                 <section data-dash-panel="{{ $panel }}" aria-busy="true" aria-label="{{ __('messages.loading') }}" class="grid grid-cols-1 lg:grid-cols-2 gap-4" style="min-height: {{ $height }}">

@@ -17,6 +17,7 @@ use App\Models\EventVideo;
 use App\Models\GalleryImage;
 use App\Models\GiftCard;
 use App\Models\Group;
+use App\Models\GuestPageSetting;
 use App\Models\Newsletter;
 use App\Models\NewsletterAbTest;
 use App\Models\NewsletterRecipient;
@@ -24,8 +25,13 @@ use App\Models\NewsletterSegment;
 use App\Models\NewsletterSegmentUser;
 use App\Models\NewsletterUnsubscribe;
 use App\Models\PromoCode;
+use App\Models\PromoterLink;
 use App\Models\Role;
+use App\Models\RoleSubscriber;
 use App\Models\Sale;
+use App\Models\SaleInstallment;
+use App\Models\SaleInstallmentPlan;
+use App\Models\SaleRefund;
 use App\Models\SaleTicket;
 use App\Models\SeatingDecoration;
 use App\Models\SeatingLevel;
@@ -34,7 +40,9 @@ use App\Models\SeatingSeat;
 use App\Models\SeatingSection;
 use App\Models\SeatingTable;
 use App\Models\Ticket;
+use App\Models\TicketReminderSetting;
 use App\Models\TicketWaitlist;
+use App\Models\User;
 use App\Utils\Aurora;
 use App\Utils\CountryUtils;
 use App\Utils\CssUtils;
@@ -44,6 +52,7 @@ use App\Utils\MarkdownUtils;
 use App\Utils\TextUtils;
 use App\Utils\TimezoneUtils;
 use App\Utils\UrlUtils;
+use Carbon\Carbon;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\QueryException;
 use Illuminate\Support\Facades\DB;
@@ -219,6 +228,27 @@ class BackupService
             'motion' => $aurora->moves(),
         ];
 
+        // What the guest page shows lives beside the schedule too (guest_page_settings).
+        $roleData['guest_page_settings'] = [
+            'show_next_event' => (bool) $role->guestPageSetting->show_next_event,
+            'page_mode' => $role->guestPageSetting->page_mode ?? 'auto',
+            'list_image_size' => $role->guestPageSetting->list_image_size ?? 'small',
+        ];
+
+        // When ticket holders are reminded lives beside the schedule too (ticket_reminder_settings).
+        // `enabled` is null while the owner has not chosen, so a restore keeps following the default.
+        $roleData['ticket_reminder_settings'] = [
+            'enabled' => is_null($role->ticketReminderSetting->enabled) ? null : (bool) $role->ticketReminderSetting->enabled,
+            'hours_before' => (int) $role->ticketReminderSetting->hours_before,
+        ];
+
+        // The translation glossary (translation_glossary_entries), in its order. A null
+        // translation keeps the term as written.
+        $roleData['translation_glossary'] = array_map(
+            fn ($entry) => ['term' => $entry['term'], 'translation' => $entry['translation']],
+            TranslationGlossary::entries($role)
+        );
+
         if ($includeImages) {
             $this->collectRoleImages($role, $roleData, $imageFiles);
         }
@@ -304,7 +334,7 @@ class BackupService
         if ($stripNewsletterPii) {
             $subscribersData = [];
         } else {
-            $subscribersData = \App\Models\RoleSubscriber::where('role_id', $role->id)
+            $subscribersData = RoleSubscriber::where('role_id', $role->id)
                 ->get()
                 ->map(function ($subscriber) {
                     return [
@@ -328,6 +358,7 @@ class BackupService
             'newsletter_unsubscribes' => $unsubscribesData,
             'role_subscribers' => $subscribersData,
             'gift_cards' => $this->exportGiftCards($role),
+            'promoter_links' => $this->exportPromoterLinks($role),
             'appointment_types' => $this->exportAppointmentTypes($role),
             // Templates, exported with the schedule that owns them. The per-occurrence snapshots
             // travel with their event, because that is what they belong to.
@@ -578,6 +609,21 @@ class BackupService
         })->toArray();
     }
 
+    /** The schedule's promoter links: the sales that cite one carry `_promoter_link_ref_id`. */
+    private function exportPromoterLinks(Role $role): array
+    {
+        return PromoterLink::where('role_id', $role->id)->get()->map(fn ($link) => [
+            '_ref_id' => $link->id,
+            'name' => $link->name,
+            'code' => $link->code,
+            'commission_percent' => $link->commission_percent,
+            'clicks' => $link->clicks,
+            'first_click_at' => $link->first_click_at?->toDateTimeString(),
+            'archived_at' => $link->archived_at?->toDateTimeString(),
+            'created_at' => $link->created_at?->toDateTimeString(),
+        ])->all();
+    }
+
     private function exportGiftCards(Role $role): array
     {
         return GiftCard::where('role_id', $role->id)->get()->map(function ($card) {
@@ -665,6 +711,10 @@ class BackupService
         $eventData['contact_name'] = $event->contact_name;
         $eventData['contact_email'] = $event->contact_email;
         $eventData['contact_phone'] = $event->contact_phone;
+        // Also not fillable: which translations a person corrected by hand. Without it a restored
+        // event's corrections would read as automatic, and the next change of the original would
+        // throw them away.
+        $eventData['translation_overrides'] = $event->translationOverrides() ?: null;
 
         if ($includeImages) {
             $this->collectEventImages($event, $eventData, $imageFiles);
@@ -746,6 +796,7 @@ class BackupService
                 '_ref_id' => $sale->id,
                 '_promo_code_ref_id' => $sale->promo_code_id,
                 '_gift_card_ref_id' => $sale->gift_card_id,
+                '_promoter_link_ref_id' => $sale->promoter_link_id,
                 '_group_ref_id' => $sale->group_id,
                 '_order_ref_id' => $sale->order_id,
                 '_newsletter_ref_id' => $sale->newsletter_id,
@@ -764,12 +815,14 @@ class BackupService
                 'transaction_reference' => $sale->transaction_reference,
                 'discount_amount' => $sale->discount_amount,
                 'gift_card_amount' => $sale->gift_card_amount,
+                'donation_amount' => $sale->donation_amount,
                 'utm_source' => $sale->utm_source,
                 'utm_medium' => $sale->utm_medium,
                 'utm_campaign' => $sale->utm_campaign,
                 'feedback_sent_at' => $sale->feedback_sent_at?->toDateTimeString(),
                 'reminder_sent_at' => $sale->reminder_sent_at?->toDateTimeString(),
                 'guest_timezone' => $sale->guest_timezone,
+                'language_code' => $sale->language_code,
                 'confirmed_at' => $sale->confirmed_at?->toDateTimeString(),
                 'paid_at' => $sale->paid_at?->toDateTimeString(),
                 'created_at' => $sale->created_at?->toDateTimeString(),
@@ -1196,8 +1249,8 @@ class BackupService
             sort($dates);
             $dateRange = '';
             if (! empty($dates)) {
-                $first = \Carbon\Carbon::parse($dates[0])->format('M Y');
-                $last = \Carbon\Carbon::parse(end($dates))->format('M Y');
+                $first = Carbon::parse($dates[0])->format('M Y');
+                $last = Carbon::parse(end($dates))->format('M Y');
                 $dateRange = $first === $last ? $first : $first.' - '.$last;
             }
 
@@ -1253,8 +1306,18 @@ class BackupService
         return $report;
     }
 
+    /**
+     * Whether this restore is for somebody whose restored audience the platform's mail would reach
+     * unpaid (AudienceMailGuard): the waitlists and interest lists are then not restored as live.
+     */
+    private bool $restoreUnsolicited = false;
+
     private function importSchedule(array $scheduleData, int $userId, bool $includesImages, BackupJob $job): array
     {
+        $restorer = User::find($userId);
+        $this->restoreUnsolicited = config('app.hosted') && $restorer && ! $restorer->isAdmin()
+            && ! AudienceMailGuard::ownerHasPaid($restorer);
+
         $report = [
             'schedules' => ['success' => 0, 'failed' => 0, 'failures' => []],
             'sub_schedules' => ['success' => 0, 'failed' => 0, 'failures' => []],
@@ -1272,6 +1335,7 @@ class BackupService
             'tickets' => [],
             'promo_codes' => [],
             'gift_cards' => [],
+            'promoter_links' => [],
             'appointment_types' => [],
             'sales' => [],
             'parts' => [],
@@ -1311,6 +1375,33 @@ class BackupService
                     $plan = $this->importSeatingPlan($planData, $role, $idMap);
                     if (isset($planData['_ref_id'])) {
                         $idMap['seating_plans'][$planData['_ref_id']] = $plan->id;
+                    }
+                } catch (\Exception $e) {
+                    report($e);
+                }
+            }
+
+            // Promoter links before events, too: sales reference them by promoter_link_id. A code
+            // that does not fit is left out rather than failing the restore.
+            foreach ($scheduleData['promoter_links'] ?? [] as $linkData) {
+                try {
+                    $code = PromoterLinks::cleanCode($linkData['code'] ?? null);
+                    $name = trim((string) ($linkData['name'] ?? ''));
+                    if ($code === null || $name === '' || PromoterLinks::codeTaken($role, $code)) {
+                        continue;
+                    }
+                    $link = new PromoterLink([
+                        'role_id' => $role->id,
+                        'name' => mb_substr($name, 0, 100),
+                        'code' => $code,
+                        'commission_percent' => is_numeric($linkData['commission_percent'] ?? null) ? max(0, min(100, (float) $linkData['commission_percent'])) : null,
+                    ]);
+                    $link->clicks = max(0, (int) ($linkData['clicks'] ?? 0));
+                    $link->first_click_at = ! empty($linkData['first_click_at']) ? Carbon::parse($linkData['first_click_at']) : null;
+                    $link->archived_at = ! empty($linkData['archived_at']) ? Carbon::parse($linkData['archived_at']) : null;
+                    $link->save();
+                    if (isset($linkData['_ref_id'])) {
+                        $idMap['promoter_links'][$linkData['_ref_id']] = $link->id;
                     }
                 } catch (\Exception $e) {
                     report($e);
@@ -1690,7 +1781,7 @@ class BackupService
             // be live in somebody's inbox pointing at the original schedule.
             foreach ($scheduleData['role_subscribers'] ?? [] as $subData) {
                 try {
-                    \App\Models\RoleSubscriber::withoutEvents(function () use ($role, $subData) {
+                    RoleSubscriber::withoutEvents(function () use ($role, $subData) {
                         // forceFill, not create(): created_at is not in $fillable, so create()
                         // dropped it silently and every restored subscriber came back dated the
                         // restore - while exportRole() has always written it, and the followers
@@ -1698,14 +1789,19 @@ class BackupService
                         // created_at survives updateTimestamps(), which only stamps when the
                         // column is not already dirty. The mutator on email still runs, because
                         // forceFill() goes through fill() and so through setAttribute().
-                        (new \App\Models\RoleSubscriber)->forceFill([
+                        (new RoleSubscriber)->forceFill([
                             'role_id' => $role->id,
                             'email' => $subData['email'],
                             'name' => $subData['name'] ?? null,
                             'locale' => $subData['locale'] ?? null,
                             'source' => $subData['source'] ?? 'import',
                             'confirmed_at' => $subData['confirmed_at'] ?? null,
-                            'token' => \App\Models\RoleSubscriber::newToken(),
+                            // Kept confirmed, so a migrating schedule keeps its list, and marked:
+                            // a backup is a file its owner can edit, so a restored subscriber is
+                            // mailed only once the owner has paid (AudienceMailGuard, rule A),
+                            // and not by the automatic announcements before then either.
+                            'origin' => 'restore',
+                            'token' => RoleSubscriber::newToken(),
                             // ?? then ?:, not either alone: ?? misses an empty string (which a
                             // hand-edited backup can carry, and which Carbon would choke on),
                             // and a bare ?: warns on the absent key.
@@ -1789,7 +1885,7 @@ class BackupService
         }
 
         if (config('app.hosted')) {
-            $user = \App\Models\User::find($userId);
+            $user = User::find($userId);
             if ($user && $user->owner()->count() >= 50) {
                 throw new \Exception(__('messages.schedule_limit'));
             }
@@ -1800,6 +1896,17 @@ class BackupService
             if (array_key_exists($field, $data)) {
                 $role->$field = $this->restorableValue($role, $field, $data[$field]);
             }
+        }
+        // A restore is a new schedule: it must not take over the public address of the graphic it
+        // was copied from (GraphicLink), where both would draw over one picture. Read from the raw
+        // value: a hand-edited file may hold anything there, and the accessor expects an array.
+        $graphicSettings = $role->getAttributes()['graphic_settings'] ?? null;
+        $graphicSettings = is_string($graphicSettings) ? json_decode($graphicSettings, true) : $graphicSettings;
+        if (is_array($graphicSettings)) {
+            unset($graphicSettings['link_enabled'], $graphicSettings['link_key']);
+            $role->graphic_settings = $graphicSettings;
+        } else {
+            $role->graphic_settings = null;
         }
         // Pre-feature backups have no header_style key; force null (resolves to the
         // "banner" style) so the model's "compact" default doesn't change a restored
@@ -1883,7 +1990,7 @@ class BackupService
         }
 
         // Auto-confirm email if it matches the importing user's verified email
-        $user = \App\Models\User::find($userId);
+        $user = User::find($userId);
         if ($role->email && $user && $user->email === $role->email && $user->email_verified_at) {
             $role->email_verified_at = now();
             $role->saveQuietly();
@@ -1903,6 +2010,34 @@ class BackupService
                 is_numeric($aurora['seed'] ?? null) ? (int) $aurora['seed'] : null,
                 ! array_key_exists('motion', $aurora) || (bool) $aurora['motion'],
             );
+        }
+
+        if (is_array($data['guest_page_settings'] ?? null) && array_key_exists('show_next_event', $data['guest_page_settings'])) {
+            GuestPageSetting::store($role, ['show_next_event' => (bool) $data['guest_page_settings']['show_next_event']]);
+        }
+        if (in_array($data['guest_page_settings']['page_mode'] ?? null, GuestPageSetting::MODES, true)) {
+            GuestPageSetting::store($role, ['page_mode' => $data['guest_page_settings']['page_mode']]);
+        }
+        if (in_array($data['guest_page_settings']['list_image_size'] ?? null, GuestPageSetting::LIST_IMAGE_SIZES, true)) {
+            GuestPageSetting::store($role, ['list_image_size' => $data['guest_page_settings']['list_image_size']]);
+        }
+
+        if (is_array($data['ticket_reminder_settings'] ?? null)) {
+            $reminders = $data['ticket_reminder_settings'];
+            $values = [];
+            if (isset($reminders['enabled'])) {
+                $values['enabled'] = (bool) $reminders['enabled'];
+            }
+            if (in_array((int) ($reminders['hours_before'] ?? 0), TicketReminderSetting::HOURS_OPTIONS, true)) {
+                $values['hours_before'] = (int) $reminders['hours_before'];
+            }
+            TicketReminderSetting::store($role, $values);
+        }
+
+        // save() cleans and caps the rows as the schedule form's are. Nothing to re-translate: a
+        // restored schedule has no translations of its own yet.
+        if (is_array($data['translation_glossary'] ?? null)) {
+            TranslationGlossary::save($role, $data['translation_glossary']);
         }
 
         return $role;
@@ -2012,6 +2147,20 @@ class BackupService
         $event->contact_name = TextUtils::clamp($data['contact_name'] ?? null, 255);
         $event->contact_email = TextUtils::clamp($data['contact_email'] ?? null, 255);
         $event->contact_phone = TextUtils::clamp($data['contact_phone'] ?? null, 255);
+
+        // Corrections made by hand (not fillable), read back through the model so an archive edited
+        // by hand cannot carry anything but known fields and hashes. Only where a translation came
+        // back with it.
+        $event->translation_overrides = null;
+        if (is_array($data['translation_overrides'] ?? null)) {
+            foreach (Event::HAND_TRANSLATABLE_FIELDS as $field) {
+                $source = $data['translation_overrides'][$field]['source'] ?? null;
+                if (isset($data['translation_overrides'][$field]) && is_string($source) && filled($event->{$field.'_en'})) {
+                    $lang = $data['translation_overrides'][$field]['lang'] ?? null;
+                    $event->markTranslationManual($field, $source, is_string($lang) ? $lang : null);
+                }
+            }
+        }
 
         // Remap the appointment type (not fillable). Drop the link if the type didn't import.
         $apptRefId = $data['_appointment_type_ref_id'] ?? null;
@@ -2544,7 +2693,12 @@ class BackupService
         $sale->feedback_sent_at = $data['feedback_sent_at'] ?? null;
         $sale->reminder_sent_at = $data['reminder_sent_at'] ?? null;
         $sale->guest_timezone = $data['guest_timezone'] ?? null;
+        // Read back through Sale::guestLanguage(), which ignores anything not a supported language.
+        $sale->language_code = is_string($data['language_code'] ?? null) ? substr($data['language_code'], 0, 10) : null;
         $sale->confirmed_at = $data['confirmed_at'] ?? null;
+        // A backup is a file its owner can edit: a restored buyer is not an opt-in
+        // (AudienceMailGuard, rule A) until the owner has paid.
+        $sale->origin = 'restore';
 
         // saveQuietly() below fires no hooks, so the saving() hook that normally stamps paid_at
         // does not run. Carry the original payment time across, falling back to created_at for
@@ -2566,6 +2720,13 @@ class BackupService
             $sale->gift_card_id = $idMap['gift_cards'][$giftCardRefId];
             $sale->gift_card_amount = $data['gift_card_amount'] ?? null;
         }
+        $promoterRefId = $data['_promoter_link_ref_id'] ?? null;
+        if ($promoterRefId && isset($idMap['promoter_links'][$promoterRefId])) {
+            $sale->promoter_link_id = $idMap['promoter_links'][$promoterRefId];
+        }
+
+        // The donation is already inside payment_amount; this keeps it as its own figure.
+        $sale->donation_amount = is_numeric($data['donation_amount'] ?? null) && (float) $data['donation_amount'] > 0 ? (float) $data['donation_amount'] : null;
 
         // newsletter_id is remapped in the second pass after newsletters are imported
 
@@ -2611,7 +2772,7 @@ class BackupService
                 continue;
             }
 
-            $refund = new \App\Models\SaleRefund;
+            $refund = new SaleRefund;
             $refund->sale_id = $sale->id;
             $refund->amount = $refundData['amount'] ?? 0;
             $refund->currency_code = $refundData['currency_code'] ?? null;
@@ -2623,7 +2784,7 @@ class BackupService
             $refund->saveQuietly();
 
             if (! empty($refundData['created_at'])) {
-                \App\Models\SaleRefund::where('id', $refund->id)
+                SaleRefund::where('id', $refund->id)
                     ->update(['created_at' => $refundData['created_at']]);
             }
         }
@@ -2647,7 +2808,7 @@ class BackupService
             return;
         }
 
-        $plan = new \App\Models\SaleInstallmentPlan;
+        $plan = new SaleInstallmentPlan;
         $plan->sale_id = $sale->id;
         $plan->currency = $planData['currency'] ?? 'USD';
         $plan->total_amount = $planData['total_amount'] ?? 0;
@@ -2661,7 +2822,7 @@ class BackupService
         $plan->saveQuietly();
 
         if (! empty($planData['created_at'])) {
-            \App\Models\SaleInstallmentPlan::where('id', $plan->id)
+            SaleInstallmentPlan::where('id', $plan->id)
                 ->update(['created_at' => $planData['created_at']]);
         }
 
@@ -2670,7 +2831,7 @@ class BackupService
                 continue;
             }
 
-            $installment = new \App\Models\SaleInstallment;
+            $installment = new SaleInstallment;
             $installment->sale_installment_plan_id = $plan->id;
             $installment->sequence = (int) $row['sequence'];
             $installment->amount = $row['amount'] ?? 0;
@@ -2840,7 +3001,11 @@ class BackupService
                 'name' => $data['name'] ?? '',
                 'email' => $data['email'],
                 'subdomain' => $role->subdomain,
-                'status' => $data['status'] ?? 'waiting',
+                // Restored for an owner who has not paid (hosted): no longer waiting, so no
+                // "tickets are available" mail goes to an address the file named.
+                'status' => $this->restoreUnsolicited && in_array($data['status'] ?? 'waiting', ['waiting', 'notified'], true)
+                    ? 'expired'
+                    : ($data['status'] ?? 'waiting'),
                 'locale' => $data['locale'] ?? null,
                 'notified_at' => $data['notified_at'] ?? null,
                 'expires_at' => $data['expires_at'] ?? null,
@@ -2874,7 +3039,9 @@ class BackupService
                 'name' => $data['name'] ?? null,
                 'locale' => $data['locale'] ?? null,
                 'source' => $data['source'] ?? 'event_page',
-                'confirmed_at' => $data['confirmed_at'] ?? null,
+                // Restored for an owner who has not paid (hosted): unconfirmed, so no notice about
+                // the event goes to an address the file named. Pruned with the unconfirmed sign-ups.
+                'confirmed_at' => $this->restoreUnsolicited ? null : ($data['confirmed_at'] ?? null),
                 'tickets_notified_at' => $data['tickets_notified_at'] ?? null,
                 'reminder_sent_at' => $data['reminder_sent_at'] ?? null,
                 'token' => EventInterest::newToken(),
@@ -2886,7 +3053,8 @@ class BackupService
     {
         $validator = Validator::make($data, [
             'subject' => 'required|string|max:500',
-            'status' => 'required|in:draft,scheduled,sent',
+            // 'review' is a newsletter held for review when the backup was made: restored as a draft.
+            'status' => 'required|in:draft,scheduled,sent,review',
         ]);
 
         if ($validator->fails()) {
@@ -2937,7 +3105,9 @@ class BackupService
         $newsletter->sent_count = $data['sent_count'] ?? 0;
         $newsletter->open_count = $data['open_count'] ?? 0;
         $newsletter->click_count = $data['click_count'] ?? 0;
-        $newsletter->type = $data['type'] ?? null;
+        // Always the schedule's own: a backup is a file its owner can edit, and an 'admin'
+        // newsletter is the platform's, which NewsletterService::send() mails to every user.
+        $newsletter->type = 'schedule';
         $newsletter->saveQuietly();
 
         return $newsletter;
@@ -2985,7 +3155,9 @@ class BackupService
         $segment = new NewsletterSegment;
         $segment->role_id = $role->id;
         $segment->name = $data['name'] ?? '';
-        $segment->type = $data['type'] ?? 'manual';
+        // Only a schedule's own kinds: 'all_users', 'plan_tier', 'signup_date' and 'admins' are the
+        // platform's, and resolve to every account on the install whoever owns the row.
+        $segment->type = in_array($data['type'] ?? null, NewsletterSegment::SCHEDULE_TYPES, true) ? $data['type'] : 'manual';
 
         $criteria = $data['filter_criteria'] ?? null;
         if (is_array($criteria)) {

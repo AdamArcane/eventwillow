@@ -3,7 +3,8 @@
     // page. Not $role, which is the event's performer and null for a venue's or a curator's event.
     $themeRole = $sale->sellingRole() ?? $role;
     $eventDate = $sale->event_date;
-    $eventName = $event->translatedName();
+    // In the language the ticket is read in (TicketController::view()), where the event has it.
+    $eventName = ! empty($ticketLanguage) ? $event->nameInLanguage($ticketLanguage) : $event->translatedName();
 
     $isUnpaid = $sale->status === 'unpaid';
     $installmentPlan = $sale->installmentPlan;
@@ -94,16 +95,22 @@
              private shell (no social tags, canonical, structured data, pixel, cart or owner CSS,
              and nothing reported to the owner's Realtime view) and takes only the colours. --}}
         @include('partials.guest-theme', ['role' => $themeRole, 'otherRole' => null, 'selectedGroup' => null])
+        @include('partials.guest-kit-styles')
+        @include('partials.guest-stage-styles')
         @include('partials.guest-ticket-styles')
     </x-slot>
 
     <main id="main-content" class="gk-tkpage" tabindex="-1" data-sale-status="{{ $sale->status }}" data-ticket="{{ \App\Utils\UrlUtils::encodeId($sale->id) }}">
-      <div class="gk-tk-wrap">
-
+      {{-- The way back, on the ground above the sheet, as on every guest page. --}}
+      <div class="gk-topbar gk-tk-topbar gk-tk-topbar-ticket gk-tk-noprint">
         <a href="{{ $eventUrl }}" class="gk-tk-back"{!! $outOfFrame !!}>
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M15 19l-7-7 7-7"/></svg>
           <span>{{ __('messages.view_event') }}</span>
         </a>
+      </div>
+
+      {{-- The sheet the ticket stands on (partials/guest-ticket-styles). --}}
+      <div class="gk-tk-wrap">
 
         <article class="gk-ticket {{ ($fresh && $valid) ? 'gk-ticket-fresh' : '' }}" id="ticket">
           <div class="gk-ticket-a">
@@ -204,6 +211,14 @@
                 @include('ticket.partials.icon', ['icon' => 'zoom'])
                 {{ __('messages.ticket_enlarge_code') }}
               </button>
+              {{-- The wallets, under the code they carry: a pass is how a phone gets in at the door.
+                   Only for a valid ticket, as the route itself decides (WalletPasses::eligible()).
+                   No inline display here: it would outrank the print sheet's "not on paper". --}}
+              @if (\App\Services\Wallet\WalletPasses::anyOffered($sale, $event))
+                <div class="gk-tk-wallets gk-tk-noprint">
+                  @include('partials.wallet-buttons', ['sale' => $sale, 'event' => $event])
+                </div>
+              @endif
             @else
               <div class="gk-tk-qr gk-tk-qr-void">
                 <img src="{{ $qrUrl }}" alt="">
@@ -354,6 +369,9 @@
 
                   $ticketDiscountTotal = $sale->isRsvp() ? 0 : $sale->legTotalDiscount();
                   $ticketGiftCardTotal = $sale->isRsvp() ? 0 : $sale->legTotalGiftCard();
+                  // What the buyer chose to give, inside the total like on the receipt. On the
+                  // order's first row only, so a guest's own ticket shows none.
+                  $ticketDonation = $sale->isRsvp() ? 0 : (float) $sale->donation_amount;
               @endphp
               @if ($sale->isRsvp() || $regularTickets->count() > 0)
               <div class="gk-tk-fact">
@@ -379,11 +397,14 @@
               @endif
             </dl>
 
-            @if ($ticketDiscountTotal > 0 || $ticketGiftCardTotal > 0)
+            @if ($ticketDiscountTotal > 0 || $ticketGiftCardTotal > 0 || $ticketDonation > 0)
               <div class="gk-tk-sec">
                 <ul class="gk-tk-rows">
                   @if ($ticketDiscountTotal > 0)
                     <li class="gk-tk-row gk-tk-good"><span class="gk-tk-good">{{ __('messages.discount') }}@if ($sale->promoCode) (<bdi>{{ $sale->promoCode->code }}</bdi>)@endif</span><span><bdi>-{{ \App\Utils\MoneyUtils::format($ticketDiscountTotal, $event->ticket_currency_code) }}</bdi></span></li>
+                  @endif
+                  @if ($ticketDonation > 0)
+                    <li class="gk-tk-row"><span>{{ __('messages.donation') }}</span><span><bdi>{{ \App\Utils\MoneyUtils::format($ticketDonation, $event->ticket_currency_code) }}</bdi></span></li>
                   @endif
                   @if ($ticketGiftCardTotal > 0)
                     <li class="gk-tk-row gk-tk-good"><span class="gk-tk-good">{{ __('messages.gift_card') }}</span><span><bdi>-{{ \App\Utils\MoneyUtils::format($ticketGiftCardTotal, $event->ticket_currency_code) }}</bdi></span></li>
@@ -617,14 +638,6 @@
                     @endif
                   @endforeach
                 </ul>
-              </div>
-            @endif
-
-            {{-- Google's badge keeps its own white ground (partials/wallet-buttons says why). --}}
-            @if (\App\Services\Wallet\GoogleWalletService::canOffer($sale, $event))
-              {{-- No inline display here: it would outrank the print sheet's "not on paper". --}}
-              <div class="gk-tk-sec gk-tk-center gk-tk-noprint">
-                @include('partials.wallet-buttons', ['sale' => $sale, 'event' => $event])
               </div>
             @endif
 

@@ -32,6 +32,7 @@ class HelpUtils
                 'section-details' => '/docs/creating-schedules#details',
                 'details-tab-general' => '/docs/creating-schedules#details-general',
                 'details-tab-localization' => '/docs/creating-schedules#details-localization',
+                'details-tab-glossary' => '/docs/creating-schedules#details-glossary',
                 'details-tab-contact' => '/docs/creating-schedules#contact-info',
                 'details-tab-announcement' => '/docs/creating-schedules#announcement-bar',
                 'section-sources' => '/docs/creating-schedules#event-sources',
@@ -71,6 +72,7 @@ class HelpUtils
                 'section-tickets' => '/docs/creating-schedules#tickets',
                 'tickets-tab-presets' => '/docs/creating-schedules#ticket-presets',
                 'tickets-tab-gift-cards' => '/docs/gift-cards#setup',
+                'tickets-tab-reminders' => '/docs/creating-schedules#ticket-reminders',
                 'section-settings' => '/docs/creating-schedules#settings',
                 'settings-tab-general' => '/docs/creating-schedules#settings-general',
                 'settings-tab-events' => '/docs/creating-schedules#settings-new-events',
@@ -90,6 +92,8 @@ class HelpUtils
             'doc' => '/docs/creating-events#details',
             'anchors' => [
                 'section-details' => '/docs/creating-events#details',
+                // The Translation row under About (#event-translation).
+                'event-translation' => '/docs/creating-events#translation',
                 'section-listing' => '/docs/creating-events#listing',
                 'section-calendar-sync' => '/docs/creating-events#google-calendar',
                 'section-venue' => '/docs/creating-events#venue',
@@ -133,6 +137,8 @@ class HelpUtils
             'doc' => '/docs/creating-events#manual',
             'anchors' => [
                 'section-details' => '/docs/creating-events#details',
+                // The Translation row under About (#event-translation).
+                'event-translation' => '/docs/creating-events#translation',
                 'section-listing' => '/docs/creating-events#listing',
                 'section-calendar-sync' => '/docs/creating-events#google-calendar',
                 'section-venue' => '/docs/creating-events#venue',
@@ -249,6 +255,7 @@ class HelpUtils
         '{subdomain}/team/add-member' => '/docs/managing-schedules#team',
         '{subdomain}/team/transfer' => '/docs/managing-schedules#transfer-ownership',
         'schedule-transfer/*' => '/docs/managing-schedules#transfer-ownership',
+        '{subdomain}/promoters' => '/docs/managing-schedules#promoters',
         '{subdomain}/plan' => '/docs/managing-schedules#plan',
         '{subdomain}/audit-log' => '/docs/managing-schedules#audit-log',
         '{subdomain}/videos' => '/docs/managing-schedules#videos',
@@ -270,6 +277,7 @@ class HelpUtils
                 'graphic-pane-header' => '/docs/event-graphics#header-footer-text',
                 'graphic-pane-caption' => '/docs/event-graphics#text-template',
                 'graphic-pane-email' => '/docs/event-graphics#email-scheduling',
+                'graphic-pane-link' => '/docs/event-graphics#public-link',
             ],
         ],
         // Explicit rather than load-bearing: '{subdomain}/merge-venues*' above already matches
@@ -277,6 +285,8 @@ class HelpUtils
         // route parameter. Kept so the mapping survives if that fallback ever tightens, and so
         // the page is not silently relying on it.
         'following/merge-venues*' => '/docs/creating-schedules#merge',
+        // Load-bearing, unlike the line above: no {subdomain} pattern reaches this path.
+        'following/merge-participants*' => '/docs/creating-schedules#merge-participants',
         'following' => '/docs/sharing#followers',
         // The tickets the signed-in person HOLDS (TicketController::tickets), not the organizer's
         // side: no guide section covers this page, so Help opens the docs home rather than
@@ -341,6 +351,8 @@ class HelpUtils
         'admin/domains*' => '/docs/saas/custom-domains#admin-management',
         'admin/referrals*' => '/docs/selfhost/admin#manage-referrals',
         'admin/newsletter*' => '/docs/selfhost/admin#manage-newsletters',
+        // Hosted only: what the owner is told about a held newsletter and paused email.
+        'admin/mail-review*' => '/docs/newsletters#review',
         'admin/blog*' => '/docs/selfhost/admin#manage-blog',
         'admin/audit-log*' => '/docs/selfhost/admin#system-audit-log',
         'admin/queue*' => '/docs/selfhost/admin#system-queue',

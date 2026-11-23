@@ -33,6 +33,10 @@
             <x-doc-nav-link href="#team-leaving">When someone leaves</x-doc-nav-link>
             <x-doc-nav-link href="#transfer-ownership">Transferring Ownership</x-doc-nav-link>
         </x-doc-nav-group>
+        <x-doc-nav-group label="Promoters" href="#promoters">
+            <x-doc-nav-link href="#promoters-add">Adding a link</x-doc-nav-link>
+            <x-doc-nav-link href="#promoters-counts">What is counted</x-doc-nav-link>
+        </x-doc-nav-group>
         <x-doc-nav-link href="#plan">Plan</x-doc-nav-link>
         <x-doc-nav-link href="#audit-log">Audit Log</x-doc-nav-link>
         <x-doc-nav-link href="#see-also">See Also</x-doc-nav-link>
@@ -492,7 +496,7 @@
 
         <h3 class="doc-subheading">Working through the list</h3>
         <ol class="doc-list doc-list-numbered mb-6">
-            <li><strong>View</strong> opens the public page for an event request so you can see the whole thing, and <strong>Edit</strong> opens it in the event form if you want to tidy it up before publishing. An appointment booking has neither: everything about it is on the card.</li>
+            <li><strong>View</strong> opens the public page for an event request so you can see the whole thing, and <strong>Edit</strong> opens it in the event form. Saving there puts the event on your schedule at once, as Accept does, but without the email Accept sends, so to tell the submitter, accept first and edit after. An appointment booking has neither: everything about it is on the card.</li>
             <li><strong>Accept</strong> publishes the event on your schedule, or confirms the booking. The person who submitted it is emailed if they sent it from an account; a Booking Form guest with no account is not, so reply to them at the address on their card. A guest who booked an appointment gets their confirmation and calendar invite. On eventschedule.com every email about a booking, to the guest or to you, needs the schedule's own <a href="{{ route('marketing.docs.creating_schedules') }}#integrations-email" class="doc-link">email settings</a>.</li>
             <li><strong>Decline</strong> asks you to confirm, then removes it from your schedule and emails the submitter, if they sent it from an account. Declining a booking also cancels it and frees the slot, but it does not return a payment. If the booking was paid, the email telling you it was cancelled gives the amount and payment reference, so you can return the money in Stripe or your payment provider. To refund from Event Schedule instead, use <strong>Refund Ticket</strong> on the <a href="{{ route('marketing.docs.tickets') }}#managing-sales" class="doc-link">Sales page</a> before you decline: it is only offered while the sale is still paid.</li>
             <li><strong>Accept All</strong>, shown at the top once more than one request is waiting, takes everything in one go, after a confirmation that names the count. There is no bulk decline: declining is one at a time, on purpose.</li>
@@ -802,7 +806,7 @@
             When a member leaves, is removed, or is changed to a viewer, they keep no hold on what they set up here:
         </p>
         <ul class="doc-list mb-6">
-            <li>The events they created on this schedule pass to the owner, except an event that has already taken money, which stays with them so its refunds still reach the right payment account</li>
+            <li>The events they created on this schedule pass to the owner, except an event that already has sales or sign-ups, which stays with them so its refunds still reach the right payment account</li>
             <li>Any <a href="{{ route('marketing.docs.appointments') }}#hosts" class="doc-link">appointment type</a> they host is switched off, and the owner is emailed so they can give it a new host</li>
             <li>When they leave or are removed, a <a href="#feeds" class="doc-link">feed</a> they added is paused until someone still on the team looks at it, and their own calendar sync for this schedule is deleted</li>
         </ul>
@@ -837,6 +841,42 @@
         <p class="text-gray-600 dark:text-gray-300 mb-4">
             <strong class="text-gray-900 dark:text-white">Billing on eventschedule.com.</strong> The previous owner is never charged for the schedule again: their subscription is cancelled at the end of the billing period already paid for and their saved card is removed. The schedule keeps its plan until that period ends. Before then the new owner adds their own billing details to keep it, otherwise the schedule moves to the free plan. Selfhosted installs have no billing step at all.
         </p>
+    </section>
+
+    <!-- Promoters -->
+    <section id="promoters" class="doc-section">
+        <h2 class="doc-heading">
+            <svg aria-hidden="true" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" class="w-5 h-5 text-gray-500 dark:text-gray-400 flex-shrink-0">
+                <path stroke-linecap="round" stroke-linejoin="round" d="M13.19 8.688a4.5 4.5 0 0 1 1.242 7.244l-4.5 4.5a4.5 4.5 0 0 1-6.364-6.364l1.757-1.757m13.35-.622 1.757-1.757a4.5 4.5 0 0 0-6.364-6.364l-4.5 4.5a4.5 4.5 0 0 0 1.242 7.244" />
+            </svg>
+            Promoters <x-doc-badge plan="pro" />
+        </h2>
+        <p class="text-gray-600 dark:text-gray-300 mb-4">
+            The <strong class="text-gray-900 dark:text-white">Promoters</strong> tab gives each person who sells tickets for you a link of their own: a street team, a DJ with a following, a partner organization. When somebody follows a promoter's link and then buys a ticket, or registers for a free event, the sale is credited to that promoter, and the tab shows how many people each link brought, the tickets they bought, the revenue, and the commission it earned. It is open to the schedule's owner and admins.
+        </p>
+
+        <h3 id="promoters-add" class="doc-subheading">Adding a link</h3>
+        <ol class="doc-list doc-list-numbered mb-6">
+            <li>The first time, the form is the page; after that, click <strong>Add link</strong> at the top. Enter the promoter's <strong>Name</strong>. The <strong>Code</strong> is what goes after <code>?via=</code> in the link; leave it empty and one is made from the name. Codes use letters, numbers, dashes and underscores, and each is used once on a schedule.</li>
+            <li>Optionally set a <strong>Commission (%)</strong>. The tab works out what each promoter has earned; paying it is up to you, outside Event Schedule.</li>
+            <li>Click <strong>Add link</strong>, then <strong>Copy link</strong> on its row and send it to the promoter.</li>
+        </ol>
+        <p class="text-gray-600 dark:text-gray-300 mb-4">
+            <strong class="text-gray-900 dark:text-white">Copied links lead to</strong>, above the list once the schedule has coming events with tickets or free registration, chooses where every copied link leads: the whole schedule, or one of those events. It changes the links, not the figures. The code is the same either way, so a promoter can use one link for the schedule and another for a single event. Once somebody has followed a link its code can no longer change, because it is already out in the world; the name and commission can. <strong>Archive</strong> stops a link counting new visits and sales, and keeps what it earned on the list.
+        </p>
+
+        <h3 id="promoters-counts" class="doc-subheading">What is counted</h3>
+        <ul class="doc-list mb-6">
+            <li><strong>Clicks</strong> are visits through the link, once per visit. Search engines and other crawlers are not counted.</li>
+            <li>A sale is credited to the last promoter link the buyer followed on this schedule. It is kept for the visit, and for 30 days when the visitor has allowed marketing cookies.</li>
+            <li>Only this schedule's own events count. An event the schedule only lists, made by another schedule, is not credited to its links.</li>
+            <li><strong>Tickets</strong> and <strong>Revenue</strong> come from paid sales: refunds are taken off, and <a href="{{ route('marketing.docs.tickets') }}#donations" class="doc-link">donations</a> are left out. Revenue in more than one currency is listed per currency. The <strong>Promoter</strong> column of the sales export names the link behind each sale.</li>
+        </ul>
+
+        <div class="doc-callout doc-callout-plan mb-6">
+            <div class="doc-callout-title">Promoter links need Pro <x-doc-badge plan="pro" /></div>
+            <p>On eventschedule.com promoter links are part of the Pro and Enterprise plans. If a schedule leaves Pro, its links stay listed with what they earned, but no new sale is credited until it is back on Pro. Selfhosted installs have them without a subscription.</p>
+        </div>
     </section>
 
     <!-- Plan -->
@@ -936,6 +976,10 @@
                         <td>Offered during that period. It undoes the cancellation</td>
                     </tr>
                     <tr>
+                        <td><strong>End trial and pay now</strong></td>
+                        <td>Offered while a plan's free trial runs, with the price on the button. It ends the trial today and charges the card at once, which lifts the trial's limits: during a trial, newsletters are limited to the Free plan's 10 emails a month (see <a href="{{ route('marketing.docs.newsletters') }}#allowance" class="doc-link">Newsletters</a>). If the charge does not go through, the trial carries on and nothing is charged; a card that asks for a security check opens the payment page first</td>
+                    </tr>
+                    <tr>
                         <td><strong>Change to Free Plan</strong></td>
                         <td>For a Pro plan held without a subscription: moves the schedule to Free at once, after a confirmation</td>
                     </tr>
@@ -946,6 +990,8 @@
             Below the plan, a <strong class="text-gray-900 dark:text-white">Referral Program</strong> card links to your referral dashboard, where referring other organizers earns free months. See <a href="{{ route('marketing.docs.referral_program') }}" class="doc-link">Referral Program</a>.
         </p>
 
+        {{-- Only where the install runs ads at all (ADS_ENABLED): this branch is hosted only. --}}
+        @if (config('ads.enabled'))
         <h3 id="plan-ads" class="doc-subheading">Ads on free schedules</h3>
         <p class="text-gray-600 dark:text-gray-300 mb-4">
             Some Event Schedule sites cover their costs by showing ads at the bottom of free schedules' public pages. Where that is switched on, upgrading to Pro removes them, in the same way it removes the "Powered by Event Schedule" credit, and a notice at the top of the Plan tab says so while your pages are showing them. Paid schedules never carry ads.
@@ -960,6 +1006,7 @@
             <div class="doc-callout-title">Not enabled on eventschedule.com</div>
             <p>This is a per-site choice made by whoever runs the Event Schedule installation you are on, and it is off unless they turn it on. eventschedule.com does not show ads on free schedules, so if that is where your schedule lives, none of this applies to you.</p>
         </div>
+        @endif
         @else
         <p class="text-gray-600 dark:text-gray-300 mb-4">
             The <strong class="text-gray-900 dark:text-white">Plan</strong> tab is part of the hosted version of Event Schedule (eventschedule.com), where it shows your subscription, your usage allowances and your billing. A selfhosted install has no subscription: every schedule already has the full Enterprise feature set, with no newsletter or photo caps.

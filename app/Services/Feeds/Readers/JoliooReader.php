@@ -57,7 +57,7 @@ class JoliooReader implements FeedReader
 
         foreach ($document->items as $entry) {
             // The post's number, from the address the item is known by.
-            if (! preg_match('#/item/(\d+)\.(?:xml|json|html)(?:$|[?\#])#', $entry['id'].' ', $m)
+            if (! preg_match('#/item/(\d+)\.(?:xml|json|html)(?:$|[?\#])#', trim($entry['id']), $m)
                 && ! preg_match('#/item/(\d+)\.(?:xml|json|html)(?:$|[?\#])#', $entry['link'], $m)) {
                 $seen[$entry['id']] = 'unreadable';
 
@@ -75,11 +75,16 @@ class JoliooReader implements FeedReader
                 'row' => null,
                 'list_hash' => hash('sha256', json_encode([$entry['title'], $entry['html'], $entry['image'], $entry['published']], JSON_UNESCAPED_UNICODE | JSON_PARTIAL_OUTPUT_ON_ERROR)),
                 'detail_url' => $detail,
-                'hint' => ['title' => $entry['title'], 'html' => $entry['html'], 'image' => $entry['image'], 'link' => $entry['link']],
+                'hint' => ['title' => $entry['title'], 'html' => $entry['html'], 'image' => $entry['image'], 'link' => $entry['link'], 'published' => $entry['published']],
             ];
         }
 
-        return new FeedReading($items, $seen, ! $document->truncated, true, $items ? $this->nextPage($fetched->url) : null);
+        // The list is newest first by when each post was put up (and an edit never moves one
+        // back), so its oldest time says how far back a page-limited read has seen.
+        $published = array_column(array_column($items, 'hint'), 'published');
+        $since = $items && count(array_filter($published, 'is_int')) === count($items) ? min($published) : null;
+
+        return new FeedReading($items, $seen, ! $document->truncated, true, $items ? $this->nextPage($fetched->url) : null, [], $since);
     }
 
     /** /rss/<token> is page one; /rss/<token>/4 is page four. Null when the address is neither. */
@@ -145,7 +150,12 @@ class JoliooReader implements FeedReader
             : ImportedTime::place($start['at'], $start['states_zone'], $timezone, $keepLocalClock);
         $location = IcsImportUtils::location((string) ($posting['post_message_location'] ?? ''));
         $media = array_values(array_filter((array) ($posting['post_message_media'] ?? []), 'is_string'));
-        $link = (string) ($item['hint']['link'] ?? '');
+        // The post's own link, never the item's page in the list: that page sits under the feed's
+        // address, whose token is what opens the feed, and an event's link is public.
+        $link = ImportAddress::absolute(is_string($posting['post_message_link'] ?? null) ? $posting['post_message_link'] : '', $fetched->url);
+        if (in_array(strtolower((string) parse_url($link, PHP_URL_HOST)), self::HOSTS, true) && str_starts_with((string) parse_url($link, PHP_URL_PATH), '/rss/')) {
+            $link = '';
+        }
 
         return [
             'event_name' => $name,
@@ -154,8 +164,11 @@ class JoliooReader implements FeedReader
             'event_duration' => $duration,
             'venue_name' => $location['venue_name'],
             'event_address' => $location['event_address'],
-            'registration_url' => ImportAddress::absolute($link, $fetched->url) ?: $location['url'],
-            'link_from_location' => ! ImportAddress::absolute($link, $fetched->url) && ! empty($location['url']),
+            'event_postal_code' => $location['event_postal_code'],
+            'event_city' => $location['event_city'],
+            'event_location' => $location['event_location'],
+            'registration_url' => $link ?: $location['url'],
+            'link_from_location' => $link === '' && ! empty($location['url']),
             'category_name' => '',
             'image_url' => ImportAddress::absolute($media[0] ?? (string) ($item['hint']['image'] ?? ''), $fetched->url) ?: null,
             'is_all_day' => $start['all_day'],

@@ -18,18 +18,26 @@
         </div>
         @else
         @include('newsletter.partials._verification-warning')
+        @include('newsletter.partials._mail-guard')
+
+        @if ($newsletters instanceof \Illuminate\Pagination\AbstractPaginator && collect($newsletters->items())->contains('status', 'review'))
+        {{-- A newsletter waiting for a quick review (AudienceMailGuard). --}}
+        <x-page-notice tone="info" class="news-notice" :title="__('messages.newsletter_in_review_title')">
+            {{ __('messages.newsletter_in_review_body') }}
+        </x-page-notice>
+        @endif
 
         <div class="page-head">
             <p class="page-lead">{{ __('messages.newsletters_list_lead') }}</p>
             @include('newsletter.partials._usage-meter')
         </div>
 
-        @if ($newsletters->count() > 0)
+        @if ($newsletters->count() > 0 || $repeating->isNotEmpty())
         @php
             $roleParam = \App\Utils\UrlUtils::encodeId($role->id);
             $readerZone = auth()->user()->timezone ?? $role->timezone ?? 'UTC';
             $timeFormat = get_use_24_hour_time($role) ? 'M j, H:i' : 'M j, g:i A';
-            $statusTones = ['scheduled' => 'is-warn', 'sending' => 'is-info', 'sent' => 'is-on'];
+            $statusTones = ['scheduled' => 'is-warn', 'sending' => 'is-info', 'sent' => 'is-on', 'review' => 'is-warn'];
         @endphp
         <div class="ap-card rounded-xl overflow-hidden">
             <table class="page-table is-hover">
@@ -45,6 +53,43 @@
                     </tr>
                 </thead>
                 <tbody>
+                    {{-- Repeating newsletters first, on page one: each sends a copy of itself on
+                         its day, and the copies are the Sent rows below. --}}
+                    @foreach ($repeating as $newsletter)
+                    @php
+                        $hash = \App\Utils\UrlUtils::encodeId($newsletter->id);
+                        $lastCopy = $lastCopies[$newsletter->id] ?? null;
+                    @endphp
+                    <tr class="news-repeat-row">
+                        <td class="c-main c-strong">
+                            <a href="{{ route('newsletter.edit', ['hash' => $hash, 'role_id' => $roleParam]) }}" class="event-link"><bdi>{{ $newsletter->subject }}</bdi></a>
+                        </td>
+                        <td>
+                            <span class="event-status is-info">{{ __('messages.newsletter_status_repeating_' . $newsletter->repeatEvery()) }}</span>
+                            <span class="c-sub whitespace-nowrap">{{ __('messages.newsletter_next_send', ['date' => $newsletter->scheduled_at->copy()->timezone($newsletter->repeatZone())->translatedFormat($timeFormat)]) }}</span>
+                        </td>
+                        <td class="c-num" data-label="{{ __('messages.recipients') }}">
+                            @if ($lastCopy)
+                            <span class="c-sub whitespace-nowrap">{{ __('messages.newsletter_last_sent', ['date' => ($lastCopy->sent_at ?? $lastCopy->events_as_of ?? $lastCopy->created_at)->copy()->timezone($newsletter->repeatZone())->translatedFormat('M j'), 'count' => number_format($lastCopy->sent_count)]) }}</span>
+                            @endif
+                        </td>
+                        <td class="c-num" data-label="{{ __('messages.open_rate') }}"></td>
+                        <td class="c-num" data-label="{{ __('messages.click_rate') }}"></td>
+                        <td class="c-date">{{ $newsletter->created_at->translatedFormat('M j, Y') }}</td>
+                        <td class="c-actions">
+                            <a href="{{ route('newsletter.edit', ['hash' => $hash, 'role_id' => $roleParam]) }}" class="event-link">{{ __('messages.edit') }}</a>
+                            <form method="POST" action="{{ route('newsletter.clone', ['hash' => $hash, 'role_id' => $roleParam]) }}">
+                                @csrf
+                                <button type="submit" class="event-link event-link-quiet">{{ __('messages.clone') }}</button>
+                            </form>
+                            <form method="POST" action="{{ route('newsletter.delete', ['hash' => $hash, 'role_id' => $roleParam]) }}" class="js-confirm-form" data-confirm="{{ __('messages.newsletter_repeat_delete_confirm') }}">
+                                @csrf
+                                @method('DELETE')
+                                <button type="submit" class="event-link is-danger">{{ __('messages.delete') }}</button>
+                            </form>
+                        </td>
+                    </tr>
+                    @endforeach
                     @foreach ($newsletters as $listed)
                     {{-- A test's variant B is drawn under its variant A (NewsletterController::index()). --}}
                     @foreach (array_filter([$listed, $variantsB[$listed->id] ?? null]) as $newsletter)
@@ -63,6 +108,14 @@
                             @if ($newsletter->ab_variant)
                             <span class="event-chip">{{ $newsletter->ab_variant }}</span>
                             @endif
+                            @if ($newsletter->repeat_parent_id)
+                            {{-- Sent by a repeating newsletter: leads back to it while it still repeats. --}}
+                            @if (isset($liveParents[$newsletter->repeat_parent_id]))
+                            <a href="{{ route('newsletter.edit', ['hash' => \App\Utils\UrlUtils::encodeId($newsletter->repeat_parent_id), 'role_id' => $roleParam]) }}" class="event-chip">{{ __('messages.newsletter_repeat_chip') }}</a>
+                            @else
+                            <span class="event-chip">{{ __('messages.newsletter_repeat_chip') }}</span>
+                            @endif
+                            @endif
                         </td>
                         <td>
                             <span class="event-status {{ $statusTones[$newsletter->status] ?? '' }}">{{ __('messages.newsletter_status_' . $newsletter->status) }}</span>
@@ -77,7 +130,7 @@
                         <td class="c-num" data-label="{{ __('messages.click_rate') }}">{{ $clicks }}</td>
                         <td class="c-date">{{ $newsletter->created_at->translatedFormat('M j, Y') }}</td>
                         <td class="c-actions">
-                            @if ($newsletter->status === 'draft' || $newsletter->status === 'scheduled')
+                            @if (in_array($newsletter->status, ['draft', 'scheduled', 'review'], true))
                             <a href="{{ route('newsletter.edit', ['hash' => $hash, 'role_id' => $roleParam]) }}" class="event-link">{{ __('messages.edit') }}</a>
                             @endif
                             @if ($wasSent)

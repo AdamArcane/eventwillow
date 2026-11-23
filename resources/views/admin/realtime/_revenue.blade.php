@@ -1,4 +1,4 @@
-{{-- Hosted only: the Revenue card in the dashboard's top corner. The two figures of the old
+{{-- Hosted only: the Revenue panel in the dashboard's top corner, beside Visitors. The two figures of the old
      dashboard's Revenue card, what Stripe is billing and what the trials would add (shown beside
      it, never inside it), and the at-risk line when there is something at risk. Details opens
      /admin/revenue (the boost markup, subscription health). It stands beside the Now card's head only
@@ -32,14 +32,22 @@
                 <p class="mt-1 dashboard-stat-value text-2xl font-bold leading-7 text-gray-900 dark:text-white">@{{ revenue.mrr }}</p>
                 <p class="mt-1 text-xs text-gray-500 dark:text-gray-400">
                     <span class="whitespace-nowrap">MRR</span>
-                    <span aria-hidden="true">&middot;</span>
+                    <span class="mx-1" aria-hidden="true">&middot;</span>
                     <span class="whitespace-nowrap">ARR @{{ revenue.arr }}</span>
                 </p>
             </div>
             <div class="rounded-xl px-3 py-2.5" style="background: var(--ap-tint-sunken)">
-                <p class="text-xs font-medium text-gray-500 dark:text-gray-400">@{{ msg.inTrial }} <span class="text-gray-900 dark:text-white tabular-nums">@{{ fmt(revenue.trialing_count) }}</span></p>
+                <p class="text-xs font-medium text-gray-500 dark:text-gray-400">@{{ msg.inTrial }} <span class="text-gray-900 dark:text-white tabular-nums">@{{ fmt(revenue.trial_pipeline_count ?? revenue.trialing_count) }}</span></p>
                 <p class="mt-1 dashboard-stat-value text-2xl font-bold leading-7 text-gray-900 dark:text-white"><span dir="ltr">+@{{ revenue.trial_mrr }}</span></p>
-                <p class="mt-1 text-xs text-gray-500 dark:text-gray-400">@{{ msg.ifConvert }}</p>
+                {{-- The same pair as the paying box beside it: what the trials would add a month,
+                     and a year. --}}
+                <p class="mt-1 text-xs text-gray-500 dark:text-gray-400">
+                    <span class="whitespace-nowrap">MRR</span>
+                    <template v-if="revenue.trial_arr">
+                        <span class="mx-1" aria-hidden="true">&middot;</span>
+                        <span class="whitespace-nowrap">ARR <span dir="ltr">+@{{ revenue.trial_arr }}</span></span>
+                    </template>
+                </p>
             </div>
         </div>
 
@@ -50,5 +58,20 @@
             <span>@{{ msg.atRisk }} <span class="whitespace-nowrap text-gray-500 dark:text-gray-400">@{{ fill(msg.ofMrr, revenue.at_risk_mrr) }}</span></span>
         </p>
     </template>
+
+    {{-- MRR a week apart over three months, and now (RecurringRevenue::history()). The weeks before
+         this one are rebuilt from each subscription's dates at today's prices, which the line
+         under the chart says. It takes what height the card has left beside the Visitors panel
+         and never sets it: the canvas sits in a box of its own. --}}
+    <div v-if="revenue && revenue.mrr_history" class="flex-1 flex flex-col px-4 sm:px-5 pt-3 pb-4" style="border-top: 1px solid var(--ap-hairline)">
+        <div class="flex flex-wrap items-baseline justify-between gap-x-3 gap-y-1">
+            <h3 class="text-sm font-semibold text-gray-900 dark:text-white">MRR</h3>
+            <span class="text-xs text-gray-500 dark:text-gray-400">@{{ msg.last3Months }}</span>
+        </div>
+        <div class="relative flex-1 mt-2" style="min-height: 6rem">
+            <div class="absolute inset-0"><canvas ref="mrrChart" role="img" :aria-label="mrrSummary"></canvas></div>
+        </div>
+        <p v-if="revenue.mrr_history.rebuilt" class="mt-2 text-[11px] leading-snug text-gray-500 dark:text-gray-400">@{{ msg.mrrRebuilt }}</p>
+    </div>
 
 </section>

@@ -396,6 +396,91 @@ if (! function_exists('is_valid_language_code')) {
     }
 }
 
+if (! function_exists('normalize_language_code')) {
+    /**
+     * A language code as somebody may type it ('pt-pt', 'pt_PT', 'PT-pt'), spelled the way
+     * config('app.supported_languages') spells it, or null when it is none of them.
+     *
+     * is_valid_language_code() stays exact on purpose: a code it accepts is used as it stands,
+     * as a lang directory name (which is case sensitive on Linux) and as a stored column value,
+     * so a loose spelling is turned into the real one here, once, at the door
+     * (App\Http\Middleware\NormalizeLanguageQuery for ?lang=), never accepted downstream.
+     */
+    function normalize_language_code(mixed $languageCode): ?string
+    {
+        if (! is_string($languageCode) || $languageCode === '') {
+            return null;
+        }
+
+        if (is_valid_language_code($languageCode)) {
+            return $languageCode;
+        }
+
+        $wanted = strtolower(str_replace('_', '-', trim($languageCode)));
+
+        foreach (array_keys(config('app.supported_languages', [])) as $supported) {
+            if (strtolower($supported) === $wanted) {
+                return $supported;
+            }
+        }
+
+        return null;
+    }
+}
+
+if (! function_exists('operator_lang_overrides')) {
+    /**
+     * What the operator changed in $locale's $group at /admin/translations (the published files
+     * under config('app.lang_overrides_path')), or [] when nothing, or when this runs outside the
+     * app (storage/check_translations.php requires the lang files on their own).
+     *
+     * For resources/lang/pt-PT, whose files start from pt's: an operator who reworded a pt string
+     * that Portugal says the same way means it for pt-PT too, while pt-PT's own wording, and an
+     * operator's pt-PT overrides (which the translator lays on top), still win.
+     */
+    function operator_lang_overrides(string $locale, string $group): array
+    {
+        if (! function_exists('app') || ! app()->bound('config') || ! is_string($dir = config('app.lang_overrides_path')) || $dir === '') {
+            return [];
+        }
+
+        $path = rtrim($dir, '/').'/'.$locale.'/'.$group.'.php';
+
+        if (! is_file($path)) {
+            return [];
+        }
+
+        try {
+            $lines = require $path;
+        } catch (\Throwable $e) {
+            report($e);
+
+            return [];
+        }
+
+        return is_array($lines) ? $lines : [];
+    }
+}
+
+if (! function_exists('language_badge')) {
+    /**
+     * The short code a language switcher prints: "PT" for both 'pt' and 'pt-PT', as a visitor
+     * reads it. Only when the switcher's other language is the same language ('pt' beside
+     * 'pt-PT') are both regions spelled out, "PT-BR" and "PT-PT": "PT" alone is Portugal's own
+     * code, and a visitor from Portugal would press it and get Brazilian Portuguese.
+     */
+    function language_badge(string $code, ?string $other = null): string
+    {
+        $base = explode('-', $code)[0];
+
+        if ($other !== null && $other !== $code && explode('-', $other)[0] === $base) {
+            return ['pt' => 'PT-BR'][$code] ?? strtoupper($code);
+        }
+
+        return strtoupper($base);
+    }
+}
+
 if (! function_exists('detect_content_language')) {
     /**
      * Best-effort detection of the dominant NON-Latin script in event content, returned as a
@@ -1076,6 +1161,22 @@ if (! function_exists('signup_intent_from_session')) {
     }
 }
 
+if (! function_exists('arrival_intent_from_session')) {
+    /**
+     * Why an organizer came to sign up, from the link they pressed (users.arrival_intent).
+     * RegisteredUserController::create() keeps it in the session, through Google too: `sell` from
+     * a ticketing page, `pro` / `enterprise` from a plan's button on /pricing, `guest_page` from
+     * the "Create your own" card on a schedule's public page. Re-checked here because a session
+     * value is only as good as the last thing that wrote it.
+     */
+    function arrival_intent_from_session(): ?string
+    {
+        $intent = session('signup_arrival_intent');
+
+        return in_array($intent, \App\Models\User::ARRIVAL_INTENTS, true) ? $intent : null;
+    }
+}
+
 if (! function_exists('pending_schedule_from_session')) {
     /**
      * The schedule type and name a visitor picked before signing up, as users columns.
@@ -1402,6 +1503,35 @@ if (! function_exists('facebook_login_enabled')) {
     {
         return filled(config('services.facebook.client_id'))
             && filled(config('services.facebook.client_secret'));
+    }
+}
+
+if (! function_exists('outlook_sync_enabled')) {
+    /**
+     * Whether this install can sync with Outlook / Microsoft 365 (an Azure app's client id and
+     * secret are set).
+     *
+     * Env-only, so it is safe in edge-cached marketing HTML. Every claim of Outlook SYNC asks it:
+     * the marketing pages, the user guide and the Settings and schedule form panels. The "Add to
+     * Outlook" links beside an event are not the integration (a link to Outlook's own compose page,
+     * or the .ics) and never ask it.
+     */
+    function outlook_sync_enabled(): bool
+    {
+        return filled(config('services.microsoft.client_id'))
+            && filled(config('services.microsoft.client_secret'));
+    }
+}
+
+if (! function_exists('outlook_sync_offered')) {
+    /**
+     * Whether the admin portal shows the Outlook panels: when the install can sync, and on a
+     * selfhost install, where the panel says how to set it up. On hosted with no Azure app the
+     * panels are hidden: a "not configured on this server" notice is nothing a customer can act on.
+     */
+    function outlook_sync_offered(): bool
+    {
+        return outlook_sync_enabled() || ! config('app.hosted');
     }
 }
 

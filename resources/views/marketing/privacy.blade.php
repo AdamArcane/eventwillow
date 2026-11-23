@@ -734,7 +734,7 @@
                 'roman' => 'III',
                 'part' => 'Calendar data',
                 'items' => [
-                    ['n' => '07', 'id' => 'google-calendar-use', 't' => 'Use of Google and Outlook Calendar Data'],
+                    ['n' => '07', 'id' => 'google-calendar-use', 't' => outlook_sync_enabled() ? 'Use of Google and Outlook Calendar Data' : 'Use of Google Calendar Data'],
                     ['n' => '08', 'id' => 'google-calendar-retention', 't' => 'Calendar Data Storage & Retention'],
                     ['n' => '09', 'id' => 'google-calendar-limited-use', 't' => 'Google Calendar Limited Use Compliance'],
                 ],
@@ -782,7 +782,7 @@
 
         // The date of the last change to what this policy says. A fact about the document: move it
         // only in a commit that changes a clause.
-        $lastUpdated = 'October 15, 2026';
+        $lastUpdated = 'October 26, 2026';
 
         // The AI providers this install actually calls (GeminiUtils, OpenAIUtils).
         $aiProviders = array_values(array_filter([
@@ -826,8 +826,8 @@
             google_analytics_enabled() ? ['Google Analytics', 'Site statistics, and only if you allow analytics cookies (clause 12).'] : null,
             config('services.google.backend') || config('services.google.maps') ? ['Google Maps', 'Placing venues on a map from their address. The interactive map on an event page loads only if you allow marketing cookies or ask to see it.'] : null,
             $aiProviders ? [implode(', ', $aiProviders), 'AI features (clause 05): the text and images a feature is asked to read, translate or write from.'] : null,
-            config('services.google.client_id') || config('services.microsoft.client_id') ? [
-                implode(' and ', array_filter([config('services.google.client_id') ? 'Google' : null, config('services.microsoft.client_id') ? 'Microsoft' : null])),
+            config('services.google.client_id') || outlook_sync_enabled() ? [
+                implode(' and ', array_filter([config('services.google.client_id') ? 'Google' : null, outlook_sync_enabled() ? 'Microsoft' : null])),
                 config('services.google.client_id') ? 'Sign-in with Google, and calendar sync, only when you connect your calendar (clauses 07 to 09).' : 'Calendar sync, only when you connect your calendar (clauses 07 to 09).',
             ] : null,
             ['YouTube', 'Videos added to schedules and events. On public pages they load only when you press play or allow marketing cookies, and their thumbnails are fetched by us, not by your browser.'],
@@ -856,7 +856,10 @@
             \App\Services\OneSignalService::isConfigured()
                 ? ['OneSignal', 'Push notifications, only for a browser that has turned them on. Nothing is sent to OneSignal from a browser that has not.']
                 : null,
-            ['Stay22', 'Accommodation search, on event pages where the schedule has enabled the accommodation map, and only once the map has been loaded'],
+            // Listed only while Stay22Service::isEnabled(), the switch behind the map itself.
+            \App\Services\Stay22Service::isEnabled()
+                ? ['Stay22', 'Accommodation search, on event pages where the schedule has enabled the accommodation map, and only once the map has been loaded']
+                : null,
             ...$mapProcessors,
             config('app.growth_data_token')
                 ? ['Anthropic', 'Help analyzing product usage statistics that carry no names, email addresses, IP addresses or anything you wrote.']
@@ -1012,18 +1015,18 @@
                                                     We collect the following personal information:
                                                 </p>
                                                 <ul class="es-fine-list">
-                                                    <li><strong>Your account:</strong> your name and email address, your password (stored only as a one-way hash), your language and timezone, and, if you add them, a profile photo and a phone number. If you sign in with Google or Facebook, the name, email address and account ID that service shares, and with Google your profile photo.</li>
+                                                    <li><strong>Your account:</strong> your name and email address, your password (stored only as a one-way hash), your language and timezone, and, if you add them, a profile photo and a phone number. If you sign in with {{ facebook_login_enabled() ? 'Google or Facebook' : 'Google' }}, the name, email address and account ID that service shares{{ facebook_login_enabled() ? ', and with Google your profile photo' : ', and your profile photo' }}.</li>
                                                     <li><strong>What you publish:</strong> your schedules and events, with their descriptions, images, venues and addresses. For a performer or venue page an organizer creates while listing an event: the name, and any email address or phone number the organizer enters, which is never shown in full.</li>
                                                     <li><strong>Asking a schedule to list an event or take a booking:</strong> the event you describe, your name and email address, a phone number if the schedule asks for one, your answers to the schedule's own questions, and your message.</li>
                                                     <li><strong>Buying, booking and RSVPs:</strong> the name, email address, and phone number if the organizer asks for one, answers to the organizer's questions, what was bought or booked, and whether it was paid. Card details are entered with the payment provider and never reach us; for a ticket paid in installments we keep the card type and its last four digits.</li>
                                                     <li><strong>Following and email lists:</strong> which schedules you follow. For a schedule's email sign-up: the address and name, the page language, the IP address it was entered from and the time it was confirmed, which are the record of your consent. For updates about a single event, asked for without an account: the email address you enter, the IP address it came from, and the language of the page. Schedule newsletters record whether each one was opened and which links were clicked.</li>
                                                     <li><strong>What you send us:</strong> support chat messages, with the page you wrote from and your country; and comments, photos and videos you post to events.</li>
-                                                    <li><strong>Paid plans:</strong> billing is handled by Stripe, and we keep the card type, its last four digits, and the history of your plan.</li>
+                                                    <li><strong>Paid plans:</strong> billing is handled by Stripe, and we keep the card type, its last four digits, and the history of your plan. For fraud prevention we also keep the identifier Stripe gives the card used at checkout (its fingerprint, not the card number), to recognise one card behind several accounts; it is kept while your account exists, and when the account is deleted it is kept for 12 months more only as a one-way hash, so the same card can still be recognised, and then deleted.</li>
                                                     <li><strong>How you found us:</strong> when you create an account, the page you first landed on, the site that sent you and any campaign tags, if you allowed marketing cookies or signed up in the same visit. If you came through the sign-up or sign-in button on our homepage, also which headline the homepage was showing.</li>
-                                                    <li><strong>Security records:</strong> while you are signed in, your session with its IP address and browser; a log of sensitive actions on your account with the IP address and browser, kept for 90 days; and the IP address your account was created from, kept for 90 days. If an account is blocked for abuse, its email address, and where the operator chooses its email domain or the IP address it was created from, go on a list that refuses new accounts.</li>
+                                                    <li><strong>Security records:</strong> while you are signed in, your session with its IP address and browser; a log of sensitive actions on your account with the IP address and browser, kept for 90 days; and the IP address your account was created from, kept for 90 days. If an account is blocked for abuse, its email address, and where the operator chooses its email domain, the IP address it was created from or the country that address is in, go on a list that refuses new accounts. When an account is created, the email address, the IP address and the country worked out from it are checked against that list; the country is not stored.</li>
                                                     <li><strong>Days you used the app:</strong> the dates on which you opened the app while signed in, and nothing about what you did there. We use them to count how many people use the service, and keep them for 120 days.</li>
                                                     <li><strong>Visit statistics:</strong> your country, worked out from your IP address, which itself is not stored. If you accept analytics cookies while signed in: the pages you view, and those you viewed in this browser just before signing in, kept for about one hour after your last activity (see "Analytics &amp; Cookies").</li>
-                                                    <li><strong>Connected services:</strong> if you connect a calendar, the access tokens Google or Microsoft issue, stored encrypted, and which events are synced. If you turn on push notifications, the identifier the push service gives your browser. On Enterprise schedules, WhatsApp messages sent to the schedule's number to add events, with their images.</li>
+                                                    <li><strong>Connected services:</strong> if you connect a calendar, the access tokens {{ outlook_sync_enabled() ? 'Google or Microsoft issue' : 'Google issues' }}, stored encrypted, and which events are synced.@if (\App\Services\OneSignalService::isConfigured()) If you turn on push notifications, the identifier the push service gives your browser.@endif On Enterprise schedules, WhatsApp messages sent to the schedule's number to add events, with their images.</li>
                                                 </ul>
 
                                                 {{-- Round 3 (2026-09-10): two capture points that shipped after this clause was
@@ -1062,11 +1065,11 @@
                                                                 ['Keep the service secure, stop fraud and abuse, fix errors, keep the security log', 'Legitimate interests'],
                                                                 ['Count visits as daily totals, and the anonymous version of our live view', 'Legitimate interests'],
                                                                 ['Count how many signed-in people use the app, from the dates each account was used. No cookie is involved', 'Legitimate interests'],
-                                                                [(google_analytics_enabled() ? 'Google Analytics, the identified live view' : 'The identified version of our live view').', and remembering in your browser which homepage headline you saw', 'Your consent (analytics cookies)'],
+                                                                [(google_analytics_enabled() ? 'Google Analytics, the identified live view' : 'The identified version of our live view').', and remembering in your browser which version of our homepage you saw', 'Your consent (analytics cookies)'],
                                                                 ...(\App\Utils\RealtimeTracker::ownerViewEnabled() ? [['Show a schedule\'s organizer your visit to their own pages as a row with no name (country, device type, page, time on page)', 'Your consent (analytics cookies)']] : []),
-                                                                ['Record the page or site that brought you when you create an account or buy in the same visit, and which homepage headline was showing when you create an account from our homepage', 'Legitimate interests'],
-                                                                ['Campaign attribution kept across visits, the Meta Pixel and Conversions API, ads, and maps, videos and booking widgets from other sites', 'Your consent (marketing cookies), or your click on that one item'],
-                                                                ['Push notifications', 'Your consent (your browser\'s permission)'],
+                                                                ['Record the page or site that brought you when you create an account or buy in the same visit, and which version of our homepage was showing when you create an account from it', 'Legitimate interests'],
+                                                                ['Campaign attribution kept across visits, the Meta Pixel and Conversions API, '.(config('ads.enabled') ? 'ads, ' : '').'and maps, videos and booking widgets from other sites', 'Your consent (marketing cookies), or your click on that one item'],
+                                                                ...(\App\Services\OneSignalService::isConfigured() ? [['Push notifications', 'Your consent (your browser\'s permission)']] : []),
                                                                 ['Send account holders product news, tips and schedule digests', 'Legitimate interests, with a way to say no on the sign-up page and in every email'],
                                                                 ['A schedule\'s newsletters and email updates', 'The organizer\'s basis, which is normally your consent: a confirmed sign-up, a Follow, or the unticked box at checkout'],
                                                                 ['AI features you use, and translations of what organizers publish', 'Contract'],
@@ -1113,6 +1116,9 @@
                                                      (EventController), and a venue or performer schedule an organizer lists on
                                                      their own event (EventRepo), so it is offered in their lists next time. --}}
                                                 <p>
+                                                    If you reach a schedule through one of its promoter links (an address ending in <span class="es-fine-chip">?via=</span> and a code), and then buy a ticket or register for one of that schedule's own events, the schedule owner sees which promoter link your purchase came through, beside the purchase they see in any case. The link is remembered for your visit, and for 30 days if you allow marketing cookies.
+                                                </p>
+                                                <p>
                                                     Signing up for a schedule's email updates works the same way: the schedule owner sees the address you enter, and confirming the link we send also sets up an account for you that follows the schedule. Submitting an event to a curator's schedule makes you a follower too, as the submission form says, and so does listing another schedule's venue or performer on an event you create, so it appears in your lists. Buying a ticket, RSVPing, or posting a comment, photo or video does not make you a follower.
                                                 </p>
                                                 {{-- The owner's Realtime tab. Same predicate as the live-view paragraph under
@@ -1126,7 +1132,7 @@
 
                                             @case('google-calendar-use')
                                                 <p>
-                                                    Users must explicitly authorize access to their Google Calendar or Microsoft Outlook calendar through that provider's OAuth authorization process. We access calendar data solely to provide and improve the core functionality of our services, including:
+                                                    Users must explicitly authorize access to their Google Calendar{{ outlook_sync_enabled() ? ' or Microsoft Outlook calendar' : '' }} through that provider's OAuth authorization process. We access calendar data solely to provide and improve the core functionality of our services, including:
                                                 </p>
                                                 <ul class="es-fine-list">
                                                     <li>Viewing, creating, updating, or deleting calendar events as requested by the user</li>
@@ -1140,7 +1146,7 @@
 
                                             @case('google-calendar-retention')
                                                 <p>
-                                                    The access tokens are stored encrypted. If you disconnect a calendar in Settings, we stop syncing at once and delete the tokens and our record of which events are synced; for Google we also ask Google to revoke our access. If you remove our access in your Google Account or Microsoft account settings instead, we notice the next time we use the connection, which for a calendar we sync from is usually within a couple of hours. For Google we then delete the same things. For Outlook we delete the tokens and stop syncing, but keep the record of which events are synced, because Microsoft reports a password change the same way and reconnecting should not copy every event again; that record goes when you disconnect in Settings or delete your account. Events already copied into your schedule stay there as your events until you delete them.
+                                                    The access tokens are stored encrypted. If you disconnect a calendar in Settings, we stop syncing at once and delete the tokens and our record of which events are synced; for Google we also ask Google to revoke our access. If you remove our access in your Google Account{{ outlook_sync_enabled() ? ' or Microsoft account' : '' }} settings instead, we notice the next time we use the connection, which for a calendar we sync from is usually within a couple of hours. For Google we then delete the same things.@if (outlook_sync_enabled()) For Outlook we delete the tokens and stop syncing, but keep the record of which events are synced, because Microsoft reports a password change the same way and reconnecting should not copy every event again; that record goes when you disconnect in Settings or delete your account.@endif Events already copied into your schedule stay there as your events until you delete them.
                                                 </p>
                                                 @break
 
@@ -1202,15 +1208,15 @@
                                                     <li>
                                                         <strong>Analytics:</strong>
                                                         @if (google_analytics_enabled())
-                                                            Google Analytics 4, the identified version of our live view (below), and remembering in your browser, until the tab closes, which homepage headline you saw. Google Analytics is not loaded at all until you allow this: no script and no request to Google.
+                                                            Google Analytics 4, the identified version of our live view (below), and remembering in your browser, until the tab closes, which version of our homepage you saw. Google Analytics is not loaded at all until you allow this: no script and no request to Google.
                                                         @else
-                                                            the identified version of our live view (below), and remembering in your browser, until the tab closes, which homepage headline you saw.
+                                                            the identified version of our live view (below), and remembering in your browser, until the tab closes, which version of our homepage you saw.
                                                         @endif
                                                     </li>
-                                                    <li><strong>Marketing and embedded content:</strong> campaign attribution cookies;@if (google_analytics_enabled()) Google Analytics' advertising features;@endif on events whose organizer runs a Boost, the Meta Pixel, and telling Meta about a ticket you buy as a one-way hash of your email address; ads on free schedules, where they are switched on; and maps, videos and booking widgets from other sites (Google Maps, YouTube, Stay22), which set their own cookies{{ $mapTiles ? '; and the street images of a schedule\'s map of venues, which your browser fetches from '.$mapTiles['name'] : '' }}.</li>
+                                                    <li><strong>Marketing and embedded content:</strong> campaign attribution cookies;@if (google_analytics_enabled()) Google Analytics' advertising features;@endif on events whose organizer runs a Boost, the Meta Pixel, and telling Meta about a ticket you buy as a one-way hash of your email address{{ config('ads.enabled') ? '; ads on free schedules, where they are switched on' : '' }}; and maps, videos and booking widgets from other sites (Google Maps, YouTube{{ \App\Services\Stay22Service::isEnabled() ? ', Stay22' : '' }}), which set their own cookies{{ $mapTiles ? '; and the street images of a schedule\'s map of venues, which your browser fetches from '.$mapTiles['name'] : '' }}.</li>
                                                 </ul>
                                                 <p>
-                                                    "Allow all" turns on both, "Decline" neither, and "Choose" lets you pick. Your choice is kept for twelve months and then asked again. Without marketing consent, a map or a video shows a button instead, and pressing it loads that one item and nothing else. Stay22, which pays a commission on bookings made through its map, is never loaded if your browser sends Global Privacy Control.
+                                                    "Allow all" turns on both, "Decline" neither, and "Choose" lets you pick. Your choice is kept for twelve months and then asked again. Without marketing consent, a map or a video shows a button instead, and pressing it loads that one item and nothing else.@if (\App\Services\Stay22Service::isEnabled()) Stay22, which pays a commission on bookings made through its map, is never loaded if your browser sends Global Privacy Control.@endif
                                                 </p>
                                                 <p>
                                                     {{ google_analytics_enabled() ? 'Separately from Google, we' : 'Separately, we' }} keep our own visit statistics, and those are deliberately built so that no individual can be picked out of them. We store only daily totals: views per device type, per referring source, per country, per campaign tag. These daily totals contain no per-visitor record. To avoid counting the same person twice in a day, and to filter out bots, your IP address and browser user-agent are combined into a one-way hash using a secret key and a salt that changes every day; that hash exists only as the key of a short-lived cache entry that expires by midnight, and is never stored in a record of your visit. Because none of this reads or writes anything on your device, it needs no cookie and no consent.
@@ -1224,8 +1230,11 @@
                                                      network, plus the account's when the withdrawing page is signed in. Rows are
                                                      pruned about an hour after last activity (realtime:prune on both cron rails, plus
                                                      a request-time backstop), each counted first into realtime_hourly, which holds per
-                                                     hour and part of the site only page views and visits and is kept KEEP_DAYS
-                                                     (RealtimeRollup). Keep this paragraph in step with that code.
+                                                     hour and part of the site only page views and visits and is kept KEEP_DAYS, and
+                                                     into realtime_breakdowns, per hour and page, country or referring site, kept
+                                                     BREAKDOWN_KEEP_DAYS (RealtimeRollup). Neither has a visitor column; both carry the
+                                                     accounts a page belongs to (role_owner_id, event_user_id, event_owner_id) so a
+                                                     blocked account's pages can be left out. Keep this paragraph in step with that code.
 
                                                      Who sees it follows RealtimeTracker::ownerViewEnabled(), the predicate behind a
                                                      schedule owner's own Realtime tab (/analytics, App\Services\ScheduleRealtime):
@@ -1240,7 +1249,7 @@
                                                     @else
                                                     We also keep a short-lived record for a live view of the site that only our administrators can see, never schedule owners.
                                                     @endif
-                                                    What it holds depends on your analytics choice. If you allow analytics, each page you view is recorded with the page, the referring site and campaign tag, your country (looked up from your IP address, which itself is not stored), your device type, browser and operating system, and how long the page stays open, under a one-way hash of your IP address, browser and language settings that changes every day; while you are signed in it is linked to your account, including the pages you viewed in this browser just before signing in. If you decline, do not answer, or your browser sends Global Privacy Control, each page view is still counted, but with no identifier and nothing that links it to you or to your other page views: only the page (for pages behind sign-in, just which kind of page), your country, your device type and, when you arrive from another site or a tagged link, that site and campaign tag. Either way, records are deleted about an hour after your last activity. Before they go, each page view is added to an hourly total for its part of the site (how many pages were viewed and how many visits began that hour, with nothing about who viewed them or which page), and those totals are kept for about two months. If you withdraw your consent, the identifiers are removed from what this browser still has on its current network and, if you are signed in when you withdraw, from your account's records.
+                                                    What it holds depends on your analytics choice. If you allow analytics, each page you view is recorded with the page, the referring site and campaign tag, your country (looked up from your IP address, which itself is not stored), your device type, browser and operating system, and how long the page stays open, under a one-way hash of your IP address, browser and language settings that changes every day; while you are signed in it is linked to your account, including the pages you viewed in this browser just before signing in. If you decline, do not answer, or your browser sends Global Privacy Control, each page view is still counted, but with no identifier and nothing that links it to you or to your other page views: only the page (for pages behind sign-in, just which kind of page), your country, your device type and, when you arrive from another site or a tagged link, that site and campaign tag. Either way, records are deleted about an hour after your last activity. Before they go, each page view is added to hourly totals: one for its part of the site (how many pages were viewed and how many visits began that hour), kept for about two months, and one each for the page, the country and the referring site (how many views or visits each had that hour), kept for about a month. These totals say nothing about who viewed a page. They do note which schedule or event a page belongs to, so that the pages of an account blocked for abuse can be left out of them. If you withdraw your consent, the identifiers are removed from what this browser still has on its current network and, if you are signed in when you withdraw, from your account's records.
                                                 </p>
                                                 <p>
                                                     We honor the <a href="https://globalprivacycontrol.org/" target="_blank" rel="noopener" class="es-fine-link">Global Privacy Control<svg class="es-fine-ext" aria-hidden="true" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4"><path stroke-linecap="round" stroke-linejoin="round" d="M13 5h6v6M19 5L9 15M15 19H5V9" /></svg></a> signal: if your browser sends GPC, we treat it as declining both categories, and the banner does not appear.
@@ -1264,19 +1273,21 @@
                                                                 ['Always', 'XSRF-TOKEN', 'Protects forms against requests forged by other sites. As long as the session.'],
                                                                 ['Always', 'remember_web_*', 'Keeps you signed in on this device. Set when you sign in or create an account; up to 400 days, or until you log out.'],
                                                                 ['Always', 'es_signed_in', 'Whether this browser is signed in, so our marketing pages offer Dashboard instead of Sign In. Holds no identifier. As long as the session, or as long as remember_web_* when that is set; removed when you log out.'],
-                                                                ['Always', 'last_login_method', 'Whether you last signed in with a password, Google or Facebook, to show that option first. 1 year.'],
+                                                                ['Always', 'last_login_method', 'Whether you last signed in with a password'.(facebook_login_enabled() ? ', Google or Facebook' : ' or Google').', to show that option first. 1 year.'],
                                                                 ['Always', 'browser_timezone, browser_language', 'Sets up a new account in your timezone and language. 1 hour, on the sign-in and sign-up pages only.'],
                                                                 ['Always', 'cookie_consent', 'Your choice in the cookie banner. 12 months.'],
+                                                                ['Always', 'es_gp_mode', 'Whether schedule and event pages are shown light or dark, set by the first one you open so the next ones match; a link to a schedule on its own domain carries the same choice in the address, which the page removes when it opens. Until the browser closes.'],
                                                                 ['Always', '__cf_bm', 'Bot protection by Cloudflare, which may set it on any page. 30 minutes.'],
                                                                 ['Always', 'Stripe (__stripe_mid, __stripe_sid)', 'Fraud prevention by the payment provider, on payment pages only. __stripe_mid 1 year, __stripe_sid 30 minutes.'],
-                                                                ['Push', 'OneSignal (browser storage)', 'Only if you turn on push notifications: the identifier the push service gives this browser. Until you turn them off.'],
+                                                                \App\Services\OneSignalService::isConfigured() ? ['Push', 'OneSignal (browser storage)', 'Only if you turn on push notifications: the identifier the push service gives this browser. Until you turn them off.'] : null,
                                                                 google_analytics_enabled() ? ['Analytics', '_ga, _ga_<measurement-id>', 'Google Analytics: tells visits and visitors apart. Up to 2 years, and deleted when you withdraw.'] : null,
-                                                                ['Analytics', 'es_hero, es_hero_clicked', 'Session storage: which homepage headline you saw and whether you then clicked sign up. Until the tab closes.'],
+                                                                ['Analytics', 'es_hero, es_hero_clicked', 'Session storage: which version of our homepage you saw and whether you then clicked sign up. Until the tab closes.'],
                                                                 ['Marketing', 'utm_params, utm_referrer_url, utm_landing_page', 'Which link, campaign or site brought you here, credited if you later create an account or buy a ticket. 30 days.'],
-                                                                ['Marketing', 'es_attribution', 'The same, written by your browser for the step from our marketing pages to sign-up: the page you landed on, the site that sent you, campaign and referral tags, and the homepage headline you saw. Until the browser closes; at most 2 KB.'],
+                                                                ['Marketing', 'es_via', 'The promoter link that brought you to a schedule, credited to that promoter if you buy a ticket for one of its events. 30 days.'],
+                                                                ['Marketing', 'es_attribution', 'The same, written by your browser for the step from our marketing pages to sign-up: the page you landed on, the site that sent you, campaign and referral tags, and the version of our homepage you saw. Until the browser closes; at most 2 KB.'],
                                                                 ['Marketing', '_fbp, _fbc', 'The Meta Pixel, on the pages of Boosted events. Up to 90 days, and deleted when you withdraw.'],
-                                                                ['Marketing', '__gads, __gpi, __eoi', 'Google AdSense, on free schedules where ads are switched on. Up to 13 months, and deleted when you withdraw.'],
-                                                                ['Marketing', 'Third-party cookies', 'Set by Google Maps, YouTube and Stay22 when one of them loads. Their own policies apply.'],
+                                                                config('ads.enabled') && config('ads.adsense_enabled') ? ['Marketing', '__gads, __gpi, __eoi', 'Google AdSense, on free schedules where ads are switched on. Up to 13 months, and deleted when you withdraw.'] : null,
+                                                                ['Marketing', 'Third-party cookies', 'Set by '.(\App\Services\Stay22Service::isEnabled() ? 'Google Maps, YouTube and Stay22' : 'Google Maps and YouTube').' when one of them loads. Their own policies apply.'],
                                                             ]) as [$kind, $name, $what])
                                                                 <tr>
                                                                     <td><span class="es-fine-chip">{{ $name }}</span><br><span class="es-fine-muted text-xs">{{ $kind }}</span></td>
@@ -1290,7 +1301,7 @@
                                                     Your browser also keeps a few things for your convenience, in <code class="es-fine-code">localStorage</code>, which stay in your browser until you use them: your theme and accessibility settings, the calendar view you picked, a schedule's map of venues that you hid, unsent form drafts, your cart, and the name, email and phone you entered at checkout, so you do not have to type them again. Those details are forgotten after 30 days, or once everything in the cart has been bought. A support chat started before signing in is remembered by a random identifier.
                                                 </p>
                                                 <p>
-                                                    You can withdraw consent at any time, as easily as you gave it (GDPR Article 7(3)): use "Cookie preferences" at the bottom of the page (in the app, under About in the menu), or the button in the next section. Withdrawing deletes the cookies the withdrawn category set on this site, unloads any map, video or accommodation search already on the page, and clears the attribution cookies.
+                                                    You can withdraw consent at any time, as easily as you gave it (GDPR Article 7(3)): use "Cookie preferences" at the bottom of the page (in the app, under About in the menu), or the button in the next section. Withdrawing deletes the cookies the withdrawn category set on this site, unloads any map, video{{ \App\Services\Stay22Service::isEnabled() ? ' or accommodation search' : '' }} already on the page, and clears the attribution cookies.
                                                 </p>
                                                 @break
 
@@ -1337,7 +1348,8 @@
                                                                 ['Sessions', $sessionHours.' hours after your last request'],
                                                                 ['Security log', '90 days. For records of plan changes, schedule claims and connected payment or calendar accounts, which are kept, the IP address and browser are removed after 90 days.'],
                                                                 ['The IP address an account was created from', '90 days, or for as long as the account is blocked'],
-                                                                ['The list that refuses new accounts after abuse (an email address, an email domain or an IP address)', 'Until the operator removes the entry'],
+                                                                ['The fingerprint of a card used at a plan checkout (not the card number)', 'Until you delete your account, then 12 months as a one-way hash'],
+                                                                ['The list that refuses new accounts after abuse (an email address, an email domain, an IP address or a country)', 'Until the operator removes the entry'],
                                                                 ['The dates you used the app while signed in', '120 days. After that only daily totals remain, which contain nothing about you'],
                                                                 ['Background tasks that failed, which can contain an email address', '30 days'],
                                                                 ['Exports you download', '7 days'],
