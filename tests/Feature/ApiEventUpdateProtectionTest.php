@@ -321,7 +321,8 @@ class ApiEventUpdateProtectionTest extends TestCase
         $event = $this->createEvent($schedule, ['creator_role_id' => $schedule->id]);
         $event->roles()->attach($venue->id, ['is_accepted' => true]);
 
-        $this->rename($event, $this->keyFor($owner), [
+        $headers = $this->keyFor($owner);
+        $this->rename($event, $headers, [
             'venue_id' => UrlUtils::encodeId($venue->id),
             'venue_name' => 'Connecticut Museum of Culture and History',
             'venue_address1' => '1 Elizabeth Street',
@@ -337,6 +338,16 @@ class ApiEventUpdateProtectionTest extends TestCase
         $this->assertSame('CT', $venue->state);
         $this->assertSame('06105', $venue->postal_code);
         $this->assertSame('us', $venue->country_code);
+
+        $this->getJson('/api/events/'.UrlUtils::encodeId($event->id), $headers)
+            ->assertOk()
+            ->assertJsonPath('data.venue_id', UrlUtils::encodeId($venue->id))
+            ->assertJsonPath('data.venue_name', 'Connecticut Museum of Culture and History')
+            ->assertJsonPath('data.venue_address1', '1 Elizabeth Street')
+            ->assertJsonPath('data.venue_city', 'Hartford')
+            ->assertJsonPath('data.venue_state', 'CT')
+            ->assertJsonPath('data.venue_postal_code', '06105')
+            ->assertJsonPath('data.venue_country_code', 'us');
     }
 
     public function test_a_pass_keeps_its_named_events_whichever_schedule_the_update_runs_through(): void

@@ -5087,6 +5087,10 @@ class Event extends Model
         $data->venue_id = $this->venue ? UrlUtils::encodeId($this->venue->id) : null;
         $data->venue_name = $this->venue?->name;
         $data->venue_address1 = $this->venue?->address1;
+        $data->venue_city = $this->venue?->city;
+        $data->venue_state = $this->venue?->state;
+        $data->venue_postal_code = $this->venue?->postal_code;
+        $data->venue_country_code = $this->venue?->country_code;
         $data->venue_subdomain = $this->venue?->subdomain;
 
         // Flyer image URL
