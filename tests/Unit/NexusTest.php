@@ -48,4 +48,13 @@ class NexusTest extends TestCase
         }
         $this->assertTrue(Nexus::claimed('true', 'https://eventschedule.com'));
     }
+
+    public function test_ddev_hosts_are_allowed_only_in_the_testing_environment(): void
+    {
+        $host = 'https://eventwillow.ddev.site';
+
+        $this->assertFalse(Nexus::claimed(true, $host));
+        $this->assertTrue(Nexus::claimed(true, $host, true));
+        $this->assertFalse(Nexus::claimed(true, 'https://tickets.example.co.za', true));
+    }
 }

@@ -13,9 +13,10 @@ namespace App\Support;
  * licence lets a derived product promote itself with (its clause 3). So the flag is honoured only
  * where the install's own address (APP_URL) is eventschedule.com, or a development host no
  * public site can be reached on: localhost, a loopback address, or a name under the reserved
- * `.test` and `.localhost` domains (RFC 2606, RFC 6761). Anywhere else the install is not the
- * nexus whatever its environment says, and its marketing addresses send a visitor to the app
- * (the non-nexus branch of routes/web.php).
+ * `.test` and `.localhost` domains (RFC 2606, RFC 6761). PHPUnit may also use DDEV's `.ddev.site`
+ * host so its route tests retain the app's normal URL; that exception is only enabled in testing.
+ * Anywhere else the install is not the nexus whatever its environment says, and its marketing
+ * addresses send a visitor to the app (the non-nexus branch of routes/web.php).
  *
  * An operator could edit this file, but the self-updater replaces it on every update, and doing
  * so is a deliberate step around the licence rather than a setting.
@@ -25,16 +26,16 @@ class Nexus
     public const DOMAIN = 'eventschedule.com';
 
     /** @param  mixed  $flag  IS_NEXUS as env() returns it */
-    public static function claimed(mixed $flag, ?string $appUrl): bool
+    public static function claimed(mixed $flag, ?string $appUrl, bool $testing = false): bool
     {
         if (! filter_var($flag, FILTER_VALIDATE_BOOLEAN)) {
             return false;
         }
 
-        return self::hostAllowed($appUrl);
+        return self::hostAllowed($appUrl, $testing);
     }
 
-    public static function hostAllowed(?string $appUrl): bool
+    public static function hostAllowed(?string $appUrl, bool $testing = false): bool
     {
         $host = strtolower(rtrim((string) parse_url(trim((string) $appUrl), PHP_URL_HOST), '.'));
 
@@ -50,6 +51,8 @@ class Nexus
             return true;
         }
 
-        return str_ends_with($host, '.test') || str_ends_with($host, '.localhost');
+        return str_ends_with($host, '.test')
+            || str_ends_with($host, '.localhost')
+            || ($testing && str_ends_with($host, '.ddev.site'));
     }
 }
