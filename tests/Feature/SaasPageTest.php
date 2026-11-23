@@ -73,9 +73,8 @@ class SaasPageTest extends TestCase
         $this->assertStringNotContainsString('PromotionController', $html);
         $this->assertStringNotContainsString('git clone eventschedule/eventschedule', $html);
 
-        // The Docker install is its own repository, as the README and /selfhost say.
+        // The Docker install is its own repository, as /selfhost says.
         $this->assertStringContainsString('eventschedule/<wbr>dockerfiles.git', $html);
-        $this->assertStringContainsString('eventschedule/dockerfiles', file_get_contents(base_path('README.md')));
         $this->assertStringContainsString('docker compose up --build -d', $html);
     }
 

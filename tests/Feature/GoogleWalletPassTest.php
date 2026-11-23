@@ -49,7 +49,7 @@ class GoogleWalletPassTest extends TestCase
         $this->privateKey = $privateKey;
         $this->publicKey = openssl_pkey_get_details($resource)['key'];
 
-        $this->pinAppUrl('https://eventwillow.ddev.site');
+        $this->pinAppUrl('https://eventschedule.test');
     }
 
     /*

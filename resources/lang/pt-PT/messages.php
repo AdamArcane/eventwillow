@@ -2579,6 +2579,7 @@ return array_replace(require __DIR__.'/../pt/messages.php', function_exists('ope
     'merge_participants_partial_result' => 'Fundidos :done de :total participantes em :target. :skipped foram ignorados (já não podem ser fundidos).',
     'possible_duplicate_participants_banner' => 'Pode ter :count participantes duplicados para rever',
     'event_interest_cancelled_button' => 'Ver agenda',
+    'phone_verify_sms_disclosure' => 'Ao pedir um código de verificação, aceita receber uma única mensagem de texto da EventWillow (Arcane Technology Solutions, LLC) neste número. Poderão aplicar-se tarifas de mensagens e dados. Até 5 mensagens por hora. Responda HELP para obter ajuda ou STOP para cancelar. Consulte :terms e :privacy.',
     'event_interest_why_receiving' => 'Recebe este e-mail porque pediu para acompanhar :event. Isto não é uma subscrição da agenda.',
     'realtime_so_far_clock' => 'Fuso horário: :zone. Lá são agora :time.',
     'realtime_so_far_how' => 'Comparando igual com igual: hoje até agora face a ontem, e face ao mesmo dia da semana em cada uma das quatro semanas anteriores, cada um até à mesma hora. "Mais ou menos igual" significa uma diferença que o acaso sozinho costuma produzir com estes números.',

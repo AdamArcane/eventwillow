@@ -121,7 +121,7 @@ class HeroExperimentTest extends TestCase
         $this->assertSame(__('marketing.home_title'), $result['title']);
         $this->assertSame(__('marketing.home_description'), $result['description']);
 
-        $this->assertStringStartsWith('Event Schedule', $result['title'], 'the brand opens the title, where a search for it is matched first');
+        $this->assertStringStartsWith('EventWillow', $result['title'], 'the brand opens the title, where a search for it is matched first');
         $this->assertStringNotContainsStringIgnoringCase($copy['line1'], $result['title'], 'the <title> is the headline again');
         $this->assertNotSame($copy['subtitle'], $result['description'], 'the meta description is the subtitle again');
     }
@@ -386,21 +386,21 @@ class HeroExperimentTest extends TestCase
      */
     public function test_on_hosted_only_the_marketing_host_can_credit_a_link(): void
     {
+        $this->pinAppUrl('https://eventschedule.test');
         config([
             'app.hosted' => true,
             'app.is_testing' => false,
             'app.env' => 'production',
-            'app.url' => 'https://eventwillow.ddev.site',
         ]);
 
         $cases = [
-            'https://eventwillow.ddev.site/' => 'promote_sell',
+            'https://eventschedule.test/' => 'promote_sell',
             'https://www.eventschedule.test/' => 'promote_sell',
-            'https://eventwillow.ddev.site/' => 'promote_sell',
             'https://app.eventschedule.test/login?hero=promote_sell' => null,
             'https://someschedule.eventschedule.test/' => null,
             'https://blog.eventschedule.test/' => null,
             'https://noteventschedule.test/' => null,
+            'https://eventwillow.ddev.site/' => null,
             'https://eventwillow.ddev.site.example.org/' => null,
         ];
 

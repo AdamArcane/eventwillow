@@ -312,7 +312,7 @@ class TeamMemberSalesVisibilityTest extends TestCase
 
         $this->actingAs($owner)->get($team)
             ->assertOk()
-            ->assertDontSee('Team members cannot see this schedule');
+            ->assertDontSee(__('messages.team_access_blocked_owner'));
 
         $role->plan_type = 'free';
         $role->plan_expires = now()->subYear()->format('Y-m-d');
@@ -320,7 +320,7 @@ class TeamMemberSalesVisibilityTest extends TestCase
 
         $this->actingAs($owner->fresh())->get($team)
             ->assertOk()
-            ->assertSee('Team members cannot see this schedule');
+            ->assertSee(__('messages.team_access_blocked_owner'));
     }
 
     public function test_only_the_owner_may_change_levels_or_remove_other_members(): void

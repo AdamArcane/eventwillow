@@ -365,7 +365,11 @@ class ScheduleFormShellTest extends TestCase
 
         // A category is a row of its list, as a sub-schedule is: it was a card of three stacked fields.
         $this->assertMatchesRegularExpression('/<div id="event-categories-container" class="event-list sched-list"[^>]*>\s*<div class="event-list-row event-category-item" data-list-row data-category-id="\d+"/', $html);
-        $this->assertSame(12, preg_match_all('/class="event-list-row event-category-item" data-list-row data-category-id="\d+"/', $html), 'the twelve defaults');
+        $this->assertSame(
+            count(config('app.event_categories')),
+            preg_match_all('/class="event-list-row event-category-item" data-list-row data-category-id="\d+"/', $html),
+            'the system defaults'
+        );
 
         // Settings > New events: what a new event starts as, in this order, and (hosted) what the AI
         // import asks for under its own heading.

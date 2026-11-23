@@ -23,6 +23,7 @@ class PublicVenueCoordinatesTest extends TestCase
         Http::preventStrayRequests();
         config(['services.map.geocoder_url' => 'https://geocoder.invalid/search',
             'eventwillow-public.site_key' => 'fixture-site-key', 'eventwillow-public.enforce_ip_allowlist' => false,
+            'eventwillow-public.allowed_ips' => ['127.0.0.1'],
             'app.search_exclude_country' => '']);
         Cache::forget('eventwillow.coordinates.cursor');
         $this->withHeaders(['X-EventWillow-Site-Key' => 'fixture-site-key']);

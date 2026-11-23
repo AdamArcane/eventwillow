@@ -99,7 +99,7 @@ return [
     'onboarding_nudge_cta' => 'Criar o seu canal',
     'onboarding_nudge_type_curator' => 'Dê um nome ao seu guia e terá um calendário público que reúne eventos de outros canais e que pode incorporar no seu próprio site. Demora cerca de um minuto.',
     'onboarding_nudge_examples_cta' => 'Ver canais de exemplo',
-    'activation_nudge_body_no_ticket_type' => ':schedule tem eventos publicados mas nenhum tipo de bilhete, por isso a página lê-se mas não se compra nela. Criar um leva um nome, um preço e uma quantidade. Faz a leitura do QR de cada bilhete à entrada, e o EventWillow não cobra comissão de plataforma em nenhum plano.',
+    'activation_nudge_body_no_ticket_type' => '":schedule" tem eventos publicados mas nenhum tipo de bilhete, por isso a página lê-se mas não se compra nela. Criar um leva um nome, um preço e uma quantidade. Faz a leitura do QR de cada bilhete à entrada, e o EventWillow não cobra comissão de plataforma em nenhum plano.',
     'venue_lookup_help' => 'Se o local já tiver um canal aqui, vamos encontrá-lo e o seu evento aparecerá nele também.',
     'same_as_schedule' => 'Igual ao canal',
     'event_created_on_schedule' => ':name está no seu canal.',

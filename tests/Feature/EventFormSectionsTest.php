@@ -311,8 +311,9 @@ class EventFormSectionsTest extends TestCase
             ['fan_comments_enabled' => true, 'fan_photos_enabled' => false, 'fan_videos_enabled' => true, 'feedback_enabled' => false],
             json_decode($seed[1], true)
         );
-        $this->assertMatchesRegularExpression('/id="fan_comments_enabled_label">Comments<span class="event-tab-aside block font-normal">Schedule: enabled<\/span>/', $html);
-        $this->assertMatchesRegularExpression('/id="fan_photos_enabled_label">Photos<span class="event-tab-aside block font-normal">Schedule: disabled<\/span>/', $html);
+        $schedule = preg_quote(__('messages.schedule'), '/');
+        $this->assertMatchesRegularExpression('/id="fan_comments_enabled_label">Comments<span class="event-tab-aside block font-normal">'.$schedule.': enabled<\/span>/', $html);
+        $this->assertMatchesRegularExpression('/id="fan_photos_enabled_label">Photos<span class="event-tab-aside block font-normal">'.$schedule.': disabled<\/span>/', $html);
         $this->assertStringNotContainsString('Same as schedule (', $html, 'the first choice no longer reads as a second "Enabled"');
 
         $view = file_get_contents(resource_path('views/event/edit.blade.php'));

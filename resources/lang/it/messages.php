@@ -1106,7 +1106,6 @@ return [
     'notify_group_followers' => 'Email ai follower',
     'notify_group_shared' => 'Casella condivisa',
     'address_is_public' => 'Questo indirizzo è pubblico: viene mostrato nella pagina del tuo programma e nei tuoi eventi.',
-    'style_row_header_layout' => 'Intestazione e layout',
     'style_row_header' => 'Intestazione',
     'integration_row_feeds' => 'Testo del calendario e feed',
     'page_content' => 'Contenuto della pagina',

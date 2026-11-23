@@ -338,8 +338,8 @@ class EuropeanPortugueseTest extends TestCase
         app()->setLocale('pt-PT');
 
         $this->assertSame('Inscrever-me', __('messages.register'), 'the RSVP button, not account sign-up');
-        $this->assertSame('Ver agenda', __('messages.event_interest_cancelled_button'));
-        $this->assertStringContainsString('esta agenda', __('messages.translation_disable_warning'));
+        $this->assertSame('Ver canal', __('messages.event_interest_cancelled_button'));
+        $this->assertStringContainsString('este canal', __('messages.translation_disable_warning'));
 
         app()->setLocale('pt');
         $this->assertNotSame('Inscrever-me', __('messages.register'));

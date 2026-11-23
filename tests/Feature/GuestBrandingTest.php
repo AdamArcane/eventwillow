@@ -43,9 +43,6 @@ class GuestBrandingTest extends TestCase
 
     private const CHIP_GRANTED = 'utm_source=granted-plan';
 
-    /** The card in the column beside an event's details. */
-    private const CARD = 'Create your own event schedule!';
-
     /** @param  'nexus'|'saas'|'selfhost'  $mode */
     private function deploy(string $mode): void
     {
@@ -320,7 +317,7 @@ class GuestBrandingTest extends TestCase
 
         $content = $this->get('/'.$curator->subdomain.'/'.$event->slug)->assertOk()->getContent();
 
-        $this->assertStringContainsString(self::CARD, $content);
+        $this->assertStringContainsString(__('messages.create_your_own_event_schedule'), $content);
         $this->assertStringContainsString(self::CHIP_FREE, $content);
         $this->assertStringNotContainsString(self::STRIP, $content);
     }

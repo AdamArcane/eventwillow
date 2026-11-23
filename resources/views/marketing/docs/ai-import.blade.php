@@ -482,12 +482,12 @@ Tickets: $20</code></pre>
             </svg>
             Undoing an Import
         </h2>
-        <p class="text-gray-600 dark:text-gray-300 mb-6">An import ends on your schedule, under a panel headed <strong class="text-gray-900 dark:text-white">Events added to your schedule</strong> with the count, the first three names and your schedule's link to copy. Its buttons, from the start of the row:</p>
+        <p class="text-gray-600 dark:text-gray-300 mb-6">An import ends on your schedule, under a panel headed <strong class="text-gray-900 dark:text-white">Events added to your channel</strong> with the count, the first three names and your schedule's link to copy. Its buttons, from the start of the row:</p>
 
         <ul class="doc-list mb-6">
             <li><strong class="text-gray-900 dark:text-white">Undo this import</strong> - Removes the events that import added, after asking you to confirm</li>
             <li><strong class="text-gray-900 dark:text-white">Import more</strong> - Returns to the import page. After an import of fewer than five events this button reads <strong class="text-gray-900 dark:text-white">Add more events</strong> and is the one highlighted</li>
-            <li><strong class="text-gray-900 dark:text-white">View schedule</strong> - Opens the public page your guests see</li>
+            <li><strong class="text-gray-900 dark:text-white">View channel</strong> - Opens the public page your guests see</li>
             <li><strong class="text-gray-900 dark:text-white">Add to your website</strong> - Opens the embed dialog on the calendar, and is the highlighted button after an import of five events or more. See <a href="{{ route('marketing.docs.sharing') }}#embed" class="doc-link">Embedding on Your Website</a></li>
         </ul>
 

@@ -29,7 +29,7 @@ return [
     'onboarding_nudge_cta' => 'Kanal erstellen',
     'onboarding_nudge_type_curator' => 'Geben Sie Ihrem Guide einen Namen und Sie erhalten einen öffentlichen Kalender, der Veranstaltungen aus anderen Kanälen sammelt und sich auf Ihrer eigenen Website einbetten lässt. Es dauert etwa eine Minute.',
     'onboarding_nudge_examples_cta' => 'Beispiel-Kanäle ansehen',
-    'activation_nudge_body_no_ticket_type' => ':schedule hat veröffentlichte Veranstaltungen, aber keine Ticketarten - die Seite lässt sich lesen, aber nichts kaufen. Eine anzulegen braucht Name, Preis und Menge. Du scannst den QR-Code jedes Tickets am Einlass, und EventWillow nimmt in keinem Tarif eine Plattformgebühr.',
+    'activation_nudge_body_no_ticket_type' => '":schedule" hat veröffentlichte Veranstaltungen, aber keine Ticketarten - die Seite lässt sich lesen, aber nichts kaufen. Eine anzulegen braucht Name, Preis und Menge. Du scannst den QR-Code jedes Tickets am Einlass, und EventWillow nimmt in keinem Tarif eine Plattformgebühr.',
     'venue_lookup_help' => 'Hat der Veranstaltungsort hier bereits einen Kanal, finden wir ihn, und Ihre Veranstaltung erscheint auch dort.',
     'same_as_schedule' => 'Wie im Kanal',
     'event_created_on_schedule' => ':name steht in Ihrem Kanal.',

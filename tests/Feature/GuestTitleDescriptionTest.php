@@ -427,14 +427,14 @@ class GuestTitleDescriptionTest extends TestCase
         $talent = $this->talent();
 
         $this->assertSame(
-            'View the event schedule for Late Show',
+            __('messages.view_schedule_for', ['name' => 'Late Show']),
             $this->description($this->get('/'.$talent->subdomain)->assertOk()->getContent())
         );
 
         $this->event($talent, 'Jazz Night');
 
         $this->assertSame(
-            'View the event schedule for Late Show · Upcoming: Jazz Night',
+            __('messages.view_schedule_for', ['name' => 'Late Show']).' · Upcoming: Jazz Night',
             $this->description($this->get('/'.$talent->subdomain)->assertOk()->getContent())
         );
 
@@ -442,7 +442,7 @@ class GuestTitleDescriptionTest extends TestCase
         $venue = $this->venue(['description' => null, 'short_description' => null]);
 
         $this->assertSame(
-            'View the event schedule for Blue Note · 131 W 3rd St, New York',
+            __('messages.view_schedule_for', ['name' => 'Blue Note']).' · 131 W 3rd St, New York',
             $this->description($this->get('/'.$venue->subdomain)->assertOk()->getContent())
         );
     }
@@ -458,6 +458,9 @@ class GuestTitleDescriptionTest extends TestCase
         $html = $this->get('/'.$talent->subdomain.'/workshops')->assertOk()->getContent();
 
         $this->assertSame('Workshops | Late Show', $this->title($html));
-        $this->assertSame('View the event schedule for Late Show · Upcoming: Drum Workshop', $this->description($html));
+        $this->assertSame(
+            __('messages.view_schedule_for', ['name' => 'Late Show']).' · Upcoming: Drum Workshop',
+            $this->description($html)
+        );
     }
 }

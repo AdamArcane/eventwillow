@@ -31,9 +31,9 @@
 return [
     // Home and hubs
     '/' => ['keyword' => 'free event calendar'],
-    '/features' => ['keyword' => 'event management software'],
-    '/pricing' => ['keyword' => 'Event Schedule pricing'],
-    '/about' => ['keyword' => 'open source event management platform'],
+    '/features' => ['keyword' => 'event management software', 'match' => ['Everything you need to bring people together']],
+    '/pricing' => ['keyword' => 'Event Schedule pricing', 'match' => ['EventWillow pricing']],
+    '/about' => ['keyword' => 'open source event management platform', 'match' => ['About EventWillow']],
     '/examples' => ['keyword' => 'Event Schedule examples'],
     '/browse' => ['keyword' => 'upcoming events'],
     '/use-cases' => ['keyword' => 'event scheduling software'],
@@ -45,7 +45,7 @@ return [
     '/replace' => ['keyword' => 'all-in-one event platform'],
 
     // Hosting and licensing
-    '/selfhost' => ['keyword' => 'selfhosted event calendar'],
+    '/selfhost' => ['keyword' => 'selfhosted event calendar', 'match' => ['Event technology without the headaches']],
     '/open-source' => ['keyword' => 'open source event calendar'],
     '/saas' => ['keyword' => 'white-label ticketing platform'],
 

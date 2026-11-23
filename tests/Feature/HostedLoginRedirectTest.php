@@ -15,12 +15,16 @@ class HostedLoginRedirectTest extends TestCase
      */
     private function configure(array $overrides = []): void
     {
-        config(array_merge([
+        $config = array_merge([
             'app.hosted' => true,
             'app.is_testing' => false,
             'app.env' => 'production',
-            'app.url' => 'https://eventwillow.ddev.site',
-        ], $overrides));
+            'app.url' => 'https://eventschedule.test',
+        ], $overrides);
+
+        $this->pinAppUrl($config['app.url']);
+        unset($config['app.url']);
+        config($config);
     }
 
     public function test_local_hosted_manage_links_return_to_configured_app_host(): void
@@ -56,7 +60,7 @@ class HostedLoginRedirectTest extends TestCase
     {
         $this->configure();
 
-        $this->get('https://eventwillow.ddev.site/login')
+        $this->get('https://eventschedule.test/login')
             ->assertRedirect('https://app.eventschedule.test/login');
 
         // www host and query-string preservation (?pa= pending-action token)

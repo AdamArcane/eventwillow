@@ -112,7 +112,8 @@ class ParseEventCharacterizationTest extends TestCase
         $this->assertStringContainsString('from this  message', $prompt);
         $this->assertStringContainsString("event_date_time (YYYY-MM-DD HH:MM),\n", $prompt);
         $this->assertStringContainsString("event_city,\n", $prompt);
-        $this->assertStringContainsString('Choose the most appropriate category from: Art & Culture, Business Networking, Community, Concerts', $prompt);
+        $categories = implode(', ', array_column($role->getEventCategories(), 'name'));
+        $this->assertStringContainsString('Choose the most appropriate category from: '.$categories, $prompt);
         $this->assertStringContainsString("custom_field_f1 (Stage (Choose from: Main, Garden)),\n", $prompt);
         $this->assertStringContainsString('Doors at eight.', $prompt);
         $this->assertStringContainsString('The date today is Oct 10, 2026.', $prompt);
@@ -167,7 +168,13 @@ class ParseEventCharacterizationTest extends TestCase
             $this->row(['event_date_time' => '2026-10-20 21:00', 'category_name' => 'Zzzzzz']),
         ]);
 
-        $this->assertSame([4, 6, 11, null], array_column($events, 'category_id'));
+        $categories = config('app.event_categories');
+        $this->assertSame([
+            array_search('Concerts & Performances', $categories, true),
+            array_search('Food & Drink', $categories, true),
+            array_search('Spiritual Gatherings', $categories, true),
+            null,
+        ], array_column($events, 'category_id'));
         $this->assertArrayNotHasKey('category_name', $events[0]);
     }
 

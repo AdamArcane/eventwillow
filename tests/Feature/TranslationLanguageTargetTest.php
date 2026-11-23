@@ -680,8 +680,8 @@ class TranslationLanguageTargetTest extends TestCase
             'subdomain' => $venue->subdomain, 'month' => $start->month, 'year' => $start->year, 'lang' => 'en',
         ]))->assertOk()->json('events.0.category_name');
 
-        $this->assertSame(__('messages.art_&_culture', [], 'he'), $default);
-        $this->assertSame(__('messages.art_&_culture', [], 'en'), $english);
+        $this->assertSame(__('messages.arts_&_culture', [], 'he'), $default);
+        $this->assertSame(__('messages.arts_&_culture', [], 'en'), $english);
         $this->assertNotSame($default, $english);
     }
 

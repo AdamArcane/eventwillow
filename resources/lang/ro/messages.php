@@ -682,7 +682,6 @@ return [
     'notify_group_followers' => 'E-mailuri pentru urmăritori',
     'notify_group_shared' => 'Căsuță comună',
     'address_is_public' => 'Această adresă este publică: apare pe pagina programului tău și la evenimentele tale.',
-    'style_row_header_layout' => 'Antet și aspect',
     'style_row_header' => 'Antet',
     'integration_row_feeds' => 'Text calendar și fluxuri',
     'page_content' => 'Conținutul paginii',

@@ -39,6 +39,7 @@
         -->
         <ini name="pcre.jit" value="1"/>
         <env name="APP_ENV" value="testing"/>
+        <env name="APP_NAME" value="Event Schedule" force="true"/>
         <!--
             .env.example ships APP_URL empty and CI copies it verbatim, so config('app.url') was ''
             there while a developer's .env carries a real one. That one difference decides the host
@@ -52,7 +53,7 @@
             shell variable can reintroduce the split. tests/TestCase.php::pinAppUrl() is how a test
             moves it deliberately.
         -->
-        <env name="APP_URL" value="https://eventwillow.ddev.site" force="true"/>
+        <env name="APP_URL" value="https://eventschedule.test" force="true"/>
         <!-- Scheduled dates are stored in UTC. Keep tests independent of a developer's local zone. -->
         <env name="APP_TIMEZONE" value="UTC" force="true"/>
         <env name="APP_MAINTENANCE_DRIVER" value="file"/>

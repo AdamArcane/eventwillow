@@ -41,7 +41,7 @@ return [
     'onboarding_nudge_cta' => 'Create your channel',
     'onboarding_nudge_type_curator' => 'Name your guide and you get a public calendar that pulls in events from other channels and embeds on your own site. It takes about a minute.',
     'onboarding_nudge_examples_cta' => 'See example channels',
-    'activation_nudge_body_no_ticket_type' => ':schedule has events published but no ticket types, so the page can be read but not bought from. Adding one takes a name, a price and a quantity. You scan the QR code on every ticket at the door, and EventWillow takes no platform fee on any plan.',
+    'activation_nudge_body_no_ticket_type' => 'The ":schedule" schedule has events published but no ticket types, so the page can be read but not bought from. Adding one takes a name, a price and a quantity. You scan the QR code on every ticket at the door, and EventWillow takes no platform fee on any plan.',
     'venue_lookup_help' => 'If the venue already has a channel here we will find it, so your event shows on it too.',
     'same_as_schedule' => 'Same as channel',
     'event_created_on_schedule' => ':name is on your channel.',

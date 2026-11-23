@@ -5,7 +5,6 @@ namespace Tests\Feature;
 use App\Utils\EventTextGenerator;
 use Carbon\Carbon;
 use Illuminate\Foundation\Testing\RefreshDatabase;
-use Illuminate\Support\Facades\URL;
 use Tests\Feature\Concerns\CreatesScheduleData;
 use Tests\TestCase;
 
@@ -44,7 +43,7 @@ class EventTextGeneratorTest extends TestCase
     /** Force a dotted-TLD root so the scheme-less guest URL looks like production. */
     private function forceDottedHost(): void
     {
-        URL::forceRootUrl('https://eventwillow.ddev.site');
+        $this->pinAppUrl('https://eventschedule.test');
     }
 
     public function test_text_lines_are_rtl_marked_and_url_lines_are_clean_for_rtl_schedule(): void
@@ -174,9 +173,9 @@ class EventTextGeneratorTest extends TestCase
         // line is still left completely clean (no RLM, no isolate).
         $text = EventTextGenerator::generate($role, [$event], false, null, ['url_include_https' => true]);
 
-        $urlLine = collect(explode("\n", $text))->first(fn ($l) => str_contains($l, 'https://eventwillow.ddev.site'));
+        $urlLine = collect(explode("\n", $text))->first(fn ($l) => str_contains($l, 'https://eventschedule.test'));
         $this->assertNotNull($urlLine);
-        $this->assertStringStartsWith('https://eventwillow.ddev.site', $urlLine);
+        $this->assertStringStartsWith('https://eventschedule.test', $urlLine);
         $this->assertStringNotContainsString(self::RLM, $urlLine);
         $this->assertStringNotContainsString(self::LRI, $urlLine);
         $this->assertStringNotContainsString(self::PDI, $urlLine);

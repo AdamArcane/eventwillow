@@ -3,6 +3,7 @@
 namespace Tests\Feature;
 
 use App\Models\BlogPost;
+use App\Utils\SeoUtils;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Http\Request;
 use Tests\Feature\Concerns\ForcesEnvironment;
@@ -91,7 +92,7 @@ class HostedBlogBreadcrumbTest extends TestCase
 
     private function assertBlogCrumbs(string $blogUrl, string $requestBase): void
     {
-        $home = config('app.url');
+        $home = SeoUtils::siteUrl();
 
         foreach (self::POSTS as $slug => $title) {
             BlogPost::create([

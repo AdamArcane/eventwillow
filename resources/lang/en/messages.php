@@ -684,7 +684,6 @@ return [
     'notify_group_followers' => 'Emails to followers',
     'notify_group_shared' => 'Shared inbox',
     'address_is_public' => 'This address is public: it is shown on your schedule page and on your events.',
-    'style_row_header_layout' => 'Header and layout',
     'style_row_header' => 'Header',
     'integration_row_feeds' => 'Calendar text and feeds',
     'page_content' => 'Page content',

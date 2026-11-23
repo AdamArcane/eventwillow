@@ -126,11 +126,8 @@ class NewsletterTest extends TestCase
     {
         // ResolveCustomDomain 404s any host outside _base_domain(), which derives from app.url.
         // CI leaves APP_URL empty, so pin it rather than depend on the developer's .env.
-        config([
-            'app.hosted' => true,
-            'app.is_testing' => false,
-            'app.url' => 'https://eventwillow.ddev.site',
-        ]);
+        $this->pinAppUrl('https://eventschedule.test');
+        config(['app.hosted' => true, 'app.is_testing' => false]);
 
         $user = User::factory()->create();
 

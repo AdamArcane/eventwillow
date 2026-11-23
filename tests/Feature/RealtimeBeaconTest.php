@@ -41,7 +41,7 @@ class RealtimeBeaconTest extends TestCase
         $this->assertTrue($hit->consented);
         $this->assertSame('wp', $hit->surface);
         $this->assertSame('/pricing', $hit->path);
-        $this->assertSame('Pricing', $hit->title);
+        $this->assertSame('Pricing | Event Schedule', $hit->title);
         $this->assertSame('search', $hit->source_channel);
         $this->assertSame('google.com', $hit->source_name);
         $this->assertSame('mobile', $hit->device);

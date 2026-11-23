@@ -82,7 +82,7 @@ class ImportDoneTest extends TestCase
         $response->assertSessionHas('events_imported', ['count' => 4, 'names' => ['Sooner', 'Middle', 'Later']]);
 
         $page = $this->get($this->schedule())->assertOk();
-        $page->assertSee('Events added to your schedule: 4');
+        $page->assertSee(__('messages.import_panel_title', ['count' => 4]));
         $page->assertSee('and 1 more');
         $page->assertSee('Undo this import');
         $page->assertSee('Add to your website');
@@ -212,7 +212,7 @@ class ImportDoneTest extends TestCase
 
         // Back on the import page later: the last import is named, with its undo.
         $page = $this->openImportPage();
-        $page->assertSee('Your last import added events to this schedule: 1.');
+        $page->assertSee(__('messages.import_last_run', ['count' => 1]));
         $page->assertSee('Undo this import');
 
         // What is added now is a sitting of its own.

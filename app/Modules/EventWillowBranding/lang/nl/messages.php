@@ -95,7 +95,7 @@ return [
     'onboarding_nudge_cta' => 'Maak je kanaal aan',
     'onboarding_nudge_type_curator' => 'Geef je gids een naam en je krijgt een openbare agenda die evenementen uit andere kanalen verzamelt en die je op je eigen site kunt insluiten. Het kost ongeveer een minuut.',
     'onboarding_nudge_examples_cta' => 'Bekijk voorbeeldkanalen',
-    'activation_nudge_body_no_ticket_type' => ':schedule heeft gepubliceerde evenementen maar geen tickettypes, dus de pagina is te lezen maar er valt niets te kopen. Er een maken vraagt om een naam, een prijs en een aantal. Je scant de QR-code van elk ticket bij de deur, en EventWillow rekent in geen enkel abonnement platformkosten.',
+    'activation_nudge_body_no_ticket_type' => '":schedule" heeft gepubliceerde evenementen maar geen tickettypes, dus de pagina is te lezen maar er valt niets te kopen. Er een maken vraagt om een naam, een prijs en een aantal. Je scant de QR-code van elk ticket bij de deur, en EventWillow rekent in geen enkel abonnement platformkosten.',
     'venue_lookup_help' => 'Als de locatie hier al een kanaal heeft, vinden we die en verschijnt je evenement daar ook.',
     'same_as_schedule' => 'Zelfde als kanaal',
     'event_created_on_schedule' => ':name staat in je kanaal.',

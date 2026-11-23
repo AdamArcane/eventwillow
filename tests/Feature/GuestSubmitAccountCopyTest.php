@@ -39,10 +39,7 @@ class GuestSubmitAccountCopyTest extends TestCase
         $response = $this->get(route('event.guest_submit', ['subdomain' => $curator->subdomain]));
         $response->assertOk();
 
-        // assertSee escapes the needle, so the apostrophe in "you'll" matches the &#039; Blade emits.
-        // assertStringContainsString against raw content would silently fail on it.
-        $response->assertSee('At least 8 characters. This schedule requires an account');
-        $response->assertSee("you'll log in with this password to edit your event later.");
+        $response->assertSee(__('messages.guest_submit_password_help'));
 
         // The value strip, including its <strong> - proof it escaped neither Blade's escaping nor
         // the Vue template compiler.

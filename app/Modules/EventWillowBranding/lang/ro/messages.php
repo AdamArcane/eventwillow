@@ -41,7 +41,7 @@ return [
     'onboarding_nudge_cta' => 'Creați canalul',
     'onboarding_nudge_type_curator' => 'Dați un nume ghidului și primiți un calendar public care adună evenimente din alte canale și poate fi încorporat pe propriul site. Durează aproximativ un minut.',
     'onboarding_nudge_examples_cta' => 'Vedeți exemple de canale',
-    'activation_nudge_body_no_ticket_type' => ':schedule are evenimente publicate, dar niciun tip de bilet, așa că pagina se poate citi, dar nu se poate cumpăra de pe ea. Crearea unuia cere un nume, un preț și o cantitate. Scanezi codul QR al fiecărui bilet la intrare, iar EventWillow nu percepe comision de platformă în niciun plan.',
+    'activation_nudge_body_no_ticket_type' => '":schedule" are evenimente publicate, dar niciun tip de bilet, așa că pagina se poate citi, dar nu se poate cumpăra de pe ea. Crearea unuia cere un nume, un preț și o cantitate. Scanezi codul QR al fiecărui bilet la intrare, iar EventWillow nu percepe comision de platformă în niciun plan.',
     'venue_lookup_help' => 'Dacă locația are deja un canal aici, o vom găsi, iar evenimentul dvs. va apărea și acolo.',
     'same_as_schedule' => 'La fel ca canalul',
     'event_created_on_schedule' => ':name este în canalul dvs.',
