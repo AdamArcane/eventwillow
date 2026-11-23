@@ -2,8 +2,13 @@
 
 namespace App\Http\Controllers;
 
+use App\Jobs\ProcessScheduledNewsletters;
 use App\Models\Role;
+use App\Models\User;
+use App\Services\AdsService;
 use App\Services\AppUpdateService;
+use App\Services\MetaAdsService;
+use App\Utils\ReleaseHistory;
 use App\Utils\UrlUtils;
 use Codedge\Updater\UpdaterManager;
 use Illuminate\Http\Request;
@@ -64,7 +69,7 @@ class AppController extends Controller
         // every signed-in person after that, it had the server open a connection to any host and
         // port they named, on a route that is outside the CSRF check.
         try {
-            $hasUsers = \App\Models\User::exists();
+            $hasUsers = User::exists();
         } catch (\Throwable $e) {
             // Table may not exist yet during initial setup
             $hasUsers = false;
@@ -144,7 +149,7 @@ class AppController extends Controller
             // An update whose migrations did not run in the process that copied it is finished
             // before any tier runs, so they meet the new schema (AppUpdateService::finishUpdate(),
             // once per installed state; it never raises).
-            \App\Services\AppUpdateService::finishUpdate();
+            AppUpdateService::finishUpdate();
 
             // Every catch below is \Throwable, not \Exception.
             //
@@ -160,7 +165,7 @@ class AppController extends Controller
             // Process scheduled newsletters BEFORE queue:work so newly dispatched
             // SendNewsletterBatch jobs get processed by the queue:work below
             try {
-                (new \App\Jobs\ProcessScheduledNewsletters)();
+                (new ProcessScheduledNewsletters)();
             } catch (\Throwable $e) {
                 \Log::error('Scheduled command ProcessScheduledNewsletters failed: '.$e->getMessage());
                 report($e);
@@ -270,7 +275,7 @@ class AppController extends Controller
                     report($e);
                 }
 
-                if (\App\Services\MetaAdsService::shouldSync()) {
+                if (MetaAdsService::shouldSync()) {
                     try {
                         \Artisan::call('boost:sync');
                     } catch (\Throwable $e) {
@@ -293,7 +298,7 @@ class AppController extends Controller
                 // network serving" would let switching the network off strand advertisers'
                 // money. SyncPromotions::handle() reads isEnabled() itself to decide which
                 // steps still apply.
-                if (\App\Services\AdsService::isEnabled()) {
+                if (AdsService::isEnabled()) {
                     try {
                         \Artisan::call('promo:sync');
                     } catch (\Throwable $e) {
@@ -404,6 +409,13 @@ class AppController extends Controller
                     \Log::error('Scheduled command app:send-event-interest-mail failed: '.$e->getMessage());
                     report($e);
                 }
+                // Keep in sync with routes/console.php: ticket holders' reminders, every install.
+                try {
+                    \Artisan::call('app:send-ticket-reminders', ['--apply' => true]);
+                } catch (\Throwable $e) {
+                    \Log::error('Scheduled command app:send-ticket-reminders failed: '.$e->getMessage());
+                    report($e);
+                }
                 try {
                     \Artisan::call('app:send-carpool-reminders');
                 } catch (\Throwable $e) {
@@ -453,6 +465,15 @@ class AppController extends Controller
                         \Artisan::call('app:setup-demo');
                     } catch (\Throwable $e) {
                         \Log::error('Scheduled command app:setup-demo failed: '.$e->getMessage());
+                        report($e);
+                    }
+                }
+
+                if (config('app.hosted')) {
+                    try {
+                        \Artisan::call('app:record-mrr');
+                    } catch (\Throwable $e) {
+                        \Log::error('Scheduled command app:record-mrr failed: '.$e->getMessage());
                         report($e);
                     }
                 }
@@ -629,6 +650,17 @@ class AppController extends Controller
                     }
                 }
 
+                // Sites that may be serving a copy of the marketing pages. Keep in sync with
+                // routes/console.php.
+                if (config('app.is_nexus')) {
+                    try {
+                        \Artisan::call('app:check-marketing-copies');
+                    } catch (\Throwable $e) {
+                        \Log::error('Scheduled command app:check-marketing-copies failed: '.$e->getMessage());
+                        report($e);
+                    }
+                }
+
                 if (config('app.hosted')) {
                     try {
                         \Artisan::call('app:send-subscription-reminders');
@@ -704,11 +736,11 @@ class AppController extends Controller
             Cache::put('scheduler.last_run_at.http', now()->timestamp, now()->addDays(7));
 
             // Which PHP this rail runs on, for the self-updater (AppUpdateService::PHP_SEEN_KEY).
-            \App\Services\AppUpdateService::recordPhp('http_cron');
+            AppUpdateService::recordPhp('http_cron');
 
             // Dates the release, as the scheduler rail's heartbeat does (growth meta.releases).
             try {
-                \App\Utils\ReleaseHistory::touch();
+                ReleaseHistory::touch();
             } catch (\Throwable $e) {
                 report($e);
             }
@@ -797,6 +829,23 @@ class AppController extends Controller
     ];
 
     /**
+     * Crawl paths on a schedule's own host that hold nothing an index wants and that crawlers
+     * walked without end, on a web container with four PHP workers:
+     *  - /{slug}/{id}/ical and /{slug}/{id}/{date}/ical: an event's calendar file, one per date.
+     *    Two segments before it, so the subscription feed (/feed/ical) stays open to calendar apps.
+     *  - ?month= on any page: the calendar's month arrows. Each month is a page whose canonical is
+     *    the schedule's own, and each lists that month's dates of every series, so a crawler
+     *    following "next month" reached occurrence pages in 2099 and 2120.
+     *  - .../POLL_HASH: the placeholder the event page's poll script fills in before it posts.
+     *    Crawlers read it out of the script and asked for it, 490 times in those two hours, and
+     *    the POST-only routes answered 405.
+     * In a two-hour runtime log of 2026-11-19, these and the demo schedules (below) were about
+     * 3,000 of 19,400 dynamic requests, nearly all from Meta's and Amazon's crawlers, and Search
+     * Console was reporting 5xx on such URLs while the container was saturated.
+     */
+    private const ROBOTS_TENANT_CRAWL_TRAPS = ['/*/*/ical$', '/*?month=', '/*&month=', '/*/POLL_HASH$'];
+
+    /**
      * robots.txt, which differs by host.
      *
      * A tenant host (hosted: a custom domain, or a schedule's subdomain) blocks only its checkout,
@@ -826,9 +875,19 @@ class AppController extends Controller
                 || ($label !== null && ! in_array($label, ['www', 'app', 'blog'], true)));
 
         if ($isTenantHost) {
+            // A schedule whose pages all answer noindex (Role::isIndexableHost(): a demo, one with
+            // no verified contact, a deleted one) is closed to crawlers but for its home page,
+            // where they can still read that noindex. The demo schedules, re-seeded every hour,
+            // were the largest single share of crawler traffic. A subdomain that names no
+            // schedule keeps the ordinary body.
+            $role = $label !== null ? Role::where('subdomain', $label)->first() : null;
+            $closed = $role !== null && ! $role->isIndexableHost();
+
             $content = "User-agent: *\n"
+                .($closed ? "Allow: /$\nDisallow: /\n" : '')
                 .collect(self::ROBOTS_TENANT_RETURN_PATHS)
                     ->merge(self::ROBOTS_SECRET_PATHS)
+                    ->merge(self::ROBOTS_TENANT_CRAWL_TRAPS)
                     ->map(fn ($path) => 'Disallow: '.$path."\n")
                     ->implode('')
                 ."\nSitemap: ".sitemap_url()."\n";

@@ -239,10 +239,11 @@
         <h3 id="setup-guide" class="doc-subheading">The setup guide</h3>
         <p class="text-gray-600 dark:text-gray-300 mb-4">For the first 30 days after you create your first schedule, a <strong class="text-gray-900 dark:text-white">Setup guide</strong> card sits under the dashboard's title, with a picture of your own page beside its steps. Creating your account and your schedule are already ticked. The next step, your first published event, is what makes the page live. Three more follow, and each can be skipped:</p>
         <ul class="doc-list mb-6">
+            <li><strong class="text-gray-900 dark:text-white">Share your schedule</strong> - done when you copy your link, download its QR code or copy the code that puts your events on your own website. When your first event goes live, the guide offers the event's ready-to-post graphic, the QR code and the link together</li>
             <li><strong class="text-gray-900 dark:text-white">Add more events</strong> - done at three events, or one that repeats</li>
-            <li><strong class="text-gray-900 dark:text-white">Share your schedule</strong> - done when you copy your link or the code that puts your events on your own website</li>
             <li><strong class="text-gray-900 dark:text-white">Tickets or free entry?</strong> - done when an event of yours has tickets or sign-up, or you answer that it needs none. Where the schedule's plan does not include selling paid tickets, the step is called <strong class="text-gray-900 dark:text-white">Sign-up or open entry?</strong> and asks the same about sign-up. A curator that only lists other schedules' events is not asked</li>
         </ul>
+        <p class="text-gray-600 dark:text-gray-300 mb-4">If you signed up from a page about selling tickets or from a paid plan's button on the pricing page, the guide is set up for selling: your first event opens on its <strong class="text-gray-900 dark:text-white">Tickets</strong> tab with <strong class="text-gray-900 dark:text-white">Sell tickets</strong> chosen, and <strong class="text-gray-900 dark:text-white">Put tickets on sale</strong> comes right after your first event, ahead of sharing and adding more events.</p>
         <p class="text-gray-600 dark:text-gray-300 mb-6">A ring fills as you go, and a line says how close you are, for example <strong class="text-gray-900 dark:text-white">One step from live</strong>. On the other pages of that schedule it is a small ring that leads back to the card, and a <strong class="text-gray-900 dark:text-white">Setup guide</strong> line under Dashboard in the sidebar does the same from anywhere. <strong class="text-gray-900 dark:text-white">Hide setup guide</strong> puts it away, and the sidebar line brings it back. Once the guide is gone, the same place on the dashboard holds <strong class="text-gray-900 dark:text-white">Next steps</strong>: suggestions such as publishing a draft or connecting a payment method, each of which you can dismiss.</p>
 
         <h3 id="dashboard-states" class="doc-subheading">When there is nothing to count yet</h3>
@@ -269,7 +270,13 @@
                 <p><strong class="text-gray-900 dark:text-white">Talent</strong> is your events at various venues, and adds an Availability tab (Enterprise). <strong class="text-gray-900 dark:text-white">Venue</strong> is various events at your venue, and adds an Address section and a Seating plans tab (Enterprise). <strong class="text-gray-900 dark:text-white">Curator</strong> is various events at various venues, and adds Event Sources and a Videos tab. Pick carefully: the type is fixed once you save.</p>
             </x-doc-faq>
             <x-doc-faq question="Can I import events from my existing calendar?">
-                <p>Yes, and it is free. Connect a calendar under <strong class="text-gray-900 dark:text-white">Edit Schedule &rarr; Integrations</strong>, which has a row for <strong class="text-gray-900 dark:text-white">Google Calendar</strong>, <strong class="text-gray-900 dark:text-white">Outlook Calendar</strong> and <strong class="text-gray-900 dark:text-white">CalDAV Calendar</strong>. For each one you pick a direction: push your events to the calendar, pull its events in, or both. For a one-time copy instead, <a href="{{ route('marketing.docs.ai_import') }}" class="doc-link">import events</a> by pasting a link to a calendar or an events page, some text or a photo of a flyer.</p>
+                <p>Yes, and it is free. Connect a calendar under <strong class="text-gray-900 dark:text-white">Edit Schedule &rarr; Integrations</strong>, which has a row for
+                @if (outlook_sync_offered())
+                    <strong class="text-gray-900 dark:text-white">Google Calendar</strong>, <strong class="text-gray-900 dark:text-white">Outlook Calendar</strong>
+                @else
+                    <strong class="text-gray-900 dark:text-white">Google Calendar</strong>
+                @endif
+                    and <strong class="text-gray-900 dark:text-white">CalDAV Calendar</strong>. For each one you pick a direction: push your events to the calendar, pull its events in, or both. For a one-time copy instead, <a href="{{ route('marketing.docs.ai_import') }}" class="doc-link">import events</a> by pasting a link to a calendar or an events page, some text or a photo of a flyer.</p>
             </x-doc-faq>
             <x-doc-faq question="Is Event Schedule free?">
                 <p>Yes, with no time limit and no credit card. The free plan covers unlimited events, your own schedule URL, calendar sync, analytics, unlimited RSVP with capacity limits, embedding your calendar, one appointment type, and 10 newsletter emails a month (each recipient counts as one email, so one send to 100 followers uses 100). Selling a ticket that carries a price is a Pro feature: Pro is {{ plan_price($proMonthly) }} a month, Enterprise is {{ plan_price($entMonthly) }} a month for custom domains and team features, and both start with a {{ (int) config('app.trial_days', 7) }}-day free trial. There is no platform fee on any plan.</p>
@@ -345,7 +352,7 @@
                     "name": "Can I import events from my existing calendar?",
                     "acceptedAnswer": {
                         "@type": "Answer",
-                        "text": "Yes, and it is free. Connect a calendar under Edit Schedule and then Integrations, which has a row for Google Calendar, Outlook Calendar and CalDAV Calendar. For each one you pick a direction: push your events to the calendar, pull its events in, or both. For a one-time copy instead, use Import Events and paste a link to a calendar or an events page, some text or a photo of a flyer."
+                        "text": "Yes, and it is free. Connect a calendar under Edit Schedule and then Integrations, which has a row for {{ outlook_sync_offered() ? 'Google Calendar, Outlook Calendar and CalDAV Calendar' : 'Google Calendar and CalDAV Calendar' }}. For each one you pick a direction: push your events to the calendar, pull its events in, or both. For a one-time copy instead, use Import Events and paste a link to a calendar or an events page, some text or a photo of a flyer."
                     }
                 },
                 {

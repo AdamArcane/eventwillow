@@ -2,11 +2,14 @@
 
 namespace App\Mail;
 
+use App\Mail\Concerns\RepliesToEventSupport;
 use App\Models\Event;
 use App\Models\Role;
 use App\Models\Sale;
 use App\Services\Wallet\GoogleWalletService;
+use App\Utils\IcsUtils;
 use App\Utils\QrCodeUtils;
+use App\Utils\TicketInvite;
 use App\Utils\UrlUtils;
 use Illuminate\Bus\Queueable;
 use Illuminate\Mail\Mailable;
@@ -18,7 +21,7 @@ use Illuminate\Queue\SerializesModels;
 
 class TicketPurchase extends Mailable
 {
-    use Queueable, SerializesModels;
+    use Queueable, RepliesToEventSupport, SerializesModels;
 
     protected $sale;
 
@@ -61,8 +64,9 @@ class TicketPurchase extends Mailable
             : 'messages.ticket_purchase_confirmation';
 
         return new Envelope(
-            subject: __($subjectKey).' - '.$this->event->name,
+            subject: __($subjectKey).' - '.$this->sale->eventAsRead($this->event)->name,
             from: new Address($fromAddress, $fromName),
+            replyTo: $this->eventSupportReplyTo($this->event->user?->email),
         );
     }
 
@@ -88,6 +92,17 @@ class TicketPurchase extends Mailable
             ? public_path('images/wallet/google/'.GoogleWalletService::badgeLocale().'.png')
             : null;
 
+        // Apple's pass is the .pkpass itself, built on tap by our own route (AppleWalletService).
+        $appleWalletUrl = \App\Services\Wallet\AppleWalletService::canOffer($this->sale, $this->event)
+            ? canonical_url(route('ticket.wallet.apple', [
+                'event_id' => UrlUtils::encodeId($this->event->id),
+                'secret' => $this->sale->secret,
+            ], false))
+            : null;
+        $appleWalletBadge = $appleWalletUrl && ($badge = \App\Services\Wallet\AppleWalletService::badge('png'))
+            ? public_path($badge)
+            : null;
+
         // Gift card feedback for the buyer: their deduction plus the balance left on the
         // card at send time (the live balance stays on the card page).
         $giftCardAmount = $this->sale->legTotalGiftCard();
@@ -102,11 +117,16 @@ class TicketPurchase extends Mailable
             text: 'emails.ticket_purchase_text',
             with: [
                 'sale' => $this->sale,
-                'event' => $this->event,
+                // In the language the guest bought in: its name, and the calendar links the
+                // event block builds from it.
+                'event' => $this->sale->eventAsRead($this->event),
+                'lang' => $this->sale->linkLanguage($this->role, $this->event),
                 'role' => $this->role,
                 'ticketUrl' => $ticketUrl,
                 'googleWalletUrl' => $googleWalletUrl,
                 'googleWalletBadge' => $googleWalletBadge,
+                'appleWalletUrl' => $appleWalletUrl,
+                'appleWalletBadge' => $appleWalletBadge,
                 'giftCardAmount' => $giftCardAmount,
                 'giftCard' => $giftCard,
             ]
@@ -116,7 +136,7 @@ class TicketPurchase extends Mailable
     /**
      * Get the attachments for the message.
      *
-     * @return array<int, \Illuminate\Mail\Mailables\Attachment>
+     * @return array<int, Attachment>
      */
     public function attachments(): array
     {
@@ -126,16 +146,31 @@ class TicketPurchase extends Mailable
         // body's QR block was hidden (cd43333dc): nothing showed in the body, but mail clients still
         // listed the image. Now it is deliberate, a named attachment every client shows, and the
         // body stays as that commit decided.
-        return [
-            Attachment::fromData(fn () => QrCodeUtils::png($this->ticketUrl()), 'ticket-qr-code.png')->withMime('image/png'),
+        $attachments = [
+            Attachment::fromData(fn () => QrCodeUtils::png($this->ticketUrl(false)), 'ticket-qr-code.png')->withMime('image/png'),
         ];
+
+        // The calendar invitation: the mail app shows it with its own add button, and the change
+        // and cancellation mails later move it or take it off (TicketInvite).
+        $invite = TicketInvite::forSale($this->sale, $this->event, $this->role, 'REQUEST');
+        if ($invite !== null) {
+            $attachments[] = IcsUtils::attachment($invite, 'REQUEST', 'event.ics');
+        }
+
+        return $attachments;
     }
 
-    private function ticketUrl(): string
+    /**
+     * $withLanguage: the link a guest presses opens in the language they bought in. The QR code
+     * keeps the bare address, which is what the door reads.
+     */
+    private function ticketUrl(bool $withLanguage = true): string
     {
-        return canonical_url(route('ticket.view', [
+        $url = canonical_url(route('ticket.view', [
             'event_id' => UrlUtils::encodeId($this->event->id),
             'secret' => $this->sale->secret,
         ], false));
+
+        return $withLanguage ? Sale::withLanguage($url, $this->sale->linkLanguage($this->role, $this->event)) : $url;
     }
 }

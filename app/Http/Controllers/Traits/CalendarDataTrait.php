@@ -10,6 +10,7 @@ use App\Utils\ListWording;
 use App\Utils\UrlUtils;
 use Carbon\Carbon;
 use Illuminate\Http\JsonResponse;
+use Illuminate\Support\Collection;
 use Illuminate\Support\Str;
 
 trait CalendarDataTrait
@@ -21,7 +22,14 @@ trait CalendarDataTrait
         // The language the visitor is reading, resolved once. Event text is then selected BY
         // language rather than by a "show the translation" boolean, which inverts for aggregated
         // events whose own language pair differs from this schedule's - see Event::textInLanguage().
-        $displayLang = $displayLang ?: ($role ? $role->displayLanguageCode() : 'en');
+        //
+        // Outside a guest page (the admin portal, the dashboard) the event is shown as written: the
+        // schedule's own language, or the event's where there is no schedule. displayLanguageCode()
+        // follows the session's translate flag, which is the person's and not the schedule's, and
+        // the dashboard's 'en' showed a Hebrew event under its English copy (2026-11-18).
+        $displayLang = $guestView
+            ? ($displayLang ?: ($role ? $role->displayLanguageCode() : 'en'))
+            : ($role?->language_code ?: $event->getLanguageCode());
         $eventName = $event->nameInLanguage($displayLang, $role);
         $shortDescription = $event->shortDescriptionInLanguage($displayLang, $role);
         $venueName = $event->getVenueDisplayName(true, $displayLang);
@@ -37,13 +45,30 @@ trait CalendarDataTrait
 
         $user = auth()->user();
         $canEdit = false;
-        if ($user && $userAdminRoleIds !== null) {
-            $onOwnSchedule = $event->roles->contains(fn ($r) => in_array($r->id, $userAdminRoleIds));
+        if ($user && $userAdminRoleIds !== null && $event->creator_role_id) {
+            // User::canEditEvent() worked out in memory, because the edit page asks that and
+            // nothing looser: a curator that only LISTS somebody else's event, a schedule that
+            // declined it, and a team on a plan without team access were offered Edit Event, and
+            // the page sent them back to the calendar with nothing said.
+            $owning = (int) $event->creator_role_id;
+            $runsOwning = in_array($owning, $userAdminRoleIds);
+            $madeIt = $user->id == $event->user_id && $runsOwning;
+            $onOwnSchedule = $event->roles->contains(function ($r) use ($userAdminRoleIds, $owning) {
+                if (! in_array($r->id, $userAdminRoleIds)) {
+                    return false;
+                }
+                if ((int) $r->id === $owning) {
+                    return true;
+                }
+                $answer = $r->pivot->is_accepted ?? null;
+
+                return ! $r->isCurator() && ($answer === null || $answer);
+            });
             // With no schedule in hand (the dashboard) the link is event.edit_admin, which looks
             // for a schedule the event is on that this person edits: "I made it" alone opens
             // nothing there. An event sent to somebody else's schedule was offered Edit Event,
             // on the card's main button, and the page answered 403.
-            $canEdit = $role ? ($user->id == $event->user_id || $onOwnSchedule) : $onOwnSchedule;
+            $canEdit = $role ? ($madeIt || $onOwnSchedule) : $onOwnSchedule;
         } elseif ($user) {
             $canEdit = $user->canEditEvent($event);
         }
@@ -115,14 +140,14 @@ trait CalendarDataTrait
             'video_count' => $event->approved_videos_count ?? 0,
             'comment_count' => $event->approved_comments_count ?? 0,
             'photo_count' => $event->approved_photos_count ?? 0,
-            'venue_guest_url' => ($event->venue && isset($role) && $event->venue->subdomain === $role->subdomain) ? null : ($event->venue?->getGuestUrl() ?: null),
+            'venue_guest_url' => ($event->venue && isset($role) && $event->venue->subdomain === $role->subdomain) ? null : ($event->venue?->getGuestUrl(true) ?: null),
             'talent' => $event->roles->filter(fn ($r) => $r->type === 'talent' && (! $guestView || $r->isClaimed()))->map(fn ($r) => [
                 'name' => $r->name,
                 'dir' => content_dir_for_language($r->name, $r->language_code ?: $dirLang),
                 // A 32px avatar and a card-width banner: the card sizes, never the originals.
                 'profile_image' => $r->getProfileImageUrl(ImageUtils::VARIANT_WIDTH) ?: null,
                 'header_image' => $r->headerImageUrl(960),
-                'guest_url' => (isset($role) && $r->subdomain === $role->subdomain) ? null : ($r->getGuestUrl() ?: null),
+                'guest_url' => (isset($role) && $r->subdomain === $role->subdomain) ? null : ($r->getGuestUrl(true) ?: null),
             ])->values()->toArray(),
             'videos' => $event->relationLoaded('approvedVideos') ? $event->approvedVideos->take(3)->map(fn ($v) => [
                 'youtube_url' => $v->youtube_url,
@@ -245,7 +270,7 @@ trait CalendarDataTrait
      * Cut a list that was fetched with one row to spare back to its cap, and say whether it was
      * cut. The row cap used to be silent: the list simply ended, as though the schedule did.
      *
-     * @return array{0: \Illuminate\Support\Collection, 1: bool}
+     * @return array{0: Collection, 1: bool}
      */
     protected function capListEvents($events, int $cap): array
     {
@@ -262,8 +287,10 @@ trait CalendarDataTrait
         $endOfMonth = Carbon::create($year, $month, 1)->endOfMonth()->endOfWeek($lastDay);
 
         $user = auth()->user();
+        // The schedules this person may edit on, plan included (planAllowsTeamAccess()), as
+        // User::canEditEvent() counts them.
         $userAdminRoleIds = $user
-            ? $user->roles()->wherePivotIn('level', ['owner', 'admin'])->pluck('roles.id')->all()
+            ? $user->manageableRoles()->pluck('id')->all()
             : [];
 
         // Bulk-load creator roles so `Event::resolveCategoryName()` doesn't trigger an N+1

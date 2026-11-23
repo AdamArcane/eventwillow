@@ -158,6 +158,7 @@ class RouteLoadTest extends TestCase
             '/caldav',
             '/stripe',
             '/invoiceninja',
+            '/stackapella',
 
             // Audience pages
             '/for-talent',
@@ -308,6 +309,7 @@ class RouteLoadTest extends TestCase
             '/settings',
             '/following',
             '/following/merge-venues',
+            '/following/merge-participants',
             '/tickets',
             '/my-carpools',
             '/sales',

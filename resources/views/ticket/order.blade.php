@@ -26,25 +26,30 @@
 
         <link href="/vendor/manrope/manrope.css" rel="stylesheet">
         @include('partials.guest-theme', ['role' => $themeRole, 'otherRole' => null, 'selectedGroup' => null])
+        @include('partials.guest-kit-styles')
+        @include('partials.guest-stage-styles')
         @include('partials.guest-ticket-styles')
     </x-slot>
 
     <main id="main-content" class="gk-tkpage" tabindex="-1">
-      <div class="gk-tk-wrap">
-        <section class="gk-tk-card">
-          <header class="gk-tk-top {{ ($themeRole && $themeRole->profile_image_url) ? 'gk-tk-top-logo' : '' }}">
+      {{-- One sheet (partials/guest-ticket-styles): the schedule's picture small, the page's name
+           large, then each event as a row between hairlines, a way to its own ticket. --}}
+      <div class="gk-tk-wrap gk-stage gk-tk-sheet">
+        <section class="gk-tk-body-sheet">
+          <header class="gk-tk-head">
             @if ($themeRole && $themeRole->profile_image_url)
-              <img src="{{ $themeRole->profile_image_url }}" alt="">
+              <img class="gk-tk-head-logo" src="{{ $themeRole->profile_image_url }}" alt="">
             @endif
-            <div>
-              <h1 class="gk-tk-title">{{ __('messages.your_tickets') }}</h1>
-              <span class="gk-tk-sub">{{ __('messages.order_includes_events', ['count' => $sales->count()]) }}</span>
-            </div>
+            @if ($themeRole)
+              <p class="gk-dateline">{{ $themeRole->translatedName() }}</p>
+            @endif
+            <h1 class="gk-title">{{ __('messages.your_tickets') }}</h1>
+            <p class="gk-subtitle">{{ __('messages.order_includes_events', ['count' => $sales->count()]) }}</p>
           </header>
 
-          <div class="gk-tk-body">
+          <div class="gk-tk-body-rows">
             @if ($waitingLeg)
-              <div class="gk-tk-msg" data-ticket-state="confirming" role="status"
+              <div class="gk-note" data-ticket-state="confirming" role="status"
                 data-confirming="{{ \App\Services\Payments\PaymentGatewayDriver::landedSecondsLeft($waitingLeg) }}"
                 data-status-url="{{ route('ticket.status', ['event_id' => \App\Utils\UrlUtils::encodeId($waitingLeg->event_id), 'secret' => $waitingLeg->secret], false) }}">
                 @include('ticket.partials.icon', ['icon' => 'clock'])
@@ -76,12 +81,12 @@
                 <li class="gk-tk-leg {{ $isReleased ? 'gk-tk-leg-off' : '' }}">
                   @if ($isReleased)
                     <div class="gk-tk-leg-main">
-                      <span><b>{{ $legEvent->translatedName() }}</b><small>{{ $legDate }}</small></span>
+                      <span><b>{{ ! empty($ticketLanguage) ? $legEvent->nameInLanguage($ticketLanguage) : $legEvent->translatedName() }}</b><small>{{ $legDate }}</small></span>
                       <span class="gk-tk-quiet">{{ $legEvent->is_cancelled && $sale->status === 'paid' ? __('messages.event_cancelled_heading') : __('messages.'.$sale->status) }}</span>
                     </div>
                   @else
                     <a class="gk-tk-leg-main" href="{{ route('ticket.view', ['event_id' => \App\Utils\UrlUtils::encodeId($legEvent->id), 'secret' => $sale->secret]) }}">
-                      <span><b>{{ $legEvent->translatedName() }}</b><small>{{ $legDate }}</small></span>
+                      <span><b>{{ ! empty($ticketLanguage) ? $legEvent->nameInLanguage($ticketLanguage) : $legEvent->translatedName() }}</b><small>{{ $legDate }}</small></span>
                       <span class="gk-tk-leg-go">
                         {{ __('messages.view_ticket') }}
                         <svg fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" d="M9 5l7 7-7 7" /></svg>
@@ -92,8 +97,8 @@
                        already returns false for a released leg, so this follows $isReleased without
                        restating it. The condensed badge is Google's own narrow variant, for exactly
                        this kind of list. --}}
-                  @if (\App\Services\Wallet\GoogleWalletService::canOffer($sale, $legEvent))
-                    <div class="gk-tk-leg-extra gk-tk-noprint">
+                  @if (\App\Services\Wallet\WalletPasses::anyOffered($sale, $legEvent))
+                    <div class="gk-tk-leg-extra gk-tk-leg-wallets gk-tk-noprint">
                       @include('partials.wallet-buttons', ['sale' => $sale, 'event' => $legEvent, 'condensed' => true])
                     </div>
                   @endif
@@ -102,7 +107,7 @@
             </ul>
 
             {{-- Each event is scanned with its own code, so there is no single QR for the order. --}}
-            <p class="gk-tk-quiet">{{ __('messages.order_ticket_per_event_help') }}</p>
+            <p class="gk-tk-quiet-s">{{ __('messages.order_ticket_per_event_help') }}</p>
           </div>
         </section>
       </div>

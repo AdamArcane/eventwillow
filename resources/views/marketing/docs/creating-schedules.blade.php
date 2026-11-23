@@ -1,3 +1,12 @@
+{{-- A feature an operator switches on with credentials is described only where it can be used:
+     on hosted its panel is hidden while it is off, so its passage is too. A selfhost operator reads
+     about it either way, as the admin portal there says how to set it up. --}}
+@php
+    $guideOutlook = outlook_sync_offered();
+    $guidePush = \App\Services\OneSignalService::isConfigured() || ! config('app.hosted');
+    $guideStay22 = \App\Services\Stay22Service::isEnabled() || ! config('app.hosted');
+    $guidePromotions = config('ads.enabled') || ! config('app.hosted');
+@endphp
 <x-docs-page
     key="creating-schedules"
     title="Creating Schedules: Settings, Links, Sync - Event Schedule"
@@ -13,6 +22,8 @@
             <x-doc-nav-link href="#details-general">General</x-doc-nav-link>
             <x-doc-nav-link href="#ai-details-generator">AI Details Generator</x-doc-nav-link>
             <x-doc-nav-link href="#details-localization">Language and time</x-doc-nav-link>
+            <x-doc-nav-link href="#details-translation">How translation works</x-doc-nav-link>
+            <x-doc-nav-link href="#details-glossary">Translation glossary</x-doc-nav-link>
             <x-doc-nav-link href="#contact-info">Contact Info</x-doc-nav-link>
             <x-doc-nav-link href="#announcement-bar">Announcement bar</x-doc-nav-link>
         </x-doc-nav-group>
@@ -26,7 +37,9 @@
             <x-doc-nav-link href="#gallery">Gallery</x-doc-nav-link>
             <x-doc-nav-link href="#sponsors">Sponsors</x-doc-nav-link>
             <x-doc-nav-link href="#venue-map">Venue map</x-doc-nav-link>
+            @if ($guideStay22)
             <x-doc-nav-link href="#accommodation">Accommodation</x-doc-nav-link>
+            @endif
         </x-doc-nav-group>
         <x-doc-nav-group label="Customize" href="#customize">
             <x-doc-nav-link href="#customize-subschedules">Sub-schedules</x-doc-nav-link>
@@ -44,6 +57,7 @@
         <x-doc-nav-group label="Tickets" href="#tickets">
             <x-doc-nav-link href="#ticket-presets">Ticket presets</x-doc-nav-link>
             <x-doc-nav-link href="#gift-cards">Gift cards</x-doc-nav-link>
+            <x-doc-nav-link href="#ticket-reminders">Reminders</x-doc-nav-link>
         </x-doc-nav-group>
         <x-doc-nav-group label="Settings" href="#settings">
             <x-doc-nav-link href="#settings-general">Schedule URL</x-doc-nav-link>
@@ -57,7 +71,9 @@
             <x-doc-nav-link href="#integrations-email">Email Settings</x-doc-nav-link>
             <x-doc-nav-link href="#calendar-sync">Calendar sync</x-doc-nav-link>
             <x-doc-nav-link href="#integrations-google">Google Calendar</x-doc-nav-link>
+            @if ($guideOutlook)
             <x-doc-nav-link href="#integrations-microsoft">Outlook Calendar</x-doc-nav-link>
+            @endif
             <x-doc-nav-link href="#integrations-caldav">CalDAV Calendar</x-doc-nav-link>
             <x-doc-nav-link href="#auto-import">Auto Import</x-doc-nav-link>
             <x-doc-nav-link href="#integrations-feeds">Feeds from other sites</x-doc-nav-link>
@@ -120,7 +136,11 @@
                     </tr>
                     <tr>
                         <td><a href="#page-content" class="doc-link">Page content</a></td>
+                        @if ($guideStay22)
                         <td>Social links, with rows for Videos, Gallery <x-doc-badge plan="pro" />, Sponsors <x-doc-badge plan="pro" />, Venue map and Accommodation. The last two only where the site offers them, and Venue map never on a Venue schedule</td>
+                        @else
+                        <td>Social links, with rows for Videos, Gallery <x-doc-badge plan="pro" />, Sponsors <x-doc-badge plan="pro" /> and Venue map. Venue map only where the site offers it, and never on a Venue schedule</td>
+                        @endif
                         <td>Every schedule</td>
                     </tr>
                     <tr>
@@ -145,7 +165,7 @@
                     </tr>
                     <tr>
                         <td><a href="#integrations" class="doc-link">Integrations</a></td>
-                        <td>Rows for Email Settings (hosted platform only), Google Calendar, Outlook Calendar, CalDAV Calendar, Auto import (selfhosted installs only), Feeds from other sites, and Calendar text and feeds</td>
+                        <td>Rows for Email Settings (hosted platform only), Google Calendar, {{ $guideOutlook ? 'Outlook Calendar, ' : '' }}CalDAV Calendar, Auto import (selfhosted installs only), Feeds from other sites, and Calendar text and feeds</td>
                         <td>Every schedule</td>
                     </tr>
                 </tbody>
@@ -154,7 +174,7 @@
 
         <div class="doc-callout doc-callout-plan">
             <div class="doc-callout-title">What needs a plan</div>
-            <p>The form itself, and most of what is on it, is free. <x-doc-badge plan="pro" /> covers the announcement bar, custom CSS, Gallery, Sponsors, Custom Fields, Custom Labels, Feedback, Carpool, gift cards, push notifications and an email for every ticket sale (on Free only the first paid sale of each event emails you). <x-doc-badge plan="enterprise" /> covers the two AI generators, a custom domain, Internal or Unlisted as the default visibility, and, on the hosted platform, feeds from other sites and a team that picks from your ticket presets. A row your plan does not include carries a lock and says which plan it needs when you open it. A <a href="{{ route('marketing.docs.selfhost') }}" class="doc-link">selfhosted</a> install resolves to Enterprise, so nothing on the form is held back there.</p>
+            <p>The form itself, and most of what is on it, is free. <x-doc-badge plan="pro" /> covers the announcement bar, custom CSS, Gallery, Sponsors, Custom Fields, Custom Labels, Feedback, Carpool, gift cards{{ $guidePush ? ', push notifications' : '' }} and an email for every ticket sale (on Free only the first paid sale of each event emails you). <x-doc-badge plan="enterprise" /> covers the two AI generators, a custom domain, Internal or Unlisted as the default visibility, and, on the hosted platform, feeds from other sites and a team that picks from your ticket presets. A row your plan does not include carries a lock and says which plan it needs when you open it. A <a href="{{ route('marketing.docs.selfhost') }}" class="doc-link">selfhosted</a> install resolves to Enterprise, so nothing on the form is held back there.</p>
         </div>
 
         <h3 id="saving" class="doc-subheading">Saving</h3>
@@ -263,11 +283,11 @@
         <div class="doc-fields">
             <div class="doc-field">
                 <h4 class="font-semibold text-gray-900 dark:text-white mb-2">Language</h4>
-                <p class="text-sm text-gray-500 dark:text-gray-400">The language you write your schedule and events in, which also sets the interface language on your schedule page. Twelve languages are supported: Arabic, Dutch, English, Estonian, French, German, Hebrew, Italian, Portuguese, Romanian, Russian, and Spanish.</p>
+                <p class="text-sm text-gray-500 dark:text-gray-400">The language you write your schedule and events in, which also sets the interface language on your schedule page. Thirteen languages are supported: Arabic, Dutch, English, Estonian, French, German, Hebrew, Italian, Portuguese (Brazil), Portuguese (Portugal), Romanian, Russian, and Spanish. Portuguese (Portugal) is European Portuguese, a language of its own beside Portuguese (Brazil): pick it for an audience in Portugal, both for the language you write in and for the one you <a href="#details-translation" class="doc-link">translate into</a>, and the translation follows Portugal's spelling and vocabulary.</p>
             </div>
             <div class="doc-field">
                 <h4 class="font-semibold text-gray-900 dark:text-white mb-2">Offer a second language to visitors</h4>
-                <p class="text-sm text-gray-500 dark:text-gray-400">Turn this on to have your schedule and events translated automatically, then pick the target under <strong class="text-gray-900 dark:text-white">Translate into</strong> (English by default; the language you write in is not offered). Visitors get a button to switch between the two. Available on all plans. Translations are generated in the background, so allow up to an hour for them to appear; changing the target re-translates everything, and editing an event refreshes its own translation. Turning the setting back off discards every stored translation for the schedule, including wording you corrected by hand, so you are asked to confirm first.</p>
+                <p class="text-sm text-gray-500 dark:text-gray-400">Turn this on to have your schedule and events translated automatically, then pick the target under <strong class="text-gray-900 dark:text-white">Translate into</strong> (English by default; the language you write in is not offered). Visitors get a button to switch between the two. Available on all plans. Translations are made in the background, by a run every 15 minutes, so allow up to an hour for them to appear (see <a href="#details-translation" class="doc-link">how automatic translation works</a>); changing the target re-translates everything, and editing an event refreshes its own translation, except wording you <a href="{{ route('marketing.docs.creating_events') }}#translation" class="doc-link">corrected by hand</a>. Turning the setting back off discards every stored translation for the schedule, including wording you corrected by hand, so you are asked to confirm first.</p>
             </div>
             <div class="doc-field">
                 <h4 class="font-semibold text-gray-900 dark:text-white mb-2">Timezone</h4>
@@ -280,6 +300,54 @@
             <div class="doc-field">
                 <h4 class="font-semibold text-gray-900 dark:text-white mb-2">First Day of Week</h4>
                 <p class="text-sm text-gray-500 dark:text-gray-400">Which day your calendar week starts on. All seven days are available; Sunday unless you change it. Closed, the row names the day only when it is not Sunday.</p>
+            </div>
+        </div>
+
+        <!-- How automatic translation works -->
+        <h3 id="details-translation" class="doc-subheading">How automatic translation works</h3>
+        <p class="text-gray-600 dark:text-gray-300 mb-6">Once <strong class="text-gray-900 dark:text-white">Offer a second language to visitors</strong> is on, you keep writing in your own language and everything a visitor reads is translated for you. There is nothing to press: a translation run every 15 minutes picks up whatever is new or changed. A selfhosted install needs an <a href="{{ route('marketing.docs.selfhost.ai') }}" class="doc-link">AI key</a> for it.</p>
+        <div class="doc-fields">
+            <div class="doc-field">
+                <h4 class="font-semibold text-gray-900 dark:text-white mb-2">What is translated</h4>
+                <p class="text-sm text-gray-500 dark:text-gray-400">Your schedule's name, short description, description, address and announcement message, the names of its sub-schedules, categories, custom fields, custom labels and sponsors, and each event's name, short description, description and agenda items. The buttons, dates and month names around them switch language too. Upcoming and ongoing events are translated, a recurring one for as long as it runs; an event that is over is left as it was. Cancelled events and appointment bookings are not translated, and neither is a draft a feed or a calendar sync brought in until you publish it.</p>
+            </div>
+            <div class="doc-field">
+                <h4 class="font-semibold text-gray-900 dark:text-white mb-2">When it appears</h4>
+                <p class="text-sm text-gray-500 dark:text-gray-400">An event you save is usually translated within a few minutes. Everything else is picked up by a translation run every 15 minutes. Each run translates a batch, text never translated before first and events typed by hand ahead of a feed's, so on the first day, or after changing the language you translate into, allow up to an hour for everything to catch up. Until a text is translated, visitors who chose the second language read it as you wrote it.</p>
+            </div>
+            <div class="doc-field">
+                <h4 class="font-semibold text-gray-900 dark:text-white mb-2">What translates it again</h4>
+                <p class="text-sm text-gray-500 dark:text-gray-400">Editing a text: only the fields you changed are translated again, at the next run. Changing <strong class="text-gray-900 dark:text-white">Translate into</strong>: everything, corrections included, because they were written in the old language. A change to the <a href="#details-glossary" class="doc-link">translation glossary</a>: only the text that uses a term you changed. Wording you <a href="{{ route('marketing.docs.creating_events') }}#translation" class="doc-link">corrected by hand</a> is never translated again on its own; editing the original only flags it for you to check.</p>
+            </div>
+            <div class="doc-field">
+                <h4 class="font-semibold text-gray-900 dark:text-white mb-2">Which languages an event uses</h4>
+                <p class="text-sm text-gray-500 dark:text-gray-400">An event is translated in the languages of the schedule it takes place at: its venue's, or, with no venue, its first performer's. A curator that lists an event written in another language shows it translated into the curator's own language.</p>
+            </div>
+            <div class="doc-field">
+                <h4 class="font-semibold text-gray-900 dark:text-white mb-2">What visitors see</h4>
+                <p class="text-sm text-gray-500 dark:text-gray-400">A switcher on your schedule page and on each event page shows the two languages by their codes, for example <strong class="text-gray-900 dark:text-white">EN</strong> and <strong class="text-gray-900 dark:text-white">PT</strong> (when both are Portuguese, <strong class="text-gray-900 dark:text-white">PT-BR</strong> and <strong class="text-gray-900 dark:text-white">PT-PT</strong>). Choosing one adds <code class="doc-inline-code">?lang=</code> to the address, keeping the month and filters they had, and the choice is remembered for the rest of the visit. So a link that ends in <code class="doc-inline-code">?lang=en</code> opens your schedule in that language, and search engines are told the translated page exists. An embedded calendar has no switcher and takes its language from its address instead: see <a href="{{ route('marketing.docs.sharing') }}#embed-multilingual" class="doc-link">a calendar for each language of your website</a>.</p>
+            </div>
+        </div>
+
+        <!-- Translation glossary -->
+        <h3 id="details-glossary" class="doc-subheading">Translation glossary</h3>
+        <p class="text-gray-600 dark:text-gray-300 mb-6">Shown under Language and time while your schedule offers a second language. It is a list of the words automatic translation should treat your way: the names of your organization, venues and programs, which it keeps exactly as you wrote them, and the odd expression that must always be translated the same way. Closed, the row lists the terms. Available on all plans.</p>
+        <div class="doc-fields">
+            <div class="doc-field">
+                <h4 class="font-semibold text-gray-900 dark:text-white mb-2">Keep a name as written</h4>
+                <p class="text-sm text-gray-500 dark:text-gray-400">Type the name in the first box (for example <strong class="text-gray-900 dark:text-white">Drink &amp; Draw</strong>) and leave the second box empty (it reads <strong class="text-gray-900 dark:text-white">Keep as written</strong>). A link under the translation switch in Language and time opens this row too. Wherever the name appears, in an event's name, its description, an agenda item, your schedule's own text, a sub-schedule, a category or a sponsor, the translation keeps it with the same spelling and capitals. If a translation comes back without it, it is asked for once more.</p>
+            </div>
+            <div class="doc-field">
+                <h4 class="font-semibold text-gray-900 dark:text-white mb-2">A fixed translation</h4>
+                <p class="text-sm text-gray-500 dark:text-gray-400">Fill in the second box to have a term always translated that way into your target language; the box is labelled with that language. The translation may still bend it to fit the sentence, such as a plural, or the masculine and feminine forms Portuguese gives a noun. A fixed translation is used between your schedule's own two languages; a name kept as written is kept whichever way a text is translated.</p>
+            </div>
+            <div class="doc-field">
+                <h4 class="font-semibold text-gray-900 dark:text-white mb-2">How a term is matched</h4>
+                <p class="text-sm text-gray-500 dark:text-gray-400">As a whole word or phrase, whatever its capitals: <strong class="text-gray-900 dark:text-white">Art</strong> matches "art" and "ART", but not "party" or "Artist". Each term is listed once, and two rows that differ only in capitals or accents (<strong class="text-gray-900 dark:text-white">Café</strong> and <strong class="text-gray-900 dark:text-white">Cafe</strong>) count as the same term, so saving asks you to remove one. Up to 100 terms, of up to 100 characters each. The list covers your schedule's own text and the events it made or is the venue or a performer of; on a curator schedule, the events it made and its own translations of the events it lists.</p>
+            </div>
+            <div class="doc-field">
+                <h4 class="font-semibold text-gray-900 dark:text-white mb-2">After a change</h4>
+                <p class="text-sm text-gray-500 dark:text-gray-400">The save bar says that translations using a changed term will be redone. When you save, the translations that use a term you added, changed or removed, and do not already read the way the list now says, are translated again in the background: your schedule's own text, its sub-schedule names, and its upcoming events and their agenda items. They appear at the next translation runs, usually within 15 minutes. Nothing else is translated again, past events are left as they are, and an event translation you <a href="{{ route('marketing.docs.creating_events') }}#translation" class="doc-link">corrected by hand</a> is never replaced. Turning translation off keeps the list for when you turn it back on.</p>
             </div>
         </div>
 
@@ -380,7 +448,13 @@
             </svg>
             Address
         </h2>
-        <p class="text-gray-600 dark:text-gray-300 mb-6">The <strong class="text-gray-900 dark:text-white">Address</strong> section appears on <strong class="text-gray-900 dark:text-white">Venue</strong> schedules only. The address is public. Your schedule page shows it as a link that opens Google Maps, your event pages show it on the venue card, with a map where the site has a Google Maps key, and it is what the <a href="#accommodation" class="doc-link">nearby accommodation</a> map centres on. Talent and Curator schedules say where they are in the <a href="#contact-info" class="doc-link">Contact info</a> row instead.</p>
+        <p class="text-gray-600 dark:text-gray-300 mb-6">The <strong class="text-gray-900 dark:text-white">Address</strong> section appears on <strong class="text-gray-900 dark:text-white">Venue</strong> schedules only. The address is public.
+            @if ($guideStay22)
+            Your schedule page shows it as a link that opens Google Maps, your event pages show it on the venue card, with a map where the site has a Google Maps key, and it is what the <a href="#accommodation" class="doc-link">nearby accommodation</a> map centres on.
+            @else
+            Your schedule page shows it as a link that opens Google Maps, and your event pages show it on the venue card, with a map where the site has a Google Maps key.
+            @endif
+            Talent and Curator schedules say where they are in the <a href="#contact-info" class="doc-link">Contact info</a> row instead.</p>
 
         <x-doc-screenshot id="creating-schedules--section-address" alt="The Address section of a venue's schedule form: Street Address, City, State / Province, Postal Code and Country, with View Map and Validate Address under them" />
 
@@ -405,7 +479,7 @@
 
         <div class="doc-callout doc-callout-info">
             <div class="doc-callout-title">The address is looked up when you save</div>
-            <p>Saving a new or changed address looks up its coordinates as part of the save. That lookup is what puts the map on your event pages and places the accommodation map. Clearing the address clears the coordinates again. The lookup needs a Google Maps key on the site, so a selfhosted install without one keeps the address as text and shows no map.</p>
+            <p>Saving a new or changed address looks up its coordinates as part of the save. That lookup is what puts the map on your event pages{{ $guideStay22 ? ' and places the accommodation map' : '' }}. Clearing the address clears the coordinates again. The lookup needs a Google Maps key on the site, so a selfhosted install without one keeps the address as text and shows no map.</p>
         </div>
     </section>
 
@@ -440,6 +514,10 @@
             <li><strong class="text-gray-900 dark:text-white">From a Curator schedule</strong> - a banner on the <strong class="text-gray-900 dark:text-white">Schedule</strong> tab, scoped to the venues in that schedule's upcoming events.</li>
         </ul>
         <p class="text-gray-600 dark:text-gray-300">Duplicates are also collapsed in the venue picker when you add an event, so you only see one option per place. That is only done where it is safe: two venues that share a name but each carry their own contact details or address both stay on the list.</p>
+
+        <h3 id="merge-participants" class="doc-subheading">Merge Duplicate Participants</h3>
+        <p class="text-gray-600 dark:text-gray-300 mb-4">The same page exists for participants (Talent schedules), and a notice on <strong class="text-gray-900 dark:text-white">Following</strong> opens it. It groups the participants you are connected to that share a name and a country, such as a team that was added as <strong class="text-gray-900 dark:text-white">Someone New</strong> for every game, and merges each group with the same <strong class="text-gray-900 dark:text-white">Merge</strong> and <strong class="text-gray-900 dark:text-white">Not duplicates</strong> buttons. Each group lists only what can be merged: the pages created for others that you follow or run, and the schedule they go into, which can also be one you run. Someone else's own page that you follow is left out of the group.</p>
+        <p class="text-gray-600 dark:text-gray-300">New copies are not made in the first place: when you add a participant with <strong class="text-gray-900 dark:text-white">Someone New</strong> and give only a name, and one of those schedules already has that name in the same country, the event goes on that schedule. A participant added with an email, a phone number or a video still gets a schedule of their own, and so does a name whose group you marked <strong class="text-gray-900 dark:text-white">Not duplicates</strong>.</p>
     </section>
 
     <!-- Style -->
@@ -468,7 +546,11 @@
             </svg>
             Page content
         </h2>
+        @if ($guideStay22)
         <p class="text-gray-600 dark:text-gray-300 mb-6">The <strong class="text-gray-900 dark:text-white">Page content</strong> section holds what your public schedule page shows besides its events. Your social links are on the page as it opens. <strong class="text-gray-900 dark:text-white">Videos</strong>, <strong class="text-gray-900 dark:text-white">Gallery</strong>, <strong class="text-gray-900 dark:text-white">Sponsors</strong>, <strong class="text-gray-900 dark:text-white">Venue map</strong> and <strong class="text-gray-900 dark:text-white">Accommodation</strong> are rows under them, and the last two appear only where the site offers them.</p>
+        @else
+        <p class="text-gray-600 dark:text-gray-300 mb-6">The <strong class="text-gray-900 dark:text-white">Page content</strong> section holds what your public schedule page shows besides its events. Your social links are on the page as it opens. <strong class="text-gray-900 dark:text-white">Videos</strong>, <strong class="text-gray-900 dark:text-white">Gallery</strong>, <strong class="text-gray-900 dark:text-white">Sponsors</strong> and <strong class="text-gray-900 dark:text-white">Venue map</strong> are rows under them, and Venue map appears only where the site offers it.</p>
+        @endif
 
         <x-doc-screenshot id="creating-schedules--section-page" alt="The Page content section of the schedule form: the social links at the top, each with its short link, then the Videos and Gallery rows" />
 
@@ -567,6 +649,7 @@
             <p>This row only appears if the operator of your Event Schedule instance has set up a map service, and never on a venue schedule, which is one place. It is available on <strong class="text-gray-900 dark:text-white">all plans</strong>, including Free.</p>
         </div>
 
+        @if ($guideStay22)
         <!-- Accommodation -->
         <span id="engagement-accommodation"></span>
         <h3 id="accommodation" class="doc-subheading">Accommodation</h3>
@@ -596,6 +679,7 @@
             <div class="doc-callout-title">Availability</div>
             <p>This row only appears if the operator of your Event Schedule instance has enabled the integration. It is available on <strong class="text-gray-900 dark:text-white">all plans</strong>, including Free.</p>
         </div>
+        @endif
     </section>
 
     <!-- Customize -->
@@ -825,7 +909,7 @@
 
         <!-- Fan Content Tab -->
         <h3 id="engagement-fan-content" class="doc-subheading">Fan Content</h3>
-        <p class="text-gray-600 dark:text-gray-300 mb-4">Let people who were there add to the event afterwards. Each kind has its own switch, all three are off until you turn them on, and nothing a visitor sends appears in public until you approve it.</p>
+        <p class="text-gray-600 dark:text-gray-300 mb-4">Let people who were there add to the event afterwards. Each kind has its own switch, all three are on for a new schedule until you turn them off, and nothing a visitor sends appears in public until you approve it.</p>
         <div class="doc-fields">
             <div class="doc-field">
                 <h4 class="font-semibold text-gray-900 dark:text-white mb-2">Comments</h4>
@@ -888,9 +972,9 @@
             </svg>
             Tickets
         </h2>
-        <p class="text-gray-600 dark:text-gray-300 mb-6">Each event sells its own tickets, on the <a href="{{ route('marketing.docs.tickets') }}#general" class="doc-link">Tickets tab</a> of the event form. The schedule's <strong class="text-gray-900 dark:text-white">Tickets</strong> section holds the setups new events start from, and gift cards, in two rows: <strong class="text-gray-900 dark:text-white">Ticket presets</strong> and <strong class="text-gray-900 dark:text-white">Gift cards</strong>. In the list of sections, Tickets names the presets, and adds Gift cards while gift cards are on.</p>
+        <p class="text-gray-600 dark:text-gray-300 mb-6">Each event sells its own tickets, on the <a href="{{ route('marketing.docs.tickets') }}#general" class="doc-link">Tickets tab</a> of the event form. The schedule's <strong class="text-gray-900 dark:text-white">Tickets</strong> section holds the setups new events start from, gift cards and the reminder ticket holders get, in three rows: <strong class="text-gray-900 dark:text-white">Ticket presets</strong>, <strong class="text-gray-900 dark:text-white">Gift cards</strong> and <strong class="text-gray-900 dark:text-white">Reminders</strong>. In the list of sections, Tickets names the presets, and adds Gift cards while gift cards are on.</p>
 
-        <x-doc-screenshot id="creating-schedules--section-tickets" alt="The Tickets section of the schedule form: a line saying each event sells its own tickets, then the Ticket presets and Gift cards rows" />
+        <x-doc-screenshot id="creating-schedules--section-tickets" alt="The Tickets section of the schedule form: a line saying each event sells its own tickets, then the Ticket presets, Gift cards and Reminders rows" />
 
         <!-- Ticket presets -->
         <h3 id="ticket-presets" class="doc-subheading">Ticket presets</h3>
@@ -907,7 +991,18 @@
         <!-- Gift cards -->
         <h3 id="gift-cards" class="doc-subheading">Gift cards <x-doc-badge plan="pro" /></h3>
         <p class="text-gray-600 dark:text-gray-300 mb-4">The <strong class="text-gray-900 dark:text-white">Gift cards</strong> row sells gift cards that buyers send to someone by email and that are redeemed toward tickets for any event on the schedule. It opens on one switch, <strong class="text-gray-900 dark:text-white">Enable gift cards</strong>; the amounts, the currency, how long a card stays valid and the payment method appear once that is on. Closed, the row says whether gift cards are on, and for which amounts. Below Pro the row carries a lock, and opens on an upgrade prompt. On eventschedule.com a card is delivered by email, so the row asks you to set up <a href="#integrations-email" class="doc-link">Email Settings</a> first.</p>
-        <p class="text-gray-600 dark:text-gray-300">Gift cards have a guide of their own: see <a href="{{ route('marketing.docs.gift_cards') }}#setup" class="doc-link">setting up gift cards</a>.</p>
+        <p class="text-gray-600 dark:text-gray-300 mb-4">Gift cards have a guide of their own: see <a href="{{ route('marketing.docs.gift_cards') }}#setup" class="doc-link">setting up gift cards</a>.</p>
+
+        <!-- Reminders -->
+        <h3 id="ticket-reminders" class="doc-subheading">Reminders</h3>
+        <p class="text-gray-600 dark:text-gray-300 mb-4">Before each event, everyone with a ticket or a registration for it gets one email: the event's name, the day and time, the place, the QR code to show at the door, a button to their ticket or registration, the join link for an online event, and your ticket notes. The subject says when, for example <em>Jazz Night is tomorrow at 8:00 PM</em>. A free ticket or registration that the guest can give up carries a <strong class="text-gray-900 dark:text-white">Can't make it?</strong> link to their ticket page, where they can cancel and free the place. Reminders are available on every plan and go out <strong class="text-gray-900 dark:text-white">1 day before</strong> unless you change it. Whether they start on depends on the schedule. On eventschedule.com they are on by default for a schedule that pays for Pro or Enterprise (a free trial does not count) or that has its own <a href="#integrations-email" class="doc-link">Email Settings</a>; on the free plan they are off until you turn them on here. On a selfhosted install they are on by default for every schedule.</p>
+        <ul class="list-disc ml-6 mb-4 text-gray-600 dark:text-gray-300 space-y-1">
+            <li><strong class="text-gray-900 dark:text-white">Email ticket holders before each event</strong> turns them on or off for every event the schedule owns.</li>
+            <li><strong class="text-gray-900 dark:text-white">Send</strong>: 3 hours, 1 day, 2 days or 3 days before the event starts, in the schedule's timezone. A reminder of a day or more that would arrive during the night (10 PM to 8 AM) goes out at 8 PM the evening before instead.</li>
+            <li><strong class="text-gray-900 dark:text-white">Preview the email</strong> opens the reminder for the schedule's next event, with your own name in it. Nothing is sent.</li>
+        </ul>
+        <p class="text-gray-600 dark:text-gray-300 mb-4">Each ticket is reminded once for its date; if you move a one-off event to another day or time after its reminder went, its holders are reminded again with the new one. An order to pay you directly (at the door, for example) is reminded while it waits to be paid, and a sale created through the <a href="{{ route('marketing.docs.developer.api') }}" class="doc-link">API</a> is reminded like any other once it is paid (or while it waits, when the event is paid directly). Someone who gets their ticket after the reminder time is not sent one, since their confirmation has just arrived. Imported attendees, season pass holders, an order whose payment plan is behind, a cancelled event and appointment bookings (which have <a href="{{ route('marketing.docs.appointments') }}" class="doc-link">reminders of their own</a>) are not sent one either. Somebody who both asked to hear about an event and holds a ticket this reminder will reach gets this one, not the one for people who only asked.</p>
+        <p class="text-gray-600 dark:text-gray-300">The reminder comes from the schedule, like the ticket confirmation: on eventschedule.com it uses your <a href="#integrations-email" class="doc-link">Email Settings</a> when you have them, and our mail server otherwise.</p>
     </section>
 
     <!-- Settings -->
@@ -1010,7 +1105,7 @@
             </div>
             <div class="doc-field">
                 <h4 class="font-semibold text-gray-900 dark:text-white mb-2">Default curator schedules</h4>
-                <p class="text-sm text-gray-500 dark:text-gray-400">If you also run Curator schedules, tick the ones new events should be shared to automatically, instead of choosing them on every event. Shown on Talent and Venue schedules that have at least one Curator schedule to offer.</p>
+                <p class="text-sm text-gray-500 dark:text-gray-400">If you also run Curator schedules, or follow ones that accept requests, tick the ones new events should be shared to automatically, instead of choosing them on every event. Shown on Talent and Venue schedules that have at least one Curator schedule to offer.</p>
             </div>
         </div>
         <h4 class="text-md font-semibold text-gray-900 dark:text-white mb-4 mt-6">AI Import</h4>
@@ -1280,11 +1375,17 @@
         </div>
         <!-- Notifications Tab -->
         <h3 id="settings-notifications" class="doc-subheading">Notifications</h3>
-        <p class="text-gray-600 dark:text-gray-300 mb-4">The row is in three groups, by who the email goes to: <strong class="text-gray-900 dark:text-white">Emails to you</strong>, <strong class="text-gray-900 dark:text-white">Emails to followers</strong> and <strong class="text-gray-900 dark:text-white">Shared inbox</strong>. Where the site has push notifications set up, a <strong class="text-gray-900 dark:text-white">Push notifications</strong> panel sits above the three.</p>
+        <p class="text-gray-600 dark:text-gray-300 mb-4">The row is in three groups, by who the email goes to: <strong class="text-gray-900 dark:text-white">Emails to you</strong>, <strong class="text-gray-900 dark:text-white">Emails to followers</strong> and <strong class="text-gray-900 dark:text-white">Shared inbox</strong>.
+        @if ($guidePush)
+            Where the site has push notifications set up, a <strong class="text-gray-900 dark:text-white">Push notifications</strong> panel sits above the three.
+        @endif
+        </p>
 
+        @if ($guidePush)
         <h4 id="notifications-push" class="font-semibold text-gray-900 dark:text-white mt-6 mb-2">Push notifications <x-doc-badge plan="pro" /></h4>
         <p class="text-gray-600 dark:text-gray-300 mb-4">The same notifications can also reach you as browser and mobile push, on top of email rather than instead of it. Choose <strong class="text-gray-900 dark:text-white">Enable push on this device</strong>, allow notifications when your browser asks, then use <strong class="text-gray-900 dark:text-white">Send test push</strong> to confirm it works. Push is per device, so repeat it on your phone and your laptop. Enabling it sends notification data to OneSignal, a third-party service.</p>
         <p class="text-gray-600 dark:text-gray-300 mb-6">The panel only appears once the operator of your Event Schedule site has configured push, which is <a href="{{ route('marketing.docs.selfhost.installation') }}#push-notifications" class="doc-link">off by default</a>. On iPhone and iPad, web push only works for sites added to the home screen (iOS 16.4 and later); Android and desktop browsers need no such step.</p>
+        @endif
 
         <h4 id="notifications-to-you" class="font-semibold text-gray-900 dark:text-white mt-6 mb-2">Emails to you</h4>
         <p class="text-gray-600 dark:text-gray-300 mb-4">Choose which emails you get about this schedule. These choices are personal: each owner and admin sets their own in this row, and the emails go to the address on that person's account, not to the schedule's <a href="#contact-info" class="doc-link">contact email</a>. To also send them to a team inbox, add a <a href="#notification-email" class="doc-link">shared notification address</a>. <strong class="text-gray-900 dark:text-white">New event requests</strong>, <strong class="text-gray-900 dark:text-white">Installment payments</strong> and <strong class="text-gray-900 dark:text-white">Weekly summary</strong> start switched on and stay that way until you turn them off; the rest are off until you turn them on.</p>
@@ -1324,7 +1425,7 @@
         </div>
         <div class="doc-callout doc-callout-info">
             <div class="doc-callout-title">Three of them need your own email settings</div>
-            <p>On the hosted platform, <strong class="text-gray-900 dark:text-white">New ticket sale</strong>, <strong class="text-gray-900 dark:text-white">New feedback</strong> and <strong class="text-gray-900 dark:text-white">New poll option suggestions</strong> only email you once you configure <a href="#integrations-email" class="doc-link">Email Settings</a>, and a note in the row links you straight there. Until then their toggles are greyed out, except that New ticket sale and New feedback stay usable where push notifications are available (above): on Pro those two also arrive as a push, which needs no email settings. A greyed-out toggle keeps whatever it was set to. New event requests, new fan content, <strong class="text-gray-900 dark:text-white">Installment payments</strong> and the weekly summary work either way. Selfhosted installs send everything through the server's own mail configuration, so nothing is gated.</p>
+            <p>On the hosted platform, <strong class="text-gray-900 dark:text-white">New ticket sale</strong>, <strong class="text-gray-900 dark:text-white">New feedback</strong> and <strong class="text-gray-900 dark:text-white">New poll option suggestions</strong> only email you once you configure <a href="#integrations-email" class="doc-link">Email Settings</a>, and a note in the row links you straight there. Until then their toggles are greyed out{{ $guidePush ? ', except that New ticket sale and New feedback stay usable where push notifications are available (above): on Pro those two also arrive as a push, which needs no email settings' : '' }}. A greyed-out toggle keeps whatever it was set to. New event requests, new fan content, <strong class="text-gray-900 dark:text-white">Installment payments</strong> and the weekly summary work either way. Selfhosted installs send everything through the server's own mail configuration, so nothing is gated.</p>
         </div>
 
         <h4 id="notifications-to-followers" class="font-semibold text-gray-900 dark:text-white mt-6 mb-2">Emails to followers</h4>
@@ -1339,16 +1440,22 @@
 
         <!-- Advanced Tab -->
         <h3 id="settings-advanced" class="doc-subheading">Advanced</h3>
+        @if ($guidePromotions)
         <p class="text-gray-600 dark:text-gray-300 mb-4">The Advanced row holds three settings that are seldom changed, and closed it names the ones that are on, or says All off. The second appears only on sites that run promotions or ads, and the third only where the network is switched on, so on most selfhosted installs the row holds the first alone.</p>
+        @else
+        <p class="text-gray-600 dark:text-gray-300 mb-4">The Advanced row holds two settings that are seldom changed, and closed it names the ones that are on, or says All off. The second appears only where the network is switched on.</p>
+        @endif
         <div class="doc-fields doc-fields--grouped">
             <div class="doc-field">
                 <h4 class="font-semibold text-gray-900 dark:text-white mb-2">Show Accessibility Widget</h4>
                 <p class="text-sm text-gray-500 dark:text-gray-400">Add an accessibility panel to your public schedule so visitors can adjust font size, contrast, and motion for themselves. Useful if you are publishing on behalf of an organization with an accessibility commitment to meet.</p>
             </div>
+            @if ($guidePromotions)
             <div class="doc-field">
                 <h4 class="font-semibold text-gray-900 dark:text-white mb-2">Do not show other schedules' promotions</h4>
                 <p class="text-sm text-gray-500 dark:text-gray-400">Some Event Schedule sites run a promotions network, where schedules pay to have an event featured on other schedules' public pages. Turn this on and your pages carry nothing of the sort: no other schedule's promotions, and no ads either. It is free on every plan, and it does not stop you buying promotions of your own. See <a href="{{ route('marketing.docs.boost') }}#on-network" class="doc-link">on-network promotions</a> and <a href="{{ route('marketing.docs.managing_schedules') }}#plan" class="doc-link">ads on free schedules</a>. The toggle only appears on sites that have this switched on.</p>
             </div>
+            @endif
             <div class="doc-field">
                 <h4 class="font-semibold text-gray-900 dark:text-white mb-2">List this schedule on the network</h4>
                 <p class="text-sm text-gray-500 dark:text-gray-400">Share this schedule's public events with the listings on eventschedule.com, where each listing links back to the event on your own site. Three choices: <strong class="text-gray-900 dark:text-white">Not decided yet</strong>, <strong class="text-gray-900 dark:text-white">Listed on the network</strong> or <strong class="text-gray-900 dark:text-white">Not listed</strong>. The setting only appears once an administrator has enabled federation for the whole installation, so you will not see it on eventschedule.com itself. You do not have to come here to answer it: once the schedule has an upcoming public event with an image, a <strong class="text-gray-900 dark:text-white">List on the network</strong> prompt on the schedule's page, and on your dashboard for schedules you own, does it in one click. A listed schedule shows <strong class="text-gray-900 dark:text-white">Listed on the network</strong> on its page, which links back to this setting. See <a href="{{ route('marketing.docs.selfhost.federation') }}#per-schedule" class="doc-link">Federation</a>.</p>
@@ -1365,7 +1472,11 @@
             </svg>
             Integrations
         </h2>
-        <p class="text-gray-600 dark:text-gray-300 mb-6">Connect your schedule to the outside world: send its email through your own server, keep it in step with a calendar you already use, bring in events from other sites, and hand out feed URLs other apps can subscribe to. The rows are <strong class="text-gray-900 dark:text-white">Email Settings</strong> (hosted platform only), <strong class="text-gray-900 dark:text-white">Google Calendar</strong>, <strong class="text-gray-900 dark:text-white">Outlook Calendar</strong>, <strong class="text-gray-900 dark:text-white">CalDAV Calendar</strong>, <strong class="text-gray-900 dark:text-white">Auto import</strong> (selfhosted installs only), <strong class="text-gray-900 dark:text-white">Feeds from other sites</strong>, and <strong class="text-gray-900 dark:text-white">Calendar text and feeds</strong>. A row that is not connected says <strong class="text-gray-900 dark:text-white">Not connected</strong>; a connected calendar row says which way it syncs.</p>
+        <p class="text-gray-600 dark:text-gray-300 mb-6">Connect your schedule to the outside world: send its email through your own server, keep it in step with a calendar you already use, bring in events from other sites, and hand out feed URLs other apps can subscribe to. The rows are <strong class="text-gray-900 dark:text-white">Email Settings</strong> (hosted platform only), <strong class="text-gray-900 dark:text-white">Google Calendar</strong>,
+        @if ($guideOutlook)
+            <strong class="text-gray-900 dark:text-white">Outlook Calendar</strong>,
+        @endif
+            <strong class="text-gray-900 dark:text-white">CalDAV Calendar</strong>, <strong class="text-gray-900 dark:text-white">Auto import</strong> (selfhosted installs only), <strong class="text-gray-900 dark:text-white">Feeds from other sites</strong>, and <strong class="text-gray-900 dark:text-white">Calendar text and feeds</strong>. A row that is not connected says <strong class="text-gray-900 dark:text-white">Not connected</strong>; a connected calendar row says which way it syncs.</p>
 
         <x-doc-screenshot id="creating-schedules--section-integrations" alt="The Integrations section on a selfhosted install, which has no Email Settings row: Google Calendar, Outlook Calendar and CalDAV Calendar, each saying Not connected, then Auto import, Feeds from other sites, and Calendar text and feeds" />
 
@@ -1429,7 +1540,7 @@
 
         <!-- What the three calendar rows share -->
         <h3 id="calendar-sync" class="doc-subheading">Calendar sync</h3>
-        <p class="text-gray-600 dark:text-gray-300 mb-4">The next three rows each keep the schedule in step with a calendar you already use. All three are <a href="{{ route('marketing.pricing') }}" class="doc-link">free on every plan</a> and work the same way: choose a calendar, choose a direction, save. A connection belongs to the schedule's owner, whose account it runs on, so the owner is the one who sets it.</p>
+        <p class="text-gray-600 dark:text-gray-300 mb-4">The next {{ $guideOutlook ? 'three' : 'two' }} rows each keep the schedule in step with a calendar you already use. {{ $guideOutlook ? 'All three are' : 'Both are' }} <a href="{{ route('marketing.pricing') }}" class="doc-link">free on every plan</a> and work the same way: choose a calendar, choose a direction, save. A connection belongs to the schedule's owner, whose account it runs on, so the owner is the one who sets it.</p>
 
         <div class="doc-fields">
             <div class="doc-field">
@@ -1446,12 +1557,22 @@
             </div>
             <div id="reading-stopped" class="doc-field">
                 <h4 class="font-semibold text-gray-900 dark:text-white mb-2">When reading stops</h4>
-                <p class="text-sm text-gray-600 dark:text-gray-300">Two things stop a sync from reading its calendar, on all three rows: the site's operator pausing it because the calendar was putting meeting details or emails on your page, and the schedule changing owner, because the next read would use the new owner's account. A sync that read from the calendar goes to <strong class="text-gray-900 dark:text-white">No Sync</strong>, Bidirectional Sync becomes <strong class="text-gray-900 dark:text-white">To Google Calendar</strong> or <strong class="text-gray-900 dark:text-white">To Outlook Calendar</strong> (To CalDAV for a CalDAV calendar), so your events still go out, and <a href="#publish-on-arrival" class="doc-link">Publish new events automatically</a> is turned off. The row then says why, in amber. After a change of owner, the new owner chooses their own calendar and a direction to start again. After a pause, choose a calendar that holds only public events and a direction again (for CalDAV, disconnect and connect again with such a calendar). An operator who undoes the pause puts the old direction back, unless you have chosen one since, and new events then arrive as drafts.</p>
+                <p class="text-sm text-gray-600 dark:text-gray-300">Two things stop a sync from reading its calendar, on {{ $guideOutlook ? 'all three rows' : 'both rows' }}: the site's operator pausing it because the calendar was putting meeting details or emails on your page, and the schedule changing owner, because the next read would use the new owner's account. A sync that read from the calendar goes to <strong class="text-gray-900 dark:text-white">No Sync</strong>, Bidirectional Sync becomes <strong class="text-gray-900 dark:text-white">To Google Calendar</strong>
+                @if ($guideOutlook)
+                    or <strong class="text-gray-900 dark:text-white">To Outlook Calendar</strong>
+                @endif
+                    (To CalDAV for a CalDAV calendar), so your events still go out, and <a href="#publish-on-arrival" class="doc-link">Publish new events automatically</a> is turned off. The row then says why, in amber. After a change of owner, the new owner chooses their own calendar and a direction to start again. After a pause, choose a calendar that holds only public events and a direction again (for CalDAV, disconnect and connect again with such a calendar). An operator who undoes the pause puts the old direction back, unless you have chosen one since, and new events then arrive as drafts.</p>
             </div>
             <div id="delete-sync" class="doc-field">
                 <h4 class="font-semibold text-gray-900 dark:text-white mb-2">When an event is deleted in the connected calendar</h4>
-                <p class="text-sm text-gray-600 dark:text-gray-300">Shown in the Google and Outlook rows once that integration is pulling events in; CalDAV has no such setting, so an event deleted there stays here. It is one setting for both: with Google connected it sits in the Google Calendar row, and otherwise in the Outlook Calendar row. Choose what happens here when you delete an event there: <strong class="text-gray-900 dark:text-white">Keep it here</strong> (the default), <strong class="text-gray-900 dark:text-white">Mark as cancelled</strong> (hidden but reversible), or <strong class="text-gray-900 dark:text-white">Delete it here</strong>. Deleting is permanent, so an event with any ticket sale on record (refunded ones included) or an ad boost that has spent money is hidden rather than deleted. An event that another schedule owns and shares with yours is only taken off your schedule, never deleted for everyone.</p>
-                <p class="text-sm text-gray-600 dark:text-gray-300 mt-2">The other way round, on all three rows: an event the sync read in from your calendar is a copy of your entry there, and the entry belongs to your calendar. Cancelling the event here never removes the entry, because a cancel can be undone and a deleted calendar entry cannot. Deleting the event here deletes the entry only when the event is published and the direction sends events to that calendar (Bidirectional Sync, or To); for a draft, or with a direction that only reads from the calendar (From), it stays. An event made here and sent out is taken off the calendar when you cancel or delete it.</p>
+                <p class="text-sm text-gray-600 dark:text-gray-300">
+                @if ($guideOutlook)
+                    Shown in the Google and Outlook rows once that integration is pulling events in; CalDAV has no such setting, so an event deleted there stays here. It is one setting for both: with Google connected it sits in the Google Calendar row, and otherwise in the Outlook Calendar row.
+                @else
+                    Shown in the Google Calendar row once it is pulling events in; CalDAV has no such setting, so an event deleted there stays here.
+                @endif
+                    Choose what happens here when you delete an event there: <strong class="text-gray-900 dark:text-white">Keep it here</strong> (the default), <strong class="text-gray-900 dark:text-white">Mark as cancelled</strong> (hidden but reversible), or <strong class="text-gray-900 dark:text-white">Delete it here</strong>. Deleting is permanent, so an event with any ticket sale on record (refunded ones included) or an ad boost that has spent money is hidden rather than deleted. An event that another schedule owns and shares with yours is only taken off your schedule, never deleted for everyone.</p>
+                <p class="text-sm text-gray-600 dark:text-gray-300 mt-2">The other way round, on {{ $guideOutlook ? 'all three rows' : 'both rows' }}: an event the sync read in from your calendar is a copy of your entry there, and the entry belongs to your calendar. Cancelling the event here never removes the entry, because a cancel can be undone and a deleted calendar entry cannot. Deleting the event here deletes the entry only when the event is published and the direction sends events to that calendar (Bidirectional Sync, or To); for a draft, or with a direction that only reads from the calendar (From), it stays. An event made here and sent out is taken off the calendar when you cancel or delete it.</p>
             </div>
         </div>
 
@@ -1484,6 +1605,7 @@
             <p>Google Calendar sync needs Google API credentials on the server. See the <a href="{{ route('marketing.docs.selfhost.google_calendar') }}" class="doc-link">selfhost Google Calendar docs</a> for setup instructions.</p>
         </div>
 
+        @if ($guideOutlook)
         <!-- Outlook / Microsoft Calendar -->
         <h3 id="integrations-microsoft" class="doc-subheading">Outlook Calendar</h3>
         <p class="text-gray-600 dark:text-gray-300 mb-4">The same two-way sync against an Outlook or Microsoft 365 calendar, over the Microsoft Graph API. Changes arrive near-instantly, with regular polling as a safety net.</p>
@@ -1502,10 +1624,11 @@
             <div class="doc-callout-title">Selfhost note</div>
             <p>Outlook Calendar sync needs an Azure app registration. See the <a href="{{ route('marketing.docs.selfhost.microsoft_calendar') }}" class="doc-link">selfhost Outlook Calendar docs</a> for setup instructions.</p>
         </div>
+        @endif
 
         <!-- CalDAV -->
         <h3 id="integrations-caldav" class="doc-subheading">CalDAV Calendar</h3>
-        <p class="text-gray-600 dark:text-gray-300 mb-4">CalDAV is the open standard behind Apple Calendar, Fastmail, Nextcloud and many others, so this row covers everything the two above do not. There is no webhook in the standard, so changes are picked up on a regular sweep rather than the moment they happen.</p>
+        <p class="text-gray-600 dark:text-gray-300 mb-4">CalDAV is the open standard behind Apple Calendar, Fastmail, Nextcloud and many others, so this row covers everything {{ $guideOutlook ? 'the two above do' : 'Google Calendar does' }} not. There is no webhook in the standard, so changes are picked up on a regular sweep rather than the moment they happen.</p>
 
         <ol class="doc-list doc-list-numbered mb-6">
             <li>Open <strong class="text-gray-900 dark:text-white">Edit Schedule</strong>, choose <strong class="text-gray-900 dark:text-white">Integrations</strong>, and open the <strong class="text-gray-900 dark:text-white">CalDAV Calendar</strong> row.</li>
@@ -1564,7 +1687,7 @@
 
         <h4 class="text-md font-semibold text-gray-900 dark:text-white mb-3">Calendar Description Template</h4>
         <p class="text-gray-600 dark:text-gray-300 mb-4">
-            An event pushed out to Google Calendar, Outlook or CalDAV normally arrives carrying its own description and nothing else. Set a <strong class="text-gray-900 dark:text-white">Calendar Description Template</strong> and every outbound event uses your wording instead, built from the same variables as <a href="{{ route('marketing.docs.event_graphics') }}#variables" class="doc-link">event graphics</a>. Leave it empty and the event description is used as-is. <strong class="text-gray-900 dark:text-white">Show available variables</strong>, above the box, opens the <a href="#available-variables" class="doc-link">list below</a>.
+            An event pushed out to Google Calendar{{ $guideOutlook ? ', Outlook' : '' }} or CalDAV normally arrives carrying its own description and nothing else. Set a <strong class="text-gray-900 dark:text-white">Calendar Description Template</strong> and every outbound event uses your wording instead, built from the same variables as <a href="{{ route('marketing.docs.event_graphics') }}#variables" class="doc-link">event graphics</a>. Leave it empty and the event description is used as-is. <strong class="text-gray-900 dark:text-white">Show available variables</strong>, above the box, opens the <a href="#available-variables" class="doc-link">list below</a>.
         </p>
         <p class="text-gray-600 dark:text-gray-300 mb-4">
             A line whose variables all come out empty is dropped rather than left as a stray separator, so one template can serve events with a venue and events without.
@@ -1964,7 +2087,7 @@ example.eventschedule.com/summer-concert</code></pre>
                 {
                     "@type": "HowToStep",
                     "name": "Connect Calendar Integrations",
-                    "text": "Sync with Google Calendar, Outlook Calendar, or CalDAV so your events stay in step with the calendar you already use.",
+                    "text": "Sync with {{ $guideOutlook ? 'Google Calendar, Outlook Calendar, or CalDAV' : 'Google Calendar or CalDAV' }} so your events stay in step with the calendar you already use.",
                     "url": "{{ url(route('marketing.docs.creating_schedules')) }}#integrations"
                 },
                 {

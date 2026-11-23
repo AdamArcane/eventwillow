@@ -91,6 +91,17 @@ class AppServiceProvider extends ServiceProvider
      */
     public function boot(): void
     {
+        // $date->localDate(): a date in the reader's own word order (App\Support\LocalDate).
+        \Carbon\Carbon::macro('localDate', function (bool $withYear = true, bool $withWeekday = true, bool $shortMonth = false) {
+            return \App\Support\LocalDate::format($this, $withYear, $withWeekday, $shortMonth);
+        });
+
+        // Plural rules for a hyphenated regional locale (pt-PT); see RegionalMessageSelector.
+        $this->app->afterResolving('translator', fn ($translator) => $translator->setSelector(new \App\Support\RegionalMessageSelector));
+        if ($this->app->resolved('translator')) {
+            $this->app['translator']->setSelector(new \App\Support\RegionalMessageSelector);
+        }
+
         if (! config('app.hosted') && empty(config('app.key'))) {
             Artisan::call('key:generate', ['--force' => true]);
         }
@@ -296,6 +307,15 @@ class AppServiceProvider extends ServiceProvider
             $ip = \App\Utils\RealtimeTracker::clientIp($request);
 
             return Limit::perMinute(30)->by('guest-count|'.hash_hmac('sha256', $ip.'|'.gmdate('Y-m-d'), (string) config('app.key')));
+        });
+
+        // POST /api/marketing-page, the marketing site's per-page counters (MarketingPageDaily).
+        // Its own budget per real visitor address, for the same reasons. A page sends three posts
+        // at most, and a visitor reading fast opens a few pages a minute.
+        RateLimiter::for('marketing_page', function ($request) {
+            $ip = \App\Utils\RealtimeTracker::clientIp($request);
+
+            return Limit::perMinute(60)->by('marketing-page|'.hash_hmac('sha256', $ip.'|'.gmdate('Y-m-d'), (string) config('app.key')));
         });
 
         // GET /ticket/status (a ticket waiting on its payment confirmation asks about eight times

@@ -5,8 +5,11 @@ namespace Tests\Feature;
 use App\Models\Event;
 use App\Models\Newsletter;
 use App\Models\Role;
+use App\Models\User;
 use App\Services\NewsletterService;
+use App\Utils\GuestTheme;
 use App\Utils\MoneyUtils;
+use App\Utils\UrlUtils;
 use Carbon\Carbon;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Tests\Feature\Concerns\CreatesScheduleData;
@@ -58,12 +61,13 @@ class MonthGridTest extends TestCase
 
     /**
      * A free ticket type beside paid ones (free entry, a paid table) was said as "From $0" on
-     * the card, on the event page and in a newsletter: three builders, each reading "the
-     * lowest price and whether there is a higher one". They ask one rule now.
+     * the card, on the event page and in a newsletter, and then as "Free entry", which hid what
+     * the paid types cost: an organizer selling admission at lei 250 and lei 280 beside a free
+     * type was shown as free. The three say "Free - $20" now, from one rule.
      */
-    public function test_a_free_ticket_beside_paid_ones_is_free_entry_and_never_from_zero(): void
+    public function test_a_free_ticket_beside_paid_ones_is_free_to_the_top_price_and_never_from_zero(): void
     {
-        $this->assertSame('free', Event::priceWording(0, 20));
+        $this->assertSame('free_range', Event::priceWording(0, 20));
         $this->assertSame('free', Event::priceWording(0, 0));
         $this->assertSame('from', Event::priceWording(10, 20));
         $this->assertSame('price', Event::priceWording(20, 20));
@@ -73,19 +77,21 @@ class MonthGridTest extends TestCase
         $this->createTicket($event, ['price' => 20, 'quantity' => 50]);
         $date = now()->addDays(7)->format('Y-m-d');
         $zero = MoneyUtils::format(0, 'USD');
+        $freeTo = __('messages.price_free_to', ['max' => MoneyUtils::format(20, 'USD')]);
 
-        // The card, the list's rows and the month.
+        // The card, the list's rows and the month: in the plain chip, never the green Free entry.
         $row = $this->row($event);
-        $this->assertTrue($row['ticket_free']);
-        $this->assertNull($row['ticket_from']);
+        $this->assertFalse($row['ticket_free']);
+        $this->assertSame($freeTo, $row['ticket_from']);
 
         // The event page's price line.
         $summary = $event->fresh()->ticketPriceSummary($date);
-        $this->assertSame('free', $summary['says']);
+        $this->assertSame('free_range', $summary['says']);
         $this->assertFalse($summary['free'], 'not every type is free: there is still something to pay for');
         $html = $this->get($this->guestEventUrl($this->role, $event))->assertOk()->getContent();
         $this->assertSame(1, preg_match('/data-ticket-price>\s*(.*?)\s*<\/span>/s', $html, $line));
-        $this->assertSame($this->role->customLabel('free_entry'), trim($line[1]));
+        $this->assertSame(e($freeTo), trim(strip_tags($line[1])));
+        $this->assertStringNotContainsString($this->role->customLabel('free_entry'), $line[1]);
         $this->assertStringNotContainsString($zero, $line[1]);
 
         // A newsletter's row for it.
@@ -98,18 +104,25 @@ class MonthGridTest extends TestCase
         ]);
         $newsletter->setRelation('role', $this->role);
         $mailed = collect(app(NewsletterService::class)->processBlocks($newsletter)[0]['data']['resolvedEvents'])->firstWhere('name', 'Free And A Table');
-        $this->assertSame(__('messages.free'), $mailed['price']);
+        $this->assertSame($freeTo, $mailed['price']);
         $this->assertTrue($mailed['buy'], 'and its button still goes to the tickets');
+
+        // Every type free: the owner's own words, as before.
+        $free = $this->event(['name' => 'All Free']);
+        $this->createTicket($free, ['price' => 0, 'quantity' => 50]);
+        $this->assertTrue($this->row($free)['ticket_free']);
+        $this->assertSame('free', $free->fresh()->ticketPriceSummary($date)['says']);
 
         // Where every type costs something the three say what they said before.
         $paid = $this->event(['name' => 'Two Prices']);
         $this->createTicket($paid, ['price' => 10, 'quantity' => 50]);
         $this->createTicket($paid, ['price' => 25, 'quantity' => 50]);
         $from = __('messages.price_from', ['price' => MoneyUtils::format(10, 'USD')]);
-        $this->assertSame($from, $this->row($paid)['ticket_from']);
+        $this->assertSame($from, $this->row($paid)['ticket_from'], 'a narrow chip says From');
         $this->assertSame('from', $paid->fresh()->ticketPriceSummary($date)['says']);
         $this->assertSame(1, preg_match('/data-ticket-price>\s*(.*?)\s*<\/span>/s', $this->get($this->guestEventUrl($this->role, $paid))->assertOk()->getContent(), $paidLine));
-        $this->assertSame($from, trim($paidLine[1]), 'the price line itself, not some other mention of the price');
+        $range = __('messages.price_range', ['min' => MoneyUtils::format(10, 'USD'), 'max' => MoneyUtils::format(25, 'USD')]);
+        $this->assertSame($range, trim(strip_tags($paidLine[1])), 'the event page has room for the whole range');
     }
 
     /**
@@ -168,7 +181,7 @@ class MonthGridTest extends TestCase
         $this->assertTrue($rows->has('Sent To Another Schedule'), 'what the person made is still on their dashboard');
         $this->assertFalse($rows['Sent To Another Schedule']['can_edit'], 'but nothing offers to edit it from there');
         $this->assertNull($rows['Sent To Another Schedule']['edit_url']);
-        $this->get(route('event.edit_admin', ['hash' => \App\Utils\UrlUtils::encodeId($sent->id)]))->assertForbidden();
+        $this->get(route('event.edit_admin', ['hash' => UrlUtils::encodeId($sent->id)]))->assertForbidden();
     }
 
     /**
@@ -317,6 +330,12 @@ class MonthGridTest extends TestCase
         $this->assertStringContainsString(':data-ev="chip.id" :data-date="day.date" :aria-label="chip.label">', $guest);
         $this->assertSame(1, preg_match('/<a class="gk-cal-ev" :class="chip\.cls" :href="chip\.url"\s+target="_blank" rel="noopener"/', $embed));
         $this->assertSame(0, preg_match('/<a class="gk-cal-ev" :class="chip\.cls" :href="chip\.url"\s+target="_blank"/', $guest));
+        // An embed that shows events on the organizer's site keeps those links: monthClick() takes
+        // a plain click to embedOpenEvent(), and the rest is the browser's, to the event's page.
+        $onsite = $this->get('/'.$this->role->subdomain.'?embed=true&events=onsite&layout=calendar')->getContent();
+        $this->assertSame(1, preg_match('/<a class="gk-cal-ev" :class="chip\.cls" :href="chip\.url"\s+target="_blank" rel="noopener"/', $onsite));
+        $this->assertStringContainsString('embedOnsite: true', $onsite);
+        $this->assertStringContainsString('embedOnsite: false', $embed);
     }
 
     /**
@@ -430,7 +449,7 @@ class MonthGridTest extends TestCase
         $longAgo = now()->subYears(2)->format('Y-m-d');
         $swallows = 'Dana <b>Bold</b> <!--<script';
         foreach ([$swallows, 'Sam Rivers', 'Sam Rivers'] as $name) {
-            $member = \App\Models\User::factory()->create(['name' => $name, 'email_verified_at' => now()]);
+            $member = User::factory()->create(['name' => $name, 'email_verified_at' => now()]);
             $this->role->users()->attach($member->id, ['level' => 'admin', 'dates_unavailable' => json_encode([$longAgo, $day])]);
         }
 
@@ -451,7 +470,7 @@ class MonthGridTest extends TestCase
 
         // A plus on a day for whoever may add an event; a viewer may not.
         $this->assertSame(1, preg_match('/const CAN = \{.*"add":"[^"]*add-event\?date=MONTH-DATE"\};/', $schedule));
-        $viewer = \App\Models\User::factory()->create(['email_verified_at' => now()]);
+        $viewer = User::factory()->create(['email_verified_at' => now()]);
         $this->role->users()->attach($viewer->id, ['level' => 'viewer']);
         $asViewer = $this->actingAs($viewer)->get(route('role.view_admin', ['subdomain' => $this->role->subdomain, 'tab' => 'schedule']))->assertOk()->getContent();
         $this->assertSame(1, preg_match('/const CAN = \{.*"add":null\};/', $asViewer));
@@ -514,7 +533,7 @@ class MonthGridTest extends TestCase
         // And the page does carry the theme's tokens on body, with a grey moved to ink.
         $this->role->forceFill(['accent_color' => '#888888'])->saveQuietly();
         $html = $this->get('/'.$this->role->subdomain.'?layout=calendar')->assertOk()->getContent();
-        $theme = \App\Utils\GuestTheme::fromAccent('#888888');
+        $theme = GuestTheme::fromAccent('#888888');
         $this->assertNotSame('#888888', strtolower($theme->fill), 'the theme does not fill with a mid grey');
         $this->assertStringContainsString('body { --es-accent: '.$theme->fill.';', $html);
         $this->assertStringContainsString('style="--es-accent: #888888;', $html, 'the wrapper still carries the accent as typed');
@@ -616,7 +635,7 @@ class MonthGridTest extends TestCase
         // A viewer marks their own days (CLAUDE.md: a viewer "marks their own days"), so the script,
         // the form and the Save button are given to one, and every day is a button that says its
         // state, their own marks drawn.
-        $viewer = \App\Models\User::factory()->create(['email_verified_at' => now()]);
+        $viewer = User::factory()->create(['email_verified_at' => now()]);
         $this->role->users()->attach($viewer->id, ['level' => 'viewer', 'dates_unavailable' => json_encode([now()->format('Y-m-d')])]);
         $asViewer = $this->actingAs($viewer)->get(route('role.view_admin', ['subdomain' => $this->role->subdomain, 'tab' => 'availability']))->assertOk()->getContent();
         $this->assertSame(1, substr_count($asViewer, 'data-availability-grid'));

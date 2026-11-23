@@ -409,6 +409,12 @@
                 <p>Under it there is a column for each area: the marketing site, schedule pages and the app, with the sign-up and log-in pages under the app while someone is there. Each area has its own colour and icon wherever a person or a page appears on this page. A column lists the pages people are on, busiest first, with how many are on each and who: a signed-in person's initials, or the flag of an anonymous visitor's country. Click an area's name to filter the page to it (the other areas stay, dimmed), a page's name to filter to that page, a face to open that person's row under Visitors, and the arrow to open the page itself. Beside a schedule's or an event's page, the sliders open that schedule in the admin panel. Views of calendars embedded on other websites are counted in a line at the bottom of the card.</p>
             </div>
             <div class="doc-field">
+                <h4>So far, against before</h4>
+                <p>A switch picks the period: <strong>Today</strong>, <strong>7 days</strong>, <strong>4 weeks</strong> or <strong>This month</strong>. The longer periods show each day as a column, with the same day of the period before as a grey mark across it, today's column lighter with its projected rest outlined, and set the period against the one before it cut at the same time of day (7 days also against a usual week, the mean of the four before). This month is set against last month up to the same day. Your choice is remembered in this browser.</p>
+                <p>Today shows visits and sign-ups as running totals through the day, in the time zone of your own <a href="{{ route('marketing.docs.account_settings') }}" class="doc-link">account settings</a>. Today's line runs to now, yesterday's is dashed, and a grey band shows a usual day of the same weekday: the lowest to the highest of that weekday in each of the four weeks before. From a quarter of the way through a usual day, with a week of counts behind it and at least 15 so far, a dotted line projects where today will end, with its range.</p>
+                <p>Under each chart, today is set against yesterday and against a usual day of this weekday, each until the same time, never against a whole day. The change is said in words: <strong>Up</strong> or <strong>Down</strong> when the gap is bigger than chance would make at these numbers, <strong>Maybe</strong> when it is close, <strong>About the same</strong> otherwise, and <strong>Too few to tell</strong> while both numbers are under 5. Visits are counted a few minutes behind the clock, so their comparisons are cut where the counting has reached. <strong>Show as a table</strong> lists the same numbers by the hour.</p>
+            </div>
+            <div class="doc-field">
                 <h4>Activity</h4>
                 <p>The last 24 hours of sign-ups, new schedules and events, orders, plan changes, claimed schedules, boosts, deleted schedules and accounts, and support chats, read from the <a href="#system-audit-log" class="doc-link">audit log</a>. A deleted account is listed without a name, with the number of schedules that went with it. The counts at the top (sign-ups, schedules, events, orders, and upgrades and deletions on a day that has them) are chips: click one to list only that kind, or <strong>All</strong> for everything. A blue dot beside the time marks an item from the last half hour. The arrow at the end of an item opens the public page of the event or schedule it is about. On a wide screen the list is as tall as Sign-ups beside it; when it holds more, it says how many and opens on a click.</p>
             </div>
@@ -418,7 +424,7 @@
             </div>
             <div class="doc-field">
                 <h4>Trends</h4>
-                <p>Counted when you scroll down to it. The last 24 hours by the hour, or the last 7 or 30 days by the day, each figure against the same span just before it, cut at the same time of day, all in the time zone of your own <a href="{{ route('marketing.docs.account_settings') }}" class="doc-link">account settings</a>, the one every time on the page uses. Page views and visits are drawn by area. Sign-ups, new schedules, new events and orders are counted as Activity counts them, from the audit log; over 24 hours they are the same live numbers as the Activity chips, for the same rolling day. Click a figure to draw it in the chart. The bar for the hour or day still under way is drawn lighter.</p>
+                <p>Counted when you scroll down to it. The last 24 hours by the hour, or the last 7 or 30 days by the day, each figure against the same span just before it, cut at the same time of day, all in the time zone of your own <a href="{{ route('marketing.docs.account_settings') }}" class="doc-link">account settings</a>, the one every time on the page uses. Page views and visits are drawn by area. Sign-ups, new schedules, new events and orders are counted as Activity counts them, from the audit log; over 24 hours they are the same live numbers as the Activity chips, for the same rolling day. Click a figure to draw it in the chart. The bar for the hour or day still under way is drawn lighter. Beside each figure, its change is said the way <strong>So far, against before</strong> says it: nothing while both numbers are under 5, a count such as +4 while the one before is under 20, a percentage above that, and in colour only when the change is bigger than chance.</p>
                 <p>Page views and visits are hourly totals, kept for about two months, that start counting on the day this version is installed. Until a range is covered the card says when counting began, and it shows a comparison only where it has the span before. Visitors are not added up across hours: telling one person seen in two hours from two people would mean keeping who they were. Admins are never counted in Trends, and neither is an embedded calendar.</p>
             </div>
             <div class="doc-field">
@@ -683,8 +689,8 @@
                 <p>The first page each sign-up landed on, with how many sign-ups it brought and what share of them saved a schedule, saved an event, added a ticket type and added a paid ticket.</p>
             </div>
             <div class="doc-field">
-                <h4>Homepage headline test</h4>
-                <p>eventschedule.com only. The headlines the marketing homepage is trying, with each one's visitors, click rate and sign-ups. <strong class="text-gray-900 dark:text-white">Reset stats</strong> starts a new round from zero.</p>
+                <h4>Homepage test</h4>
+                <p>eventschedule.com only. The headlines, or the two versions of the page, that the marketing homepage is trying, with each one's visitors, click rate and sign-ups. A test of two pages also shows how many of those sign-ups saved a schedule and an event, and is ended by hand on the page to keep. <strong class="text-gray-900 dark:text-white">Reset stats</strong> starts a new round from zero.</p>
             </div>
         </div>
 
@@ -1184,7 +1190,7 @@
             </svg>
             Settings (System)
         </h2>
-        <p class="text-gray-600 dark:text-gray-300 mb-6">The Settings page holds the handful of settings that apply to the whole installation. It is built from separate cards, each with its own Save button, and a card is only rendered when it can do something on this install. There are eight, and a plain selfhost sees four of them: Header / Footer Code, Event Schedule network, Platform currency and Realtime visitors, plus Accommodation affiliate when it is enabled. None of these settings can be changed while the install is in demo mode.</p>
+        <p class="text-gray-600 dark:text-gray-300 mb-6">The Settings page holds the handful of settings that apply to the whole installation. It is built from separate cards, each with its own Save button, and a card is only rendered when it can do something on this install. There are nine, and a plain selfhost sees five of them: Home schedule, Header / Footer Code, Event Schedule network, Platform currency and Realtime visitors, plus Accommodation affiliate when it is enabled. None of these settings can be changed while the install is in demo mode.</p>
 
         <x-doc-screenshot id="selfhost-admin--settings" alt="The admin Settings page, opening on the Header / Footer Code card" />
 
@@ -1198,6 +1204,11 @@
                     </tr>
                 </thead>
                 <tbody>
+                    <tr>
+                        <td><a href="#settings-home-schedule" class="doc-link">Home schedule</a></td>
+                        <td>Shows one schedule at your site's own address</td>
+                        <td>A selfhost install, once it has a schedule</td>
+                    </tr>
                     <tr>
                         <td><a href="#settings-header-footer" class="doc-link">Header / Footer Code</a></td>
                         <td>Injects your own code into every public guest page</td>
@@ -1242,6 +1253,15 @@
             </table>
         </div>
 
+        <h3 id="settings-home-schedule" class="doc-subheading">Home schedule</h3>
+        <p class="text-gray-600 dark:text-gray-300 mb-6">A selfhost install puts every schedule under a path, so a schedule called <code class="doc-inline-code">example</code> lives at <code class="doc-inline-code">https://events.example.com/example</code>. Most installs run one schedule, and the address people know is the bare one. Pick that schedule here and <code class="doc-inline-code">https://events.example.com</code> shows it, instead of the sign-in page.</p>
+        <ul class="doc-list mb-6">
+            <li><strong class="text-gray-900 dark:text-white">Everywhere it is named</strong> - the page's canonical address, share links, emails, QR codes, the sitemap and the <a href="#settings-network" class="doc-link">network</a> listing all use the site's own address.</li>
+            <li><strong class="text-gray-900 dark:text-white">What stays where it was</strong> - its events and sub-schedules keep their addresses under the path, and the old address of the schedule keeps working, so links already shared do not break.</li>
+            <li><strong class="text-gray-900 dark:text-white">Signing in</strong> - the site's address no longer opens the sign-in page, so you and your team sign in at <code class="doc-inline-code">/login</code>.</li>
+        </ul>
+        <p class="text-gray-600 dark:text-gray-300 mb-6">Choose <strong class="text-gray-900 dark:text-white">None</strong> to go back. If the chosen schedule is deleted, the address opens the sign-in page again on its own.</p>
+
         <h3 id="settings-header-footer" class="doc-subheading">Header and footer code</h3>
         <p class="text-gray-600 dark:text-gray-300 mb-6">This is where site-wide tracking such as <strong class="text-gray-900 dark:text-white">Google Tag Manager</strong> or Google Analytics goes.</p>
         <ul class="doc-list mb-6">
@@ -1259,14 +1279,14 @@
         <h3 id="settings-network" class="doc-subheading">Event Schedule network</h3>
         <p class="text-gray-600 dark:text-gray-300 mb-4">This card opts your installation into sharing its public events with the eventschedule.com listings. From top to bottom:</p>
         <ul class="doc-list mb-6">
-            <li><strong class="text-gray-900 dark:text-white">Where the install stands</strong> - once it has connected: pending review, approved with the number of events on the network and a link to them, or suspended, and when the last sync ran. A sync that failed is reported here too</li>
+            <li><strong class="text-gray-900 dark:text-white">Where the install stands</strong> - once it has connected: pending review, approved with the number of events on the network, a link to them and the visits the network sent to your pages in the last 30 days, or suspended, and when the last sync ran. A sync that failed is reported here too</li>
             <li><strong class="text-gray-900 dark:text-white">Share events with the network</strong> - the toggle itself. Turning it off withdraws the listings again</li>
             <li><strong class="text-gray-900 dark:text-white">Contact email</strong> - lets the moderators reach you with their decision and the steps to get listed</li>
             <li><strong class="text-gray-900 dark:text-white">Also list these schedules</strong> - the schedules you own that have not been listed yet, each with how many of its events would be shared, so switching sharing on and choosing what to share is one save</li>
             <li><strong class="text-gray-900 dark:text-white">The preview</strong> - exactly which schedules and events would be sent, each event marked sent, next sync, needs an image or not accepted, so nothing leaves your install unseen</li>
             <li><strong class="text-gray-900 dark:text-white">Two counts under the preview</strong> - why it may be shorter than you expect: schedules that have not verified an email address or phone number, and other owners' schedules that have not been listed yet, whose owners are asked on their dashboards</li>
         </ul>
-        <p class="text-gray-600 dark:text-gray-300 mb-6">See <a href="{{ route('marketing.docs.selfhost.federation') }}" class="doc-link">Federation</a> for the full picture.</p>
+        <p class="text-gray-600 dark:text-gray-300 mb-6">See <a href="{{ route('marketing.docs.selfhost.federation') }}" class="doc-link">The Event Schedule network</a> for the full picture.</p>
 
         <h3 id="settings-monetization" class="doc-subheading">Monetization</h3>
         <p class="text-gray-600 dark:text-gray-300 mb-6">This card configures advertising on free schedules: whether to show AdSense, the publisher and ad slot IDs, whether personalized ads are allowed, whether to run your own promotions marketplace, whether promotions take priority over AdSense, and the prices you charge per thousand impressions and per click. It stays hidden unless <code class="doc-inline-code">ADS_ENABLED=true</code> and the install is a multi-tenant hosted platform other than eventschedule.com, because a selfhosted install resolves every schedule to Enterprise and so has no free tier for an ad to appear on. See <a href="{{ route('marketing.docs.saas.monetization') }}" class="doc-link">Monetization</a> for what each setting does.</p>
@@ -1386,7 +1406,7 @@
             <li><strong class="text-gray-900 dark:text-white">Each install</strong> - its name, address and contact email, when it was last seen, its public schedules and a sample of the listings it would publish, so an approval is never made on a name alone</li>
             <li><strong class="text-gray-900 dark:text-white">Actions</strong> - <strong>Approve</strong>, after which the install's listings publish automatically, <strong>Suspend</strong>, which hides them, and <strong>Send welcome email</strong>. Ticking several installs applies one action to all of them</li>
         </ul>
-        <p class="text-gray-600 dark:text-gray-300">The <a href="{{ route('marketing.docs.selfhost.federation') }}" class="doc-link">Federation</a> guide describes the whole exchange from the selfhost side.</p>
+        <p class="text-gray-600 dark:text-gray-300">The <a href="{{ route('marketing.docs.selfhost.federation') }}" class="doc-link">Event Schedule network</a> guide describes the whole exchange from the selfhost side.</p>
     </section>
 
     <!-- System: Support (hosted only) -->

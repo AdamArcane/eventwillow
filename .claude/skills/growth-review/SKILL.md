@@ -133,6 +133,20 @@ Schema 9 also answers these directly:
   ```
 - `claims.claimable_with_contact` (schema 10): the placeholders the claim page and invitations can
   still reach. A stock, not what `claimed` came out of.
+- **The homepage page test (schema 29, from 2026-11-16):** `hero_test` now holds two homepages
+  under one headline, `home_full` (today's) and `home_light`, split evenly and ended by hand.
+  Read it only on its look dates, and decide on signups per visitor:
+
+  ```bash
+  jq '.hero_test | {phase, split, ended, p_light_better, started_at, looks, next_look,
+    rows: [.rows[] | {key, page, visitors, clicks, signups, saved_schedule, saved_event, signup_rate, schedule_rate}]}' $F
+  ```
+
+  At the first two looks it ends only on `p_light_better` of 0.97 or more, or 0.03 or less, with
+  400 visitors a page; the third look ends it, and between 0.05 and 0.95 the answer is "no
+  difference large enough to see", which leaves the choice to schedules per visitor and to the
+  user. Clicks are not comparable between the two pages. "Reading a page round" in
+  `docs/GROWTH_DATA.md` lists what skews it. `marketing_pages` is not split by arm.
 - `hero_test`: the homepage headline A/B test, per variant. `app:pull-growth` prints it under the
   KPI table; the full rows are:
 
@@ -191,6 +205,10 @@ paying, and schedules that newly sold.
   Deploys are manual, so a tag date only says the version existed by then.
 - Line `daily` up with those dates. Compare equal windows either side of a release, and say how
   many events each side holds.
+- A spike in signups (or in the admin dashboard's active users, which a signup week lifts for
+  seven days) is traced in `signup_sources` (schema 26): signups per day by referrer channel,
+  referrer domain, utm source and landing path, last 90 days. Set it beside the outreach log,
+  `~/.claude/plans/growth-outreach/log.tsv`, to name the post that caused it.
 
 ## 5. Discipline (each of these has been gotten wrong before)
 

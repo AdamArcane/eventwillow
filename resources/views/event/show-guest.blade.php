@@ -1,4 +1,12 @@
-<x-app-guest-layout :role="$role" :event="$event" :date="$date" :occurrence-date="$requestedOccurrence ?? null" :fonts="$fonts" :showMobileBackground="true" :otherRole="$otherRole" :ad-slot="true" :cart="true">
+{{-- $embedEvent: this event inside an embedded calendar (App\Support\EmbedEventView), on the
+     organizer's own website. The same page, as a signed-out visitor sees it (the controller
+     renders it so), with nothing that cannot work in a frame on another site: no form to buy or
+     sign up with (a cross-site frame has no session), no fan content, follow, polls or carpool, no
+     mailing list, no ads, cart or phone bar. Buying and registering open the event's page in a new
+     tab; every other link does too (<base target="_blank"> in the layout), but Back and the other
+     dates of a series, which stay in the frame. --}}
+@php $embedEvent = (bool) ($embedEvent ?? false); @endphp
+<x-app-guest-layout :role="$role" :event="$event" :date="$date" :occurrence-date="$requestedOccurrence ?? null" :fonts="$fonts" :showMobileBackground="true" :otherRole="$otherRole" :ad-slot="! $embedEvent" :example-bar="! $embedEvent" :cart="! $embedEvent" :embed-event="$embedEvent">
 
   <style {!! nonce_attr() !!}>
     /* GP Dropdown Menus */
@@ -20,6 +28,12 @@
        children of the row on a laptop, so its layout is what it was. */
     .gp-cta-wide { display: none; }
     @media (min-width: 640px) { .gp-cta-wide { display: contents; } }
+    @if ($embedEvent)
+    {{-- In a frame the row is the only one: there is no phone bar. --}}
+    .gp-cta-wide { display: contents; }
+    [data-embed-share][data-copied] .gk-share-icon { display: none; }
+    [data-embed-share]:not([data-copied]) .gk-share-done { display: none; }
+    @endif
   </style>
 
   <main>
@@ -102,7 +116,7 @@
 
     // The ride board. Decided up here because the row of laptop buttons below is hidden on a
     // phone unless this link is in it.
-    $carpoolRole = ($role->isPro() && $role->carpool_enabled) ? $role : null;
+    $carpoolRole = ($role->isPro() && $role->carpool_enabled && ! $embedEvent) ? $role : null;
     $showCarpool = $carpoolRole && (! $event->days_of_week || $date);
 
     // The organizer's gallery, when the event's owning schedule is on a paid plan. With no flyer
@@ -194,13 +208,16 @@
   <div class="h-[68px]"></div>
   @endif
 
+  @unless ($embedEvent)
   @include('role.partials.guest-banner', ['onEventPage' => true])
+  @endunless
 
   {{-- Built here rather than beside the breadcrumb that used to own it: the left column's
        list of other events renders FIRST and links to the same place, and one block is what
        keeps the two from drifting apart. --}}
   @php
-    $backUrl = route('role.view_guest', ['subdomain' => $role->subdomain]);
+    // A selfhost install's home schedule is at the site's own address (App\Support\HomeSchedule).
+    $backUrl = \App\Support\HomeSchedule::is($role) ? url('/') : route('role.view_guest', ['subdomain' => $role->subdomain]);
     $queryParams = [];
     if (request('category')) $queryParams['category'] = request('category');
     if (request('schedule')) $queryParams['schedule'] = request('schedule');
@@ -228,11 +245,41 @@
     if (!empty($queryParams)) {
       $backUrl .= '?' . http_build_query($queryParams);
     }
+    // In a frame, back to the calendar the frame came from, built from what it carried
+    // (never an address the request names).
+    if ($embedEvent) {
+      $backUrl = \App\Support\EmbedEventView::calendarUrl($role);
+    }
   @endphp
-  <div class="container mx-auto gk-event-page px-0 sm:px-5 pt-4 pb-20 sm:pb-8">
+  <div class="gk-stage gk-event-page {{ $embedEvent ? 'pb-6' : 'pb-20 sm:pb-8' }}" @if ($embedEvent) data-embed-root @endif>
+
     {{-- Two columns on a laptop; on a phone their children are dealt into one, in the order the
          kit's .gk-o rules give (partials/guest-kit-styles says why). --}}
     <div class="gk-event">
+    {{-- The way back, across the top of both columns (inside the grid, so a page with one
+         column lines it up with that column). --}}
+    <div class="gk-topline">
+        <nav id="gp-back-link" aria-label="Breadcrumb" class="gk-crumbs {{ $role->isRtl() ? 'rtl' : '' }}">
+          @if ($embedEvent)
+          {{-- Stays in the frame. embed-frame's script makes it the browser's Back when the frame
+               came from the calendar, which brings the list back where it was, and in the
+               overlay it closes the overlay. --}}
+          <a href="{{ $backUrl }}" target="_self" data-embed-back class="px-3 py-2 -mx-3 hover:underline hover:text-gray-700 dark:hover:text-gray-200">
+            {{ $role->isRtl() ? '→' : '←' }} {{ __('messages.embed_back_to_calendar') }}
+          </a>
+          @else
+          <a href="{{ $backUrl }}" class="px-3 py-2 -mx-3 hover:underline hover:text-gray-700 dark:hover:text-gray-200">
+            {{ $role->isRtl() ? '→' : '←' }} {{ $role->customLabel('back_to_schedule') }}
+          </a>
+          @endif
+          @if (auth()->user() && auth()->user()->canEditEvent($event))
+            <span>|</span>
+            <a href="{{ app_url(route('event.edit', ['subdomain' => $role->subdomain, 'hash' => App\Utils\UrlUtils::encodeId($event->id)], false)) }}" class="px-3 py-2 -mx-3 hover:underline hover:text-gray-700 dark:hover:text-gray-200">
+              {{ __('messages.edit_event') }}
+            </a>
+          @endif
+        </nav>
+    </div>
 
       {{-- LEFT COLUMN: the flyer, the performers, the venue --}}
       <div class="contents">
@@ -277,7 +324,7 @@
           $flyerSrcset = $event->imageVariantSrcset('default', true, pageWidth: true);
           $flyerSize = $event->imageSourceDimensions();
         @endphp
-        <div id="gp-flyer" class="gk-o1 bg-white/95 dark:bg-gray-900/95 backdrop-blur-sm sm:rounded-2xl overflow-hidden">
+        <div id="gp-flyer" class="gk-o1 gk-poster">
           <a href="{{ $event->flyer_image_url }}" data-lightbox-set="flyer" data-lightbox-index="0" class="block">
             <img src="{{ $event->getImageUrl(960, pageWidth: true) }}"
                  @if ($flyerSrcset) srcset="{{ $flyerSrcset }}" sizes="(min-width: 1024px) 380px, (min-width: 640px) calc(100vw - 40px), 100vw" @endif
@@ -300,7 +347,9 @@
         <script {!! nonce_attr() !!}>(window.EsLightboxSets = window.EsLightboxSets || {}).flyer = @json($flyerLightbox, JSON_UNESCAPED_UNICODE | JSON_HEX_TAG);</script>
         @endif
 
-        @if (! $hasTalentImage && ! $event->flyer_image_url)
+        {{-- With the performers drawn small in the words column (the lineup below), a page with
+             no flyer always gets a stand-in here, a performer's picture first. --}}
+        @if (! $event->flyer_image_url)
         @php
           // The schedule whose photo stands in: with no performer's photo on the page, the
           // venue's, else this one's. Event::pagePhotoRoles() lists them in the page's order, and
@@ -317,7 +366,7 @@
              No order class: on a phone a stand-in does not lead the page. It is the schedule's
              square profile picture, not this event's, and it pushed the title and the date to
              the second screen; it comes with the other cards of this column, after the facts. --}}
-        <div id="gp-event-hero-image" class="bg-white/95 dark:bg-gray-900/95 backdrop-blur-sm sm:rounded-2xl overflow-hidden">
+        <div id="gp-event-hero-image" class="gk-poster">
             <img src="{{ $fallbackImageRole->getProfileImageUrl(960) }}"
                  @if ($fallbackImageSrcset) srcset="{{ $fallbackImageSrcset }}" sizes="(min-width: 1024px) 380px, (min-width: 640px) calc(100vw - 40px), 100vw" @endif
                  alt="{{ $eventName }}"
@@ -327,12 +376,1225 @@
         @endif
         @endif
 
+        {{-- Venue card. Not for a venue with nothing to say beyond the name and address the facts
+             row already gives (no picture, story, links or ways to reach it): an empty card was
+             the only thing in the picture column of a sparse event. Kept while it carries the
+             calendar links a ticketed event falls back on. --}}
+        @php
+          $venueBare = $event->venue
+              && ! $event->venue->headerImageUrl() && ! $event->venue->profile_image_url
+              && ! $event->venue->textInLanguage('description_html', $displayLang)
+              && ! $event->venue->decodeLinks('social_links') && ! $event->venue->website
+              && ! ($event->venue->email && $event->venue->show_email) && ! $event->venue->showsPhone()
+              && ! (! $event->is_draft && $event->tickets_enabled)
+              && ! ($event->venue->formatted_address && config('services.google.maps') && ! request()->attributes->get('custom_domain_host'));
+        @endphp
+        @if ($event->venue && ($event->venue->name || $event->venue->formatted_address) && ! $venueBare)
+        @php
+          // As for the talent cards above: the header the venue's own page shows, or none.
+          $venueHeaderUrl = $event->venue->headerImageUrl(960);
+          $hasVenueHeader = (bool) $venueHeaderUrl;
+        @endphp
+        <div id="gp-venue" class="gk-card z-20 relative {{ $role->isRtl() ? 'rtl' : '' }}">
+          @if ($hasVenueHeader)
+            <div class="overflow-hidden rounded-t-2xl">
+              @php $venueHeaderSize = $event->venue->headerImageDimensions(); @endphp
+              <img class="block max-h-40 w-full object-cover" src="{{ $venueHeaderUrl }}" @if ($venueHeaderSize) width="{{ $venueHeaderSize[0] }}" height="{{ $venueHeaderSize[1] }}" @endif alt="{{ $event->venue->nameInLanguage($displayLang) }}" loading="lazy" decoding="async"/>
+            </div>
+          @endif
+          <div class="p-5 relative z-10">
+            <div class="flex flex-col gap-2">
+              {{-- The venue as the mock draws it: its picture small beside its name, the address
+                   under the name. Never the picture overlapping the cover. --}}
+              <div class="gk-venue-row">
+              @if ($event->venue->profile_image_url)
+                <img class="gk-venue-logo" src="{{ $event->venue->getProfileImageUrl(\App\Utils\ImageUtils::VARIANT_WIDTH) }}" alt="" loading="lazy" decoding="async"/>
+              @endif
+              <div class="gk-venue-id">
+              @if ($event->venue->name)
+                @if ($event->venue->isClaimed())
+                  @php
+                    $venuePanelUrl = $event->venue->getGuestUrl(true);
+                  @endphp
+                  <a href="{{ $venuePanelUrl }}" class="group inline-flex items-center gap-2 w-fit hover:opacity-80 transition-opacity duration-200 {{ $role->isRtl() ? 'rtl' : '' }}">
+                    <span class="text-base leading-snug font-semibold text-gray-900 dark:text-gray-100 group-hover:underline" style="font-family: '{{ str_replace('_', ' ', $event->venue->font_family) }}', sans-serif;">
+                      {{ $event->venue->nameInLanguage($displayLang) }}
+                    </span>
+                    <svg class="w-5 h-5 fill-gray-900 dark:fill-gray-100 opacity-70 group-hover:opacity-100 transition-opacity {{ $role->isRtl() ? 'scale-x-[-1]' : '' }}" viewBox="0 0 24 24" aria-hidden="true">
+                      <path d="M8.59,16.58L13.17,12L8.59,7.41L10,6L16,12L10,18L8.59,16.58Z"/>
+                    </svg>
+                  </a>
+                @else
+                  <p class="text-base leading-snug font-semibold text-gray-900 dark:text-gray-100" style="font-family: '{{ str_replace('_', ' ', $event->venue->font_family) }}', sans-serif;">
+                    {{ $event->venue->nameInLanguage($displayLang) }}
+                  </p>
+                @endif
+              @else
+                <p class="text-base leading-snug font-semibold text-gray-900 dark:text-gray-100">
+                  {{ $event->venue->shortAddress() }}
+                </p>
+              @endif
+              @if ($event->venue->name && $event->venue->shortAddress())
+                <span class="gk-venue-addr">{{ $event->venue->shortAddress() }}</span>
+              @endif
+              </div>
+              </div>
+              @if ($event->venue->textInLanguage("description_html", $displayLang))
+                @php $venueDir = content_dir_for_language($event->venue->textInLanguage("description_html", $displayLang), $displayLang); @endphp
+                {{-- demoteH1(): the event name is the page's one <h1>, so the venue's "# Heading" prints as an <h2>. --}}
+                <div x-data="{ expanded: false, needsExpand: false }" x-init="$nextTick(() => { let el = $refs.collapsed; needsExpand = el.scrollHeight > el.clientHeight })">
+                  <div x-show="!expanded" x-ref="collapsed" class="text-sm text-gray-700 dark:text-gray-300 line-clamp-3 custom-content {{ $venueDir === 'rtl' ? 'rtl' : '' }}" dir="{{ $venueDir }}">
+                    {!! \App\Utils\UrlUtils::convertUrlsToLinks(\App\Utils\MarkdownUtils::demoteH1($event->venue->textInLanguage("description_html", $displayLang))) !!}
+                  </div>
+                  <div x-show="expanded" x-cloak class="text-sm text-gray-700 dark:text-gray-300 custom-content {{ $venueDir === 'rtl' ? 'rtl' : '' }}" dir="{{ $venueDir }}">
+                    {!! \App\Utils\UrlUtils::convertUrlsToLinks(\App\Utils\MarkdownUtils::demoteH1($event->venue->textInLanguage("description_html", $displayLang))) !!}
+                  </div>
+                  <button x-show="!expanded && needsExpand" :aria-expanded="expanded" @click="expanded = true" class="text-sm font-medium hover:underline mt-1 text-blue-600 dark:text-blue-400">
+                    {{ $role->customLabel('read_more') }}
+                  </button>
+                  <button x-show="expanded" x-cloak :aria-expanded="expanded" @click="expanded = false" class="text-sm font-medium hover:underline mt-1 text-blue-600 dark:text-blue-400">
+                    {{ __('messages.show_less') }}
+                  </button>
+                </div>
+              @endif
+              {{-- Only when there is something to put in it: empty, its margin left a gap above the icons. --}}
+              @if (($event->venue->email && $event->venue->show_email) || $event->venue->showsPhone() || $event->venue->website)
+              <div class="flex flex-col gap-4 mt-2">
+                @if ($event->venue->email && $event->venue->show_email)
+                <div class="flex flex-row gap-2 items-center relative duration-300 text-gray-700 dark:text-gray-300 fill-gray-700 dark:fill-gray-300 {{ $role->isRtl() ? 'rtl' : '' }}">
+                  <svg width="24" height="24" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
+                    <path fill-rule="evenodd" clip-rule="evenodd" d="M3.17157 5.17157C2 6.34315 2 8.22876 2 12C2 15.7712 2 17.6569 3.17157 18.8284C4.34315 20 6.22876 20 10 20H14C17.7712 20 19.6569 20 20.8284 18.8284C22 17.6569 22 15.7712 22 12C22 8.22876 22 6.34315 20.8284 5.17157C19.6569 4 17.7712 4 14 4H10C6.22876 4 4.34315 4 3.17157 5.17157ZM18.5762 7.51986C18.8413 7.83807 18.7983 8.31099 18.4801 8.57617L16.2837 10.4066C15.3973 11.1452 14.6789 11.7439 14.0448 12.1517C13.3843 12.5765 12.7411 12.8449 12 12.8449C11.2589 12.8449 10.6157 12.5765 9.95518 12.1517C9.32112 11.7439 8.60271 11.1452 7.71636 10.4066L5.51986 8.57617C5.20165 8.31099 5.15866 7.83807 5.42383 7.51986C5.68901 7.20165 6.16193 7.15866 6.48014 7.42383L8.63903 9.22291C9.57199 10.0004 10.2197 10.5384 10.7666 10.8901C11.2959 11.2306 11.6549 11.3449 12 11.3449C12.3451 11.3449 12.7041 11.2306 13.2334 10.8901C13.7803 10.5384 14.428 10.0004 15.361 9.22291L17.5199 7.42383C17.8381 7.15866 18.311 7.20165 18.5762 7.51986Z" />
+                  </svg>
+                  <a href="mailto:{{ $event->venue->email }}" class="text-sm hover:underline">{{ $event->venue->email }}</a>
+                </div>
+                @endif
+                @if ($event->venue->showsPhone())
+                <div class="flex flex-row gap-2 items-center relative duration-300 text-gray-700 dark:text-gray-300 fill-gray-700 dark:fill-gray-300 {{ $role->isRtl() ? 'rtl' : '' }}">
+                  <svg width="24" height="24" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
+                    <path d="M6.62 10.79c1.44 2.83 3.76 5.14 6.59 6.59l2.2-2.2c.27-.27.67-.36 1.02-.24 1.12.37 2.33.57 3.57.57.55 0 1 .45 1 1V20c0 .55-.45 1-1 1-9.39 0-17-7.61-17-17 0-.55.45-1 1-1h3.5c.55 0 1 .45 1 1 0 1.25.2 2.45.57 3.57.11.35.03.74-.25 1.02l-2.2 2.2z"/>
+                  </svg>
+                  {{-- A number reads left to right in every language: in a Hebrew card the + moved to its end. --}}
+                  <a href="tel:{{ $event->venue->phone }}" class="text-sm hover:underline"><bdi dir="ltr">{{ $event->venue->phone }}</bdi></a>
+                </div>
+                @endif
+                @if ($event->venue->website)
+                <div class="flex flex-row gap-2 items-center relative duration-300 text-gray-700 dark:text-gray-300 fill-gray-700 dark:fill-gray-300 min-w-0 {{ $role->isRtl() ? 'rtl' : '' }}">
+                  <svg width="24" height="24" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg" aria-hidden="true" class="flex-shrink-0">
+                    <path fill-rule="evenodd" clip-rule="evenodd" d="M2.02783 11.25C2.41136 6.07745 6.72957 2 12.0001 2C11.1693 2 10.4295 2.36421 9.82093 2.92113C9.21541 3.47525 8.70371 4.24878 8.28983 5.16315C7.87352 6.08292 7.55013 7.15868 7.33126 8.32611C7.1558 9.26194 7.04903 10.2485 7.01344 11.25H2.02783ZM2.02783 12.75H7.01344C7.04903 13.7515 7.1558 14.7381 7.33126 15.6739C7.55013 16.8413 7.87351 17.9171 8.28983 18.8368C8.70371 19.7512 9.21541 20.5247 9.82093 21.0789C10.4295 21.6358 11.1693 22 12.0001 22C6.72957 22 2.41136 17.9226 2.02783 12.75Z" />
+                    <path d="M12.0001 3.39535C11.7251 3.39535 11.3699 3.51236 10.9567 3.89042C10.5406 4.27126 10.1239 4.86815 9.75585 5.68137C9.3902 6.4892 9.09329 7.46441 8.88897 8.55419C8.72806 9.41242 8.62824 10.3222 8.59321 11.25H15.4071C15.372 10.3222 15.2722 9.41242 15.1113 8.5542C14.907 7.46441 14.6101 6.48921 14.2444 5.68137C13.8763 4.86815 13.4597 4.27126 13.0435 3.89042C12.6304 3.51236 12.2751 3.39535 12.0001 3.39535Z" />
+                    <path d="M8.88897 15.4458C9.09329 16.5356 9.3902 17.5108 9.75585 18.3186C10.1239 19.1319 10.5406 19.7287 10.9567 20.1096C11.3698 20.4876 11.7251 20.6047 12.0001 20.6047C12.2751 20.6047 12.6304 20.4876 13.0435 20.1096C13.4597 19.7287 13.8763 19.1319 14.2444 18.3186C14.6101 17.5108 14.907 16.5356 15.1113 15.4458C15.2722 14.5876 15.372 13.6778 15.4071 12.75H8.59321C8.62824 13.6778 8.72806 14.5876 8.88897 15.4458Z" />
+                    <path d="M12.0001 2C12.831 2 13.5708 2.36421 14.1793 2.92113C14.7849 3.47525 15.2966 4.24878 15.7104 5.16315C16.1267 6.08292 16.4501 7.15868 16.669 8.32612C16.8445 9.26194 16.9512 10.2485 16.9868 11.25H21.9724C21.5889 6.07745 17.2707 2 12.0001 2Z" />
+                    <path d="M16.669 15.6739C16.4501 16.8413 16.1267 17.9171 15.7104 18.8368C15.2966 19.7512 14.7849 20.5247 14.1793 21.0789C13.5708 21.6358 12.831 22 12.0001 22C17.2707 22 21.5889 17.9226 21.9724 12.75H16.9868C16.9512 13.7515 16.8445 14.7381 16.669 15.6739Z" />
+                  </svg>
+                  {{-- Linked only through safeHref(): the website is free text, and a javascript:
+                       value would run on this page. Without a safe link it reads as text. --}}
+                  @if ($venueWebsiteHref = \App\Utils\UrlUtils::safeHref($event->venue->website))
+                  <x-link href="{{ $venueWebsiteHref }}" target="_blank" :nofollow="true" class="text-sm text-gray-700 dark:text-gray-300 min-w-0 break-all">
+                    {{ App\Utils\UrlUtils::shown($event->venue->website) }}
+                  </x-link>
+                  @else
+                  <span class="text-sm text-gray-700 dark:text-gray-300 min-w-0 break-all">{{ App\Utils\UrlUtils::shown($event->venue->website) }}</span>
+                  @endif
+                </div>
+                @endif
+              </div>
+              @endif
+
+              @if ($event->venue->social_links)
+              <div id="gp-venue-socials" class="flex flex-row flex-wrap gap-2 items-center mt-3 {{ $role->isRtl() ? 'rtl' : '' }}">
+                @foreach ($event->venue->decodeLinks('social_links') as $link)
+                  {{-- No icon for a link a browser should not open - see Role::socialLinkHref(). --}}
+                  @if ($venueLinkHref = $event->venue->socialLinkHref($link, $loop->index))
+                  @php
+                    // A round icon, as the venue card always had; the platform (or a website's
+                    // own domain) is its name for a reader and its tooltip.
+                    $venueLinkPlatform = \App\Utils\UrlUtils::detectPlatform($link->url);
+                    $venueLinkWord = $venueLinkPlatform === 'website'
+                        ? (\App\Utils\UrlUtils::linkHost($venueLinkHref) ?: \App\Utils\UrlUtils::clean($link->url))
+                        : \App\Utils\UrlUtils::getPlatformBrandName($venueLinkPlatform);
+                  @endphp
+                  <a
+                    href="{{ $venueLinkHref }}" target="_blank" rel="noopener noreferrer nofollow"
+                    class="gk-icon-link"
+                    title="{{ $venueLinkWord }}"
+                    aria-label="{{ $venueLinkWord }}"
+                    >
+                    <x-url-icon class="w-5 h-5" color="currentColor">
+                      {{ \App\Utils\UrlUtils::clean($link->url) }}
+                    </x-url-icon>
+                  </a>
+                  @endif
+                @endforeach
+              </div>
+              @endif
+
+              {{-- Calendar links dropdown (inside venue card). Not plan-gated: this is the quiet
+                   fallback a visitor sees when an event is not selling, so it has to render for a
+                   free ticketed event too - otherwise a free schedule at its monthly allowance shows
+                   a page with no buy button AND no calendar link, which reads as broken. --}}
+              @if (!$event->is_draft && $event->tickets_enabled)
+              <div class="relative mt-4">
+                <button type="button"
+                    class="gk-card-btn calendar-card-toggle inline-flex justify-center gap-x-1.5 px-6 py-3 text-base font-semibold"
+                    aria-expanded="true" aria-haspopup="true">
+                  {{ $role->customLabel('add_to_calendar') }}
+                  <svg class="-me-1 h-5 w-5" viewBox="0 0 20 20" fill="currentColor" aria-hidden="true">
+                    <path fill-rule="evenodd" d="M5.23 7.21a.75.75 0 011.06.02L10 11.168l3.71-3.938a.75.75 0 111.08 1.04l-4.25 4.5a.75.75 0 01-1.08 0l-4.25-4.5a.75.75 0 01.02-1.06z" clip-rule="evenodd" />
+                  </svg>
+                </button>
+
+                {{-- Calendar dropdown menu --}}
+                <div id="calendar-card-dropdown" class="pop-up-menu gp-dropdown hidden absolute top-full {{ $role->isRtl() ? 'end-0 origin-top-right' : 'start-0 origin-top-left' }} z-50 mt-2 w-56 rounded-xl bg-white shadow-lg focus:outline-none" role="menu" aria-orientation="vertical" tabindex="-1">
+                  <div class="py-1 stop-propagation" role="none">
+                    <a data-funnel="calendar_add" href="{{ $event->getGoogleCalendarUrl($date) }}" target="_blank" rel="noopener noreferrer" class="group flex items-center px-4 py-3 text-sm text-gray-700 dark:text-gray-200 rounded-lg transition-all duration-200 gp-dropdown-item" role="menuitem" tabindex="-1">
+                      <svg class="me-3 h-5 w-5 text-gray-400 group-hover:text-gray-500" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
+                        <path d="M21.35,11.1H12.18V13.83H18.69C18.36,17.64 15.19,19.27 12.19,19.27C8.36,19.27 5,16.25 5,12C5,7.9 8.2,4.73 12.2,4.73C15.29,4.73 17.1,6.7 17.1,6.7L19,4.72C19,4.72 16.56,2 12.1,2C6.42,2 2.03,6.8 2.03,12C2.03,17.05 6.16,22 12.25,22C17.6,22 21.5,18.33 21.5,12.91C21.5,11.76 21.35,11.1 21.35,11.1V11.1Z" />
+                      </svg>
+                      Google Calendar
+                    </a>
+                    <a data-funnel="calendar_add" href="{{ $event->getAppleCalendarUrl($date, $role->subdomain) }}{{ $role->langQuerySuffix($displayLang) }}" class="group flex items-center px-4 py-3 text-sm text-gray-700 dark:text-gray-200 rounded-lg transition-all duration-200 gp-dropdown-item" role="menuitem" tabindex="-1">
+                      <svg class="me-3 h-5 w-5 text-gray-400 group-hover:text-gray-500" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
+                        <path d="M18.71,19.5C17.88,20.74 17,21.95 15.66,21.97C14.32,22 13.89,21.18 12.37,21.18C10.84,21.18 10.37,21.95 9.1,22C7.79,22.05 6.8,20.68 5.96,19.47C4.25,17 2.94,12.45 4.7,9.39C5.57,7.87 7.13,6.91 8.82,6.88C10.1,6.86 11.32,7.75 12.11,7.75C12.89,7.75 14.37,6.68 15.92,6.84C16.57,6.87 18.39,7.1 19.56,8.82C19.47,8.88 17.39,10.1 17.41,12.63C17.44,15.65 20.06,16.66 20.09,16.67C20.06,16.74 19.67,18.11 18.71,19.5M13,3.5C13.73,2.67 14.94,2.04 15.94,2C16.07,3.17 15.6,4.35 14.9,5.19C14.21,6.04 13.07,6.7 11.95,6.61C11.8,5.46 12.36,4.26 13,3.5Z" />
+                      </svg>
+                      Apple Calendar
+                    </a>
+                    <a data-funnel="calendar_add" href="{{ $event->getMicrosoftCalendarUrl($date) }}" target="_blank" rel="noopener noreferrer" class="group flex items-center px-4 py-3 text-sm text-gray-700 dark:text-gray-200 rounded-lg transition-all duration-200 gp-dropdown-item" role="menuitem" tabindex="-1">
+                      <svg class="me-3 h-5 w-5 text-gray-400 group-hover:text-gray-500" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
+                        <path d="M2,3H11V12H2V3M11,22H2V13H11V22M21,3V12H12V3H21M21,22H12V13H21V22Z" />
+                      </svg>
+                      Microsoft Outlook
+                    </a>
+                  </div>
+                </div>
+              </div>
+              @endif
+            </div>
+          </div>
+          @if ($event->venue->formatted_address && config('services.google.maps') && !request()->attributes->get('custom_domain_host'))
+          <div id="gp-venue-map" class="overflow-hidden sm:rounded-b-2xl" style="height: 200px;">
+            {{-- Interactive Google Maps only once the visitor wants it (components/consent-embed);
+                 until then the static map this install proxies, which sends Google nothing. --}}
+            <x-consent-embed
+                kind="map"
+                :src="'https://www.google.com/maps/embed/v1/place?key='.config('services.google.maps').'&q='.($event->venue->google_place_id ? 'place_id:'.$event->venue->google_place_id : urlencode($event->venue->bestAddress()))"
+                :title="__('messages.map_of_venue', ['venue' => $event->venue->nameInLanguage($displayLang)])"
+                frame-class="w-full border-0"
+                frame-style="height: 200px;"
+                :poster="config('services.google.backend') && $event->venue->geo_lat ? route('map.image', ['id' => \App\Utils\UrlUtils::encodeId($event->venue->id)]) : null" />
+          </div>
+          @elseif ($event->venue->formatted_address && config('services.google.backend') && $event->venue->geo_lat)
+          <div id="gp-venue-map" class="overflow-hidden sm:rounded-b-2xl" style="height: 200px;">
+            <a href="https://www.google.com/maps/search/?api=1&query={{ $event->venue->geo_lat }},{{ $event->venue->geo_lon }}" target="_blank" rel="noopener noreferrer">
+              <img src="{{ route('map.image', ['id' => \App\Utils\UrlUtils::encodeId($event->venue->id)]) }}"
+                   alt="{{ $event->venue->bestAddress() }}"
+                   width="600" height="200"
+                   loading="lazy"
+                   style="width: 100%; height: 200px; object-fit: cover;">
+            </a>
+          </div>
+          @endif
+        </div>
+        @endif
+
+        {{-- Accommodation near the venue. A sibling of the venue card rather than a child of
+             it: the card's last element carries sm:rounded-b-2xl, so appending inside would
+             break that edge, and "where to stay" is a different subject that wants its own
+             heading and landmark. Its own gate is the venue's coordinates, which is not the
+             same predicate as the card's formatted_address. --}}
+        <x-stay22-map :role="$role" :event="$event" :date="$date" :accent-color="$accentColor" />
+
+        {{-- Calendar links dropdown (fallback when no venue). Not plan-gated, same reason as the
+             copy inside the venue card above. --}}
+        @if (!$event->is_draft && !($event->venue && ($event->venue->name || $event->venue->formatted_address)) && $event->tickets_enabled)
+        <div class="relative {{ $role->isRtl() ? 'rtl' : '' }}">
+          <button type="button"
+              class="gk-card-btn calendar-card-toggle inline-flex justify-center gap-x-1.5 px-6 py-3 text-base font-semibold"
+              aria-expanded="true" aria-haspopup="true">
+            {{ $role->customLabel('add_to_calendar') }}
+            <svg class="-me-1 h-5 w-5" viewBox="0 0 20 20" fill="currentColor" aria-hidden="true">
+              <path fill-rule="evenodd" d="M5.23 7.21a.75.75 0 011.06.02L10 11.168l3.71-3.938a.75.75 0 111.08 1.04l-4.25 4.5a.75.75 0 01-1.08 0l-4.25-4.5a.75.75 0 01.02-1.06z" clip-rule="evenodd" />
+            </svg>
+          </button>
+
+          {{-- Calendar dropdown menu --}}
+          <div id="calendar-card-dropdown" class="pop-up-menu gp-dropdown hidden absolute top-full {{ $role->isRtl() ? 'end-0 origin-top-right' : 'start-0 origin-top-left' }} z-50 mt-2 w-56 rounded-xl bg-white shadow-lg focus:outline-none" role="menu" aria-orientation="vertical" tabindex="-1">
+            <div class="py-1 stop-propagation" role="none">
+              <a data-funnel="calendar_add" href="{{ $event->getGoogleCalendarUrl($date) }}" target="_blank" rel="noopener noreferrer" class="group flex items-center px-4 py-3 text-sm text-gray-700 dark:text-gray-200 rounded-lg transition-all duration-200 gp-dropdown-item" role="menuitem" tabindex="-1">
+                <svg class="me-3 h-5 w-5 text-gray-400 group-hover:text-gray-500" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
+                  <path d="M21.35,11.1H12.18V13.83H18.69C18.36,17.64 15.19,19.27 12.19,19.27C8.36,19.27 5,16.25 5,12C5,7.9 8.2,4.73 12.2,4.73C15.29,4.73 17.1,6.7 17.1,6.7L19,4.72C19,4.72 16.56,2 12.1,2C6.42,2 2.03,6.8 2.03,12C2.03,17.05 6.16,22 12.25,22C17.6,22 21.5,18.33 21.5,12.91C21.5,11.76 21.35,11.1 21.35,11.1V11.1Z" />
+                </svg>
+                Google Calendar
+              </a>
+              <a data-funnel="calendar_add" href="{{ $event->getAppleCalendarUrl($date, $role->subdomain) }}{{ $role->langQuerySuffix($displayLang) }}" class="group flex items-center px-4 py-3 text-sm text-gray-700 dark:text-gray-200 rounded-lg transition-all duration-200 gp-dropdown-item" role="menuitem" tabindex="-1">
+                <svg class="me-3 h-5 w-5 text-gray-400 group-hover:text-gray-500" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
+                  <path d="M18.71,19.5C17.88,20.74 17,21.95 15.66,21.97C14.32,22 13.89,21.18 12.37,21.18C10.84,21.18 10.37,21.95 9.1,22C7.79,22.05 6.8,20.68 5.96,19.47C4.25,17 2.94,12.45 4.7,9.39C5.57,7.87 7.13,6.91 8.82,6.88C10.1,6.86 11.32,7.75 12.11,7.75C12.89,7.75 14.37,6.68 15.92,6.84C16.57,6.87 18.39,7.1 19.56,8.82C19.47,8.88 17.39,10.1 17.41,12.63C17.44,15.65 20.06,16.66 20.09,16.67C20.06,16.74 19.67,18.11 18.71,19.5M13,3.5C13.73,2.67 14.94,2.04 15.94,2C16.07,3.17 15.6,4.35 14.9,5.19C14.21,6.04 13.07,6.7 11.95,6.61C11.8,5.46 12.36,4.26 13,3.5Z" />
+                </svg>
+                Apple Calendar
+              </a>
+              <a data-funnel="calendar_add" href="{{ $event->getMicrosoftCalendarUrl($date) }}" target="_blank" rel="noopener noreferrer" class="group flex items-center px-4 py-3 text-sm text-gray-700 dark:text-gray-200 rounded-lg transition-all duration-200 gp-dropdown-item" role="menuitem" tabindex="-1">
+                <svg class="me-3 h-5 w-5 text-gray-400 group-hover:text-gray-500" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
+                  <path d="M2,3H11V12H2V3M11,22H2V13H11V22M21,3V12H12V3H21M21,22H12V13H21V22Z" />
+                </svg>
+                Microsoft Outlook
+              </a>
+            </div>
+          </div>
+        </div>
+        @endif
+
+        {{-- The schedule's other upcoming events carry on down this column, as they always
+             did (event/partials/more-events says what changed about how). --}}
+
+        </div>
+      </div>
+
+      @php
+          // ONE eligibility decision for the interest capture, shared by the card and by every
+          // link that points at it. It used to live only inside the partial, so the two
+          // Add-to-Calendar rows were gated on $showCalendarPopup while the card they pointed at
+          // ALSO refused on unlisted, cancelled, hidden, password-protected, demo and past events -
+          // and on a cancelled event, where the mobile sheet definitely renders, the menu offered
+          // "Tell me when tickets go on sale" and clicking it did nothing.
+          //
+          // Mirrors the noindex conditions in layouts/app-guest.blade.php:71 plus the guards the
+          // checkout opt-in already carries. Anything not publicly and durably visible has no
+          // business collecting an address against it.
+          //
+          // The event-level half, including the owner's switch, is Event::offersInterestCapture(),
+          // which EventInterestController::store() calls too. The switch it reads is the event
+          // CREATOR's, not $role's: the list and its emails belong to the creator, and this page
+          // is often not the creator's (a claimed talent's subdomain is the canonical URL).
+          $showInterestCapture = ! request()->embed
+              && ! request('graphic')
+              && $event->exists
+              && $event->offersInterestCapture()
+              && ! is_demo_role($role);
+
+          if ($showInterestCapture) {
+              // Nothing to promise about a date that has already gone. Mirrors canAcceptRsvp()'s
+              // check: end of the occurrence's day AT THE VENUE, because Carbon::parse() without
+              // the zone would use the app timezone and call a 9pm New York show over an hour
+              // before doors. A dateless event is never past.
+              if (\App\Models\Event::isOccurrenceDate($date ?? null)) {
+                  $showInterestCapture = ! \Carbon\Carbon::parse($date, $event->scheduleTimezone())->endOfDay()->isPast();
+              } elseif ($event->starts_at) {
+                  $showInterestCapture = ! $event->getEndDateTime(null, true)->endOfDay()->isPast();
+              }
+          }
+      @endphp
+
+      {{-- RIGHT COLUMN: the facts and the button, the form, the story --}}
+      <div class="gk-event-col gk-event-main">
+        <div id="gp-event-details" class="gk-o2 gk-sec gk-details z-10">
+
+
+        @php
+            $translateMode = showing_translation($role);
+        @endphp
+
+        {{-- The head: a line saying when in the schedule's colour, the name, the short
+             description. The facts row below says it all again in full. --}}
+        @php
+          $headDt = $event->getStartDateTime($date, true, $event->scheduleTimezone());
+          $headHasTime = strlen((string) $event->starts_at) > 10;
+          $headYear = $headDt->year !== \Carbon\Carbon::now($event->scheduleTimezone())->year;
+        @endphp
+        <div class="gk-ev-head">
+        <p class="gk-dateline" data-event-dateline>
+          <span>{{ $headDt->translatedFormat('l') }}</span><span class="gk-dateline-dot" aria-hidden="true">·</span><span>{{ $headDt->translatedFormat($headYear ? 'M j, Y' : 'M j') }}</span>@if ($headHasTime)<span class="gk-dateline-dot" aria-hidden="true">·</span><bdi dir="ltr">{{ $headDt->format(get_use_24_hour_time($role) ? 'H:i' : 'g:i A') }}</bdi>@endif
+        </p>
+        {{-- Event title --}}
+        <h1
+          id="gp-event-title"
+          @if ($embedEvent) tabindex="-1" data-embed-heading @endif
+          class="gk-title {{ mb_strlen($eventName) > 64 ? 'gk-title-s' : (mb_strlen($eventName) > 36 ? 'gk-title-m' : '') }} {{ $role->isRtl() ? 'rtl text-right' : '' }}"
+          dir="{{ content_dir_for_language($eventName, $displayLang) }}"
+        >
+          {!! str_replace(' , ', '<br>', e($eventName)) !!}
+          @if ($event->isPasswordProtected())
+            <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" class="inline-block w-8 h-8 text-gray-400 ms-2 align-[-0.15em]"><path stroke-linecap="round" stroke-linejoin="round" d="M16.5 10.5V6.75a4.5 4.5 0 10-9 0v3.75m-.75 11.25h10.5a2.25 2.25 0 002.25-2.25v-6.75a2.25 2.25 0 00-2.25-2.25H6.75a2.25 2.25 0 00-2.25 2.25v6.75a2.25 2.25 0 002.25 2.25z" /></svg>
+          @endif
+        </h1>
+
+        {{-- Short description --}}
+        @if ($eventShortDescription)
+        <p id="gp-event-short-description" class="gk-subtitle {{ $role->isRtl() ? 'rtl text-right' : '' }}"
+          dir="{{ content_dir_for_language($eventShortDescription, $displayLang) }}">
+          {{ $eventShortDescription }}
+        </p>
+        @endif
+        </div>
+
+        {{-- When. The day in the tile, then what a visitor has to know to be there: the year
+             when it is not this one, the hours with the zone they are in, how it repeats and the
+             next days it is on.
+
+             A show that runs past midnight is one night, not two days. Event::isMultiDay() is
+             true the moment an event crosses midnight, so a 10 PM to 2 AM show was drawn as
+             "16-17" with a date range; is_multi_day (a day or longer) is what a range is for. --}}
+        @php
+          // Venue-local: this feeds the machine-readable <time datetime> attribute below.
+          $startDt = $event->getStartDateTime($date, true, $event->scheduleTimezone());
+          $manyDays = (bool) $event->is_multi_day;
+          $endDt = $event->duration > 0 ? (clone $startDt)->addMinutes($event->durationInMinutes()) : null;
+          $use24 = get_use_24_hour_time($role);
+          $otherYear = $startDt->year !== \Carbon\Carbon::now($event->scheduleTimezone())->year;
+          // A date with no time of day has no zone worth naming. Carbon prints an offset for a
+          // zone with no abbreviation of its own.
+          $hasTime = strlen((string) $event->starts_at) > 10;
+          $zone = $hasTime ? $startDt->format('T') : '';
+          // "+0545" as "GMT+5:45", "+08" as "GMT+8".
+          if (preg_match('/^([+-])(\d{2})(\d{2})?$/', $zone, $offset)) {
+              $zone = 'GMT'.$offset[1].((int) $offset[2]).(($offset[3] ?? '00') !== '00' ? ':'.$offset[3] : '');
+          }
+          // "10:00 PM - 2:00 AM" needs no help. An end well into the next morning says its day.
+          $endsNextDay = ! $manyDays && $endDt && ! $endDt->isSameDay($startDt) && (int) $endDt->format('G') >= 6;
+          // The other days of a series, and how it repeats. Asked of every series, one of
+          // hand-added dates included (it has no pattern to name, and still has other days).
+          // A series that has run its course says neither: "Weekly" under a date of a course
+          // that ended in the spring reads as though it were still on.
+          $moreDates = $event->days_of_week ? $event->occurrencesAfter($date ?: null, 3) : [];
+          $recurrence = ($moreDates || ($event->recurring_end_type ?? 'never') !== 'after_events') ? $event->recurrenceSummary() : null;
+        @endphp
+        <div class="gk-factrow" data-event-facts>
+        <div id="gp-event-date" class="gk-fact-cell {{ $role->isRtl() ? 'rtl' : '' }}" data-label="{{ __('messages.date_and_time') }}">
+          @if ($manyDays && $endDt && $startDt->format('m') === $endDt->format('m'))
+          <div class="gk-tile flex-shrink-0 w-16 h-16 rounded-xl border border-gray-200 dark:border-gray-700
+                      bg-white dark:bg-gray-900 flex flex-col items-center justify-center shadow-sm">
+            <span class="text-[11px] font-bold uppercase tracking-wider leading-none pt-1"
+                  style="color: var(--es-accent-readable);">
+              {{ $startDt->translatedFormat('M') }}
+            </span>
+            <span class="text-lg font-bold text-gray-900 dark:text-white leading-none">
+              {{ $startDt->format('j') }}-{{ $endDt->format('j') }}
+            </span>
+          </div>
+          @else
+          <div class="gk-tile flex-shrink-0 w-16 h-16 rounded-xl border border-gray-200 dark:border-gray-700
+                      bg-white dark:bg-gray-900 flex flex-col items-center justify-center shadow-sm">
+            <span class="text-[11px] font-bold uppercase tracking-wider leading-none pt-1"
+                  style="color: var(--es-accent-readable);">
+              {{ $startDt->translatedFormat('M') }}
+            </span>
+            <span class="text-2xl font-bold text-gray-900 dark:text-white leading-none">
+              {{ $startDt->format('j') }}
+            </span>
+          </div>
+          @endif
+          <div class="flex flex-col min-w-0">
+            @if ($manyDays && $endDt)
+              <span class="gk-fact-main">
+                <time datetime="{{ $startDt->format('Y-m-d\TH:i:sP') }}">
+                  {{ $event->getDateRangeDisplay($date) }}
+                </time>
+              </span>
+              @php
+                $timeFormat = $use24 ? 'H:i' : 'g:i A';
+                $multiStartTime = $startDt->format($timeFormat);
+                $multiEndTime = $endDt->format($timeFormat);
+              @endphp
+              <span class="gk-fact-sub">
+                @if ($startDt->format('m') === $endDt->format('m'))
+                  {{ \App\Utils\DateUtils::short($startDt, 'MMMd', 'M j') }}, <bdi dir="ltr">{{ $multiStartTime }}</bdi> - {{ $endDt->format('j') }}, <bdi dir="ltr">{{ $multiEndTime }}</bdi>
+                @else
+                  {{ \App\Utils\DateUtils::short($startDt, 'MMMd', 'M j') }}, <bdi dir="ltr">{{ $multiStartTime }}</bdi> - {{ \App\Utils\DateUtils::short($endDt, 'MMMd', 'M j') }}, <bdi dir="ltr">{{ $multiEndTime }}</bdi>
+                @endif
+                @if ($zone) <bdi dir="ltr" data-event-zone>{{ $zone }}</bdi>@endif
+              </span>
+            @else
+              <span class="gk-fact-main">
+                <time datetime="{{ $startDt->format('Y-m-d\TH:i:sP') }}">
+                  {{-- The tile has no room for a year, and next October is not this October. --}}
+                  {{-- In the language's own order: Hebrew put the month first ("ב׳, נוב׳ 23"). --}}
+                  {{ \App\Utils\DateUtils::short($startDt, $otherYear ? 'yMMMEd' : 'MMMEd', $otherYear ? 'D, M j, Y' : 'D, M j') }}
+                </time>
+              </span>
+              <span class="gk-fact-sub">
+                <time dir="ltr" datetime="{{ $startDt->format('Y-m-d\TH:i:sP') }}">{{ $event->getStartEndTime($date, $use24) }}</time>@if ($endsNextDay) <span data-event-ends>({{ $endDt->translatedFormat('D') }})</span>@endif
+                @if ($zone) <bdi dir="ltr" data-event-zone>{{ $zone }}</bdi>@endif
+              </span>
+            @endif
+            @if ($recurrence)
+              {{-- A label and a list, not a sentence (Event::recurrenceSummary() says why). --}}
+              <span class="gk-fact-sub" data-event-repeats>
+                {{ $recurrence['label'] }}@if ($recurrence['days']) · {{ implode(', ', $recurrence['days']) }}@endif
+                @if ($recurrence['until'])
+                  · {{ __('messages.repeats_until', ['date' => \Carbon\Carbon::parse($recurrence['until'])->translatedFormat('M j, Y')]) }}
+                @endif
+              </span>
+            @endif
+          </div>
+        </div>
+        @if ($moreDates)
+          {{-- The other days it is on, each a link to that day's own page: a page for one date
+               of a series used to offer no way to any other. A day with nothing left says so.
+
+               nofollow, and never a day past the horizon Event::occurrencesAfter() keeps from
+               today: each of these is a real page, and a link from every date to the next
+               three is a chain a crawler would follow for ever. --}}
+          <div class="gk-more-dates gk-fact-cell-wide flex flex-wrap items-baseline gap-x-3 gap-y-1 text-sm {{ $role->isRtl() ? 'rtl' : '' }}" data-event-more-dates>
+            <span class="text-gray-500 dark:text-gray-400">{{ __('messages.more_dates') }}</span>
+            @foreach ($moreDates as $moreDate)
+              @php
+                $moreDt = $event->getStartDateTime($moreDate, true, $event->scheduleTimezone());
+                $moreGone = $event->rowsSoldOutOn($moreDate);
+              @endphp
+              <span class="whitespace-nowrap">
+                <a href="{{ $embedEvent ? \App\Support\EmbedEventView::eventUrl($event, $subdomain, $moreDate) : $event->getGuestUrl($subdomain, $moreDate) }}" class="gk-link" rel="nofollow"@if ($embedEvent) target="_self"@endif>{{ $moreDt->translatedFormat($moreDt->year !== $startDt->year ? 'D, M j, Y' : 'D, M j') }}</a>@if ($moreGone) <span class="text-gray-500 dark:text-gray-400">({{ __('messages.sold_out') }})</span>@endif
+              </span>
+            @endforeach
+          </div>
+        @endif
+
+        {{-- Location icon badge. An online event shows the domain of its link, or "Online" when
+             the link is free text or has no public domain - never the link itself. --}}
+        @if (($event->venue && ($event->venue->name || $event->venue->shortAddress())) || $event->event_url)
+        <div id="gp-event-location" class="gk-fact-cell" data-label="{{ __('messages.location') }}">
+          <div class="flex items-center gap-4 {{ $role->isRtl() ? 'rtl' : '' }}">
+            <div class="gk-tile flex-shrink-0 w-16 h-16 rounded-xl border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-900
+                        flex items-center justify-center shadow-sm">
+              @if ($event->venue && $event->venue->profile_image_url)
+                <img src="{{ $event->venue->getProfileImageUrl(\App\Utils\ImageUtils::VARIANT_WIDTH) }}" alt="{{ $event->venue->nameInLanguage($displayLang) }}" class="w-11 h-11 rounded-lg object-cover" loading="lazy" decoding="async">
+              @else
+                <svg width="24" height="24" viewBox="0 0 24 24" fill="currentColor" style="color: var(--es-accent)" aria-hidden="true">
+                  <path fill-rule="evenodd" clip-rule="evenodd" d="M12 2C7.58172 2 4 6.00258 4 10.5C4 14.9622 6.55332 19.8124 10.5371 21.6744C11.4657 22.1085 12.5343 22.1085 13.4629 21.6744C17.4467 19.8124 20 14.9622 20 10.5C20 6.00258 16.4183 2 12 2ZM12 12C13.1046 12 14 11.1046 14 10C14 8.89543 13.1046 8 12 8C10.8954 8 10 8.89543 10 10C10 11.1046 10.8954 12 12 12Z" />
+                </svg>
+              @endif
+            </div>
+            <div class="flex flex-col">
+              <span>
+                @if ($event->venue && $event->venue->nameInLanguage($displayLang))
+                  @if ($event->venue->isClaimed())
+                    @php
+                      $venueUrl = $event->venue->getGuestUrl(true);
+                      $queryParams = [];
+                      if (request('category')) $queryParams['category'] = request('category');
+                      if (request('schedule')) $queryParams['schedule'] = request('schedule');
+                      // Scratch name, never $date - see the breadcrumb block above.
+                      if ($rawDateParam) {
+                        $tDate = $rawDateParam;
+                        if (preg_match('/^\d{4}-\d{2}-\d{2}$/', $tDate)) {
+                          $tDateParts = explode('-', $tDate);
+                          $queryParams['month'] = (int)$tDateParts[1];
+                          $queryParams['year'] = (int)$tDateParts[0];
+                        }
+                      } else {
+                        if (request('month')) $queryParams['month'] = request('month');
+                        if (request('year')) $queryParams['year'] = request('year');
+                      }
+                      if (!empty($queryParams)) {
+                        $venueUrl .= '?' . http_build_query($queryParams);
+                      }
+                    @endphp
+                    <a href="{{ $venueUrl }}" class="group inline-flex items-center gap-1 w-fit">
+                      {{-- No space between the name and the chevron: a line break there let the chevron
+                           drop to a line of its own when the name just filled the column. --}}
+                      <span dir="{{ content_dir_for_language($event->venue->nameInLanguage($displayLang), $displayLang) }}" class="gk-fact-main group-hover:underline">{!! str_replace(' , ', '<br>', e($event->venue->nameInLanguage($displayLang))) !!}</span><svg class="w-5 h-5 fill-gray-900 dark:fill-gray-100 opacity-70 group-hover:opacity-100 transition-opacity {{ $role->isRtl() ? 'scale-x-[-1]' : '' }}" viewBox="0 0 24 24" aria-hidden="true">
+                        <path d="M8.59,16.58L13.17,12L8.59,7.41L10,6L16,12L10,18L8.59,16.58Z"/>
+                      </svg>
+                    </a>
+                  @else
+                    <span dir="{{ content_dir_for_language($event->venue->nameInLanguage($displayLang), $displayLang) }}" class="gk-fact-main">{!! str_replace(' , ', '<br>', e($event->venue->nameInLanguage($displayLang))) !!}</span>
+                  @endif
+                @else
+                  {{-- Also reached by a venue with no name in this language, which must never read
+                       "Online": the fallback is only for an event that has a link. --}}
+                  <span class="gk-fact-main">{{ $event->event_url ? ($event->getEventUrlDomain() ?: __('messages.online')) : '' }}</span>
+                @endif
+              </span>
+              @if ($event->venue && $event->venue->shortAddress())
+              <span class="gk-fact-sub">
+                <x-link href="https://www.google.com/maps/search/?api=1&query={{ urlencode($event->venue->bestAddress()) }}" target="_blank" :nofollow="true">
+                  {{ $event->venue->shortAddress() }}
+                </x-link>
+              </span>
+              @endif
+            </div>
+          </div>
+        </div>
+        @endif
+
+        {{-- The schedule's own facts about this event: the custom fields its owner ticked "On
+             event page" (the room, the floor, a dress code). One row beside one tile, like When
+             and Where above it. Whose fields they are, and that a private one is never here, is
+             CustomFieldDisplay::forEventPage()'s to say.
+
+             Two forms. A schedule with ONE field ticked gets it read as the rows above are: the
+             answer, then what it is. Any other gets a list of pairs, so six facts are six lines
+             and not six rows. Which form is the SCHEDULE's doing, never this event's: with two
+             fields ticked, an event that answered one of them keeps the list, or the room would
+             change size and place from one of a schedule's events to the next. A long answer
+             takes the list too (a paragraph over its own label reads upside down). A lone Yes/No
+             field leads with its name ("Step-free access", not "Yes"), and so does a lone date:
+             "Oct 12, 2026" in large type directly under the event's own date row reads as a
+             second date for the event. The label comes first in the markup either way; .gk-fact
+             turns the pair over for the eye. v-pre is a precaution: nothing mounts Vue on this
+             card today, and an owner's label or a visitor's answer must stay text on the day
+             something does. --}}
+        @php
+          $eventFacts = \App\Utils\CustomFieldDisplay::forEventPage($event, $role);
+          $loneFact = count($eventFacts) === 1 ? $eventFacts[0] : null;
+          $factList = $eventFacts && (! $loneFact
+              || \App\Utils\CustomFieldDisplay::eventPageFieldCount($event) > 1
+              || $loneFact['type'] === 'multiline_string'
+              || mb_strlen($loneFact['value']) > 60);
+          $factLead = 'gk-fact-main';
+          $factQuiet = 'gk-fact-sub';
+        @endphp
+        @if ($eventFacts)
+        <div id="gp-event-fields" class="gk-fact-cell gk-fact-cell-bare {{ $role->isRtl() ? 'rtl' : '' }}">
+          <div class="gk-tile flex-shrink-0 w-16 h-16 rounded-xl border border-gray-200 dark:border-gray-700
+                      bg-white dark:bg-gray-900 flex items-center justify-center shadow-sm">
+            <svg width="24" height="24" viewBox="0 0 20 20" fill="currentColor" style="color: var(--es-accent)" aria-hidden="true">
+              <path fill-rule="evenodd" d="M18 10a8 8 0 11-16 0 8 8 0 0116 0zm-7-4a1 1 0 11-2 0 1 1 0 012 0zM9 9a.75.75 0 000 1.5h.253a.25.25 0 01.244.304l-.459 2.066A1.75 1.75 0 0010.747 15H11a.75.75 0 000-1.5h-.253a.25.25 0 01-.244-.304l.459-2.066A1.75 1.75 0 009.253 9H9z" clip-rule="evenodd" />
+            </svg>
+          </div>
+          @if ($factList)
+          <dl class="gk-facts gk-facts-pairs" v-pre>
+            @foreach ($eventFacts as $fact)
+            <div class="gk-fact-pair" data-event-field="{{ $fact['key'] }}">
+              <dt class="{{ $factQuiet }} gk-fact-text"><bdi>{{ $fact['label'] }}</bdi></dt>
+              <dd class="gk-fact-main gk-fact-text"><bdi>{{ $fact['value'] }}</bdi></dd>
+            </div>
+            @endforeach
+          </dl>
+          @elseif (in_array($loneFact['type'], ['switch', 'date'], true))
+          <dl class="gk-facts" v-pre>
+            <div class="gk-fact-flag" data-event-field="{{ $loneFact['key'] }}">
+              <dt class="{{ $factLead }} gk-fact-text"><bdi>{{ $loneFact['label'] }}</bdi></dt>
+              <dd class="{{ $factQuiet }} gk-fact-text">{{ $loneFact['value'] }}</dd>
+            </div>
+          </dl>
+          @else
+          <dl class="gk-facts" v-pre>
+            <div class="gk-fact" data-event-field="{{ $loneFact['key'] }}">
+              <dt class="{{ $factQuiet }} gk-fact-text"><bdi>{{ $loneFact['label'] }}</bdi></dt>
+              <dd class="{{ $factLead }} gk-fact-text"><bdi>{{ $loneFact['value'] }}</bdi></dd>
+            </div>
+          </dl>
+          @endif
+        </div>
+        @endif
+
+        {{-- RSVP Free badge --}}
+        @if ($event->rsvp_enabled)
+        <div id="gp-event-price" class="gk-fact-cell {{ $role->isRtl() ? 'rtl' : '' }}" data-label="{{ __('messages.price') }}">
+          <div class="gk-tile flex-shrink-0 w-16 h-16 rounded-xl border border-gray-200 dark:border-gray-700
+                      bg-white dark:bg-gray-900 flex items-center justify-center shadow-sm">
+            <svg width="24" height="24" viewBox="0 0 20 20" fill="currentColor" style="color: var(--es-accent)" aria-hidden="true">
+              <path fill-rule="evenodd" d="M5.5 3A2.5 2.5 0 003 5.5v2.879a2.5 2.5 0 00.732 1.767l7.5 7.5a2.5 2.5 0 003.536 0l2.878-2.878a2.5 2.5 0 000-3.536l-7.5-7.5A2.5 2.5 0 008.38 3H5.5zM6 7a1 1 0 100-2 1 1 0 000 2z" clip-rule="evenodd" />
+            </svg>
+          </div>
+          <div class="flex flex-col">
+            <span class="gk-fact-main">
+              {{ __('messages.free_entry') }}
+            </span>
+          </div>
+        </div>
+        @endif
+
+        {{-- Ticket price. The registration link is read through registrationHref() here and at
+             every CTA below, never the column: a legacy value that is no link offers nothing. --}}
+        @if ($event->registrationHref() && $event->ticket_price !== null && !$event->tickets_enabled && !$event->rsvp_enabled)
+        <div id="gp-event-price" class="gk-fact-cell {{ $role->isRtl() ? 'rtl' : '' }}" data-label="{{ __('messages.price') }}">
+          <div class="gk-tile flex-shrink-0 w-16 h-16 rounded-xl border border-gray-200 dark:border-gray-700
+                      bg-white dark:bg-gray-900 flex items-center justify-center shadow-sm">
+            <svg width="24" height="24" viewBox="0 0 20 20" fill="currentColor" style="color: var(--es-accent)" aria-hidden="true">
+              <path fill-rule="evenodd" d="M5.5 3A2.5 2.5 0 003 5.5v2.879a2.5 2.5 0 00.732 1.767l7.5 7.5a2.5 2.5 0 003.536 0l2.878-2.878a2.5 2.5 0 000-3.536l-7.5-7.5A2.5 2.5 0 008.38 3H5.5zM6 7a1 1 0 100-2 1 1 0 000 2z" clip-rule="evenodd" />
+            </svg>
+          </div>
+          <div class="flex flex-col">
+            <span class="gk-fact-main">
+              @if ($event->ticket_price == 0)
+                {{ __('messages.free_entry') }}
+              @else
+                {{ \App\Utils\MoneyUtils::format($event->ticket_price, $event->ticket_currency_code) }}
+              @endif
+            </span>
+            @php
+                // Either half can stand alone: a bare "15% off" is as useful as a bare code.
+                $eventCouponBits = array_filter([
+                    $event->coupon_code ? __('messages.coupon_code').': '.$event->coupon_code : null,
+                    $event->couponDiscountLabel() ?: null,
+                ]);
+            @endphp
+            @if ($eventCouponBits)
+            <span class="gk-fact-sub">
+              {{ implode(' • ', $eventCouponBits) }}
+            </span>
+            @endif
+          </div>
+        </div>
+        @endif
+
+        {{-- What a ticket costs, for an event that sells its own. The page said nothing about
+             price until Buy tickets was pressed. One #gp-event-price a page: the two rows above
+             are for sign-up and for tickets sold elsewhere, and neither is this case. --}}
+        @php
+            $ticketPrice = (! $event->rsvp_enabled && $event->canSellTickets($date)) ? $event->ticketPriceSummary($date) : null;
+        @endphp
+        @if ($ticketPrice)
+        <div id="gp-event-price" class="gk-fact-cell {{ $role->isRtl() ? 'rtl' : '' }}" data-label="{{ __('messages.price') }}">
+          <div class="gk-tile flex-shrink-0 w-16 h-16 rounded-xl border border-gray-200 dark:border-gray-700
+                      bg-white dark:bg-gray-900 flex items-center justify-center shadow-sm">
+            <svg width="24" height="24" viewBox="0 0 20 20" fill="currentColor" style="color: var(--es-accent)" aria-hidden="true">
+              <path fill-rule="evenodd" d="M5.5 3A2.5 2.5 0 003 5.5v2.879a2.5 2.5 0 00.732 1.767l7.5 7.5a2.5 2.5 0 003.536 0l2.878-2.878a2.5 2.5 0 000-3.536l-7.5-7.5A2.5 2.5 0 008.38 3H5.5zM6 7a1 1 0 100-2 1 1 0 000 2z" clip-rule="evenodd" />
+            </svg>
+          </div>
+          <div class="flex flex-col">
+            <span class="gk-fact-main" data-ticket-price>
+              {{-- The owner's "Free entry" only where every way in is free: beside paid types it
+                   is "Free - lei 280", and paid prices that differ are the whole range. --}}
+              @if ($ticketPrice['says'] === 'free')
+                {{ $role->customLabel('free_entry') }}
+              @else
+                <bdi>{{ \App\Models\Event::priceText($ticketPrice['says'], $ticketPrice['min'], $ticketPrice['max'], $ticketPrice['currency'], true) }}</bdi>
+              @endif
+            </span>
+            @if ($ticketPrice['low'])
+            <span class="text-sm font-medium text-amber-700 dark:text-amber-300" data-ticket-low>{{ __('messages.few_left') }}</span>
+            @endif
+          </div>
+        </div>
+        @endif
+
+        {{-- Already registered indicator --}}
+        @if ($userSale)
+        <div class="gk-fact-cell {{ $role->isRtl() ? 'rtl' : '' }}" data-label="{{ __('messages.your_tickets') }}">
+          <div class="gk-tile flex-shrink-0 w-16 h-16 rounded-xl border border-gray-200 dark:border-gray-700
+                      bg-white dark:bg-gray-900 flex items-center justify-center shadow-sm">
+            <svg width="24" height="24" viewBox="0 0 20 20" fill="none" aria-hidden="true">
+              <path fill-rule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm3.857-9.809a.75.75 0 00-1.214-.882l-3.483 4.79-1.88-1.88a.75.75 0 10-1.06 1.061l2.5 2.5a.75.75 0 001.137-.089l4-5.5z" clip-rule="evenodd" style="fill: var(--es-accent)" />
+            </svg>
+          </div>
+          <div class="flex flex-col">
+            @php
+              // How many places that is. A buyer's own sale counts its whole party and a guest's
+              // row counts itself; the controller has already left out a guest's row whose
+              // party this same visitor bought.
+              $userTicketCount = (int) $userSales->sum(fn ($s) => $s->isRsvp() ? 0 : ($s->isPrimarySale() ? $s->legTotalQuantity() : $s->quantity()));
+            @endphp
+            <span class="gk-fact-main" data-user-tickets="{{ $userTicketCount }}">
+              {{-- "You're registered" said nothing of how many, to somebody deciding whether to
+                   get one more. A sign-up has no tickets to count. --}}
+              {{ $userTicketCount > 0 ? trans_choice('messages.you_have_tickets', $userTicketCount, ['count' => $userTicketCount]) : __('messages.you_are_registered') }}
+            </span>
+            <span class="flex flex-wrap gap-x-3 gap-y-1">
+              @foreach ($userSales->take(6) as $userSaleIndex => $oneSale)
+                <x-link href="{{ route('ticket.view', ['event_id' => \App\Utils\UrlUtils::encodeId($event->id), 'secret' => $oneSale->secret]) }}"
+                   target="_blank"
+                   class="text-sm font-medium">
+                  {{ __('messages.view_ticket') }}@if ($userSales->count() > 1) {{ $userSaleIndex + 1 }}@endif
+                </x-link>
+              @endforeach
+            </span>
+          </div>
+        </div>
+        @endif
+
+        </div>{{-- .gk-factrow --}}
+
+        {{-- Moment B: the exit ramp for somebody who is interested but not buying today.
+             Deliberately a quiet text link rather than a second button - it sits beside the primary
+             conversion action, and the point is to catch the visitor who was going to leave, not to
+             compete for the one who was going to buy.
+
+             Placed ABOVE #gp-event-form on purpose: hidePanelsBelow() display:none's every
+             sibling after that element while the buy form is open, which is why the subscribe panel
+             at the foot of the page vanishes during checkout. --}}
+        @if ($showInterestCapture && ($event->canSellTickets($date) || $event->canAcceptRsvp($date)))
+        <a href="#gp-event-interest" class="self-start text-sm text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-200 hover:underline">
+            {{-- "Not buying today?" only where buying today is possible. --}}
+            {{ ($event->canAcceptRsvp($date) || $saleState === 'open')
+                ? __('messages.event_interest_not_ready')
+                : ($saleState === 'not_started' ? __('messages.event_interest_cta') : __('messages.event_interest_cta_changes')) }}
+        </a>
+        @endif
+
+        {{-- CTA buttons --}}
+        <div id="gp-event-cta" x-data="{ shareState: 'idle' }" class="gk-cta relative items-center gap-3 text-left {{ ($showCarpool || $embedEvent) ? 'inline-flex flex-wrap' : 'hidden sm:inline-flex' }} self-start {{ $role->isRtl() ? 'rtl' : '' }}">
+        <div class="gp-cta-wide">
+        @php
+          // In a frame, one way to buy or sign up: the event's own page in a new tab, with the form
+          // open, where there is a session to buy with. Said in the button's name too.
+          $embedCta = $embedEvent ? function (string $form, string $label) use ($event, $subdomain, $date) {
+              return [
+                  'href' => \App\Support\EmbedEventView::pageUrl($event, $subdomain, \App\Models\Event::isOccurrenceDate($date) ? $date : null, $form),
+                  'label' => $label,
+                  'aria' => $label.' ('.__('messages.opens_in_new_tab').')',
+              ];
+          } : null;
+        @endphp
+        @if ($event->is_cancelled)
+            <span class="text-base text-red-600 dark:text-red-400 font-medium">{{ __('messages.event_cancelled_guest_notice') }}</span>
+        @elseif ($embedEvent && $event->canAcceptRsvp($date))
+            @php $cta = $embedCta('rsvp', $event->isRsvpFull($date) ? __('messages.join_waitlist') : $role->customLabel('register')); @endphp
+            <a href="{{ $cta['href'] }}" target="_blank" rel="noopener" data-embed-checkout="rsvp" aria-label="{{ $cta['aria'] }}"
+               class="gk-cta-main min-w-[180px] inline-flex items-center justify-center gap-x-2 rounded-md px-6 py-3 text-lg font-semibold shadow-sm"
+               style="background-color: var(--es-accent); color: var(--es-accent-text);">
+              {{ $cta['label'] }}
+              <svg class="h-4 w-4 {{ $role->isRtl() ? 'scale-x-[-1]' : '' }}" fill="none" viewBox="0 0 24 24" stroke-width="2" stroke="currentColor" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" d="M13.5 6H5.25A2.25 2.25 0 003 8.25v10.5A2.25 2.25 0 005.25 21h10.5A2.25 2.25 0 0018 18.75V10.5m-10.5 6L21 3m0 0h-5.25M21 3v5.25" /></svg>
+            </a>
+        @elseif ($embedEvent && $event->canSellTickets($date) && ($saleOffersForm || $saleShowsRows))
+            @if (! $saleOffersForm)
+            <span class="text-base font-semibold text-gray-700 dark:text-gray-200" data-sale-state="{{ $saleState }}">{{ $saleStateLabel }}</span>
+            @endif
+            @php
+              $cta = $embedCta('tickets', ! $saleOffersForm ? $role->customLabel('tickets')
+                  : ($saleState === 'sold_out' ? __('messages.join_waitlist')
+                  : ($event->areTicketsFree() ? $role->customLabel('get_tickets') : $role->customLabel('buy_tickets'))));
+            @endphp
+            <a href="{{ $cta['href'] }}" target="_blank" rel="noopener" data-embed-checkout="tickets" aria-label="{{ $cta['aria'] }}"
+               class="gk-cta-main min-w-[180px] inline-flex items-center justify-center gap-x-2 rounded-md px-6 py-3 text-lg font-semibold shadow-sm"
+               style="background-color: var(--es-accent); color: var(--es-accent-text);">
+              {{ $cta['label'] }}
+              <svg class="h-4 w-4 {{ $role->isRtl() ? 'scale-x-[-1]' : '' }}" fill="none" viewBox="0 0 24 24" stroke-width="2" stroke="currentColor" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" d="M13.5 6H5.25A2.25 2.25 0 003 8.25v10.5A2.25 2.25 0 005.25 21h10.5A2.25 2.25 0 0018 18.75V10.5m-10.5 6L21 3m0 0h-5.25M21 3v5.25" /></svg>
+            </a>
+            @if (! $saleOffersForm && $saleState !== 'sold_out' && ! $event->is_draft)
+              @php $showCalendarPopup = true; @endphp
+            @endif
+        @elseif ($event->canAcceptRsvp($date))
+            <button type="button"
+                  @click="$dispatch('show-event-form')"
+                  class="gk-cta-main min-w-[180px] inline-flex justify-center gap-x-1.5 rounded-md px-6 py-3 text-lg font-semibold shadow-sm"
+                  style="background-color: var(--es-accent); color: var(--es-accent-text);">
+              @if ($event->isRsvpFull($date))
+                {{ __('messages.join_waitlist') }}
+              @else
+                {{ $role->customLabel('register') }}
+              @endif
+            </button>
+        @elseif ($event->canSellTickets($date) || ($event->registrationHref() && (!$event->tickets_enabled || $event->blockedByPlanOnly($date)) && !$event->rsvp_enabled))
+          @if ($event->canSellTickets($date) && ! $saleOffersForm)
+            {{-- "Selling" with nothing to buy: sold out where there is no waitlist, or no ticket
+                 inside its sales window. Say which, and do not say Buy. --}}
+            <span class="text-base font-semibold text-gray-700 dark:text-gray-200" data-sale-state="{{ $saleState }}">{{ $saleStateLabel }}</span>
+            @if ($saleShowsRows)
+            <button type="button" data-sale-rows
+                  @click="$dispatch('show-event-form')"
+                  class="gk-cta-alt inline-flex justify-center rounded-md border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 px-5 py-3 text-base font-semibold text-gray-900 dark:text-gray-100 shadow-sm">
+              {{ $role->customLabel('tickets') }}
+            </button>
+            @endif
+            {{-- ! is_draft, as every other branch that offers the calendar and as the phone bar
+                 has it: a draft is on nobody's calendar yet. --}}
+            @if ($saleState !== 'sold_out' && ! $event->is_draft)
+              @php $showCalendarPopup = true; @endphp
+            @endif
+          @elseif ($event->canSellTickets($date))
+            <button type="button"
+                  @click="$dispatch('show-event-form')"
+                  class="gk-cta-main min-w-[180px] inline-flex justify-center gap-x-1.5 rounded-md px-6 py-3 text-lg font-semibold shadow-sm"
+                  style="background-color: var(--es-accent); color: var(--es-accent-text);">
+              @if ($saleState === 'sold_out')
+                {{-- Only reached where a waitlist will be accepted: $saleOffersForm is false otherwise. --}}
+                {{ __('messages.join_waitlist') }}
+              @else
+                {{ $event->areTicketsFree() ? $role->customLabel('get_tickets') : $role->customLabel('buy_tickets') }}
+              @endif
+            </button>
+          @else
+            <a href="{{ $event->registrationHref() }}" target="_blank" rel="noopener noreferrer nofollow"
+              @if ($event->payment_method === 'payment_url' && $event->user && $event->user->paymentUrlMobileOnly() && ! is_mobile())
+                class="payment-mobile-only-link"
+                data-mobile-msg="{{ __('messages.payment_url_mobile_only') }}"
+              @endif
+            >
+                <button type="button"
+                      class="gk-cta-main min-w-[180px] inline-flex justify-center gap-x-1.5 rounded-md px-6 py-3 text-lg font-semibold shadow-sm bg-green-600 text-white">
+                  {{ __('messages.view_event') }}
+                </button>
+            </a>
+          @endif
+        @elseif (!$event->is_draft && $event->allTicketSalesEnded() && $event->tickets_enabled)
+              <span class="text-sm text-gray-500 dark:text-gray-400">{{ __('messages.ticket_sales_ended') }}</span>
+              @php $showCalendarPopup = true; @endphp
+        @elseif (!$event->is_draft && $event->allTicketSalesNotStarted() && $event->tickets_enabled)
+              <span class="text-sm text-gray-500 dark:text-gray-400">{{ __('messages.sales_not_started') }}</span>
+              @php $showCalendarPopup = true; @endphp
+        @elseif (!$event->is_draft)
+              @php $showCalendarPopup = true; @endphp
+        @endif
+
+        @if (!empty($showCalendarPopup))
+              <button type="button"
+                  class="gk-cta-main calendar-popup-toggle inline-flex justify-center gap-x-1.5 rounded-md px-6 py-3 text-lg font-semibold shadow-sm"
+                  style="background-color: var(--es-accent); color: var(--es-accent-text);"
+                  id="menu-button" aria-expanded="true" aria-haspopup="true">
+              {{ $role->customLabel('add_to_calendar') }}
+              <svg class="-me-1 h-5 w-5" viewBox="0 0 20 20" fill="currentColor" aria-hidden="true">
+                  <path fill-rule="evenodd" d="M5.23 7.21a.75.75 0 011.06.02L10 11.168l3.71-3.938a.75.75 0 111.08 1.04l-4.25 4.5a.75.75 0 01-1.08 0l-4.25-4.5a.75.75 0 01.02-1.06z" clip-rule="evenodd" />
+              </svg>
+              </button>
+
+            {{-- Desktop calendar dropdown --}}
+            <div id="calendar-pop-up-menu" class="pop-up-menu gp-dropdown hidden absolute top-full end-0 z-50 mt-2 w-72 {{ $role->isRtl() ? 'origin-top-left' : 'origin-top-right' }} rounded-xl bg-white shadow-lg focus:outline-none" role="menu" aria-orientation="vertical" aria-labelledby="menu-button" tabindex="-1">
+                <div class="py-1 stop-propagation" role="none">
+                    <a data-funnel="calendar_add" href="{{ $event->getGoogleCalendarUrl($date) }}" target="_blank" rel="noopener noreferrer" class="group flex items-center px-4 py-3 text-sm text-gray-700 dark:text-gray-200 rounded-lg transition-all duration-200 gp-dropdown-item" role="menuitem" tabindex="-1" id="menu-item-0">
+                        <svg class="me-3 h-5 w-5 text-gray-400 group-hover:text-gray-500" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
+                        <path d="M21.35,11.1H12.18V13.83H18.69C18.36,17.64 15.19,19.27 12.19,19.27C8.36,19.27 5,16.25 5,12C5,7.9 8.2,4.73 12.2,4.73C15.29,4.73 17.1,6.7 17.1,6.7L19,4.72C19,4.72 16.56,2 12.1,2C6.42,2 2.03,6.8 2.03,12C2.03,17.05 6.16,22 12.25,22C17.6,22 21.5,18.33 21.5,12.91C21.5,11.76 21.35,11.1 21.35,11.1V11.1Z" />
+                        </svg>
+                        Google Calendar
+                    </a>
+                    <a data-funnel="calendar_add" href="{{ $event->getAppleCalendarUrl($date, $role->subdomain) }}{{ $role->langQuerySuffix($displayLang) }}" class="group flex items-center px-4 py-3 text-sm text-gray-700 dark:text-gray-200 rounded-lg transition-all duration-200 gp-dropdown-item" role="menuitem" tabindex="-1" id="menu-item-1">
+                        <svg class="me-3 h-5 w-5 text-gray-400 group-hover:text-gray-500" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
+                        <path d="M18.71,19.5C17.88,20.74 17,21.95 15.66,21.97C14.32,22 13.89,21.18 12.37,21.18C10.84,21.18 10.37,21.95 9.1,22C7.79,22.05 6.8,20.68 5.96,19.47C4.25,17 2.94,12.45 4.7,9.39C5.57,7.87 7.13,6.91 8.82,6.88C10.1,6.86 11.32,7.75 12.11,7.75C12.89,7.75 14.37,6.68 15.92,6.84C16.57,6.87 18.39,7.1 19.56,8.82C19.47,8.88 17.39,10.1 17.41,12.63C17.44,15.65 20.06,16.66 20.09,16.67C20.06,16.74 19.67,18.11 18.71,19.5M13,3.5C13.73,2.67 14.94,2.04 15.94,2C16.07,3.17 15.6,4.35 14.9,5.19C14.21,6.04 13.07,6.7 11.95,6.61C11.8,5.46 12.36,4.26 13,3.5Z" />
+                        </svg>
+                        Apple Calendar
+                    </a>
+                    <a data-funnel="calendar_add" href="{{ $event->getMicrosoftCalendarUrl($date) }}" target="_blank" rel="noopener noreferrer" class="group flex items-center px-4 py-3 text-sm text-gray-700 dark:text-gray-200 rounded-lg transition-all duration-200 gp-dropdown-item" role="menuitem" tabindex="-1" id="menu-item-2">
+                        <svg class="me-3 h-5 w-5 text-gray-400 group-hover:text-gray-500" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
+                        <path d="M2,3H11V12H2V3M11,22H2V13H11V22M21,3V12H12V3H21M21,22H12V13H21V22Z" />
+                        </svg>
+                        Microsoft Outlook
+                    </a>
+                    {{-- Everything above hands over a SNAPSHOT: a .ics never updates, and the
+                         Google/Outlook links are one-shot too. These two are what a calendar entry
+                         cannot do. Plain anchors, so nothing is added to the Alpine scope this
+                         dropdown lives in. --}}
+                    <div class="my-1 border-t border-gray-100 dark:border-gray-700"></div>
+                    @if ($showInterestCapture)
+                    <a href="#gp-event-interest" class="group flex items-center px-4 py-3 text-sm text-gray-700 dark:text-gray-200 rounded-lg transition-all duration-200 gp-dropdown-item" role="menuitem" tabindex="-1" id="menu-item-3">
+                        <svg class="me-3 h-5 w-5 text-gray-400 group-hover:text-gray-500" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
+                            <path stroke-linecap="round" stroke-linejoin="round" d="M3 8l7.89 5.26a2 2 0 002.22 0L21 8M5 19h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z" />
+                        </svg>
+                        {{ ($event->canSellTickets($date) && $saleState !== 'not_started') ? __('messages.event_interest_cta_changes') : __('messages.event_interest_cta') }}
+                    </a>
+                    @endif
+                    <a href="{{ route('feed.ical', ['subdomain' => $role->subdomain]) }}" class="group flex items-center px-4 py-3 text-sm text-gray-700 dark:text-gray-200 rounded-lg transition-all duration-200 gp-dropdown-item" role="menuitem" tabindex="-1" id="menu-item-4">
+                        <svg class="me-3 h-5 w-5 text-gray-400 group-hover:text-gray-500" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
+                            <path stroke-linecap="round" stroke-linejoin="round" d="M8 7V3m8 4V3M3 11h18M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z" />
+                        </svg>
+                        {{-- v-pre: the schedule name is user-controlled, and Blade's {{ }} escaping
+                             does NOT stop Vue compiling a mustache in the VALUE. This row currently
+                             sits outside every Vue mount on the page (#ticket-selector, #rsvp-form,
+                             #es-cart-app, #calendar-app), but that is a property of where the markup
+                             happens to be, not a guarantee - and the cost of being wrong is
+                             arbitrary JS. The element carries no Vue bindings, so v-pre costs
+                             nothing. --}}
+                        <span v-pre>{{ __('messages.event_interest_subscribe_feed', ['schedule' => $role->translatedName()]) }}</span>
+                    </a>
+                </div>
+            </div>
+
+        @endif
+        {{-- Carpool link --}}
+        </div>
+        {{-- Outside .gp-cta-wide: this is the one button of the row a phone draws. It used to sit
+             in a row that was hidden below 640px, so a phone had no way to the ride board. One
+             link, not a second copy in the phone bar: #gp-event-carpool is a documented id and an
+             owner's rule for it must reach the only one there is. --}}
+        @if ($showCarpool)
+        @php
+            $carpoolUrl = config('app.hosted')
+                ? route('carpool.index', ['subdomain' => $carpoolRole->subdomain, 'event_hash' => \App\Utils\UrlUtils::encodeId($event->id)])
+                : '/' . $carpoolRole->subdomain . '/carpool/' . \App\Utils\UrlUtils::encodeId($event->id);
+            if ($date && $event->days_of_week) {
+                $carpoolUrl .= '/' . $date;
+            }
+            $carpoolCount = $event->carpoolOffers()->where('status', 'active')
+                ->when($date && $event->days_of_week, fn ($q) => $q->where('event_date', $date))
+                ->count();
+        @endphp
+        <a href="{{ $carpoolUrl }}"
+           id="gp-event-carpool"
+           class="gk-cta-icon flex-shrink-0 h-[42px] inline-flex items-center justify-center gap-1.5 rounded-xl border border-gray-300 dark:border-gray-600 text-gray-600 dark:text-gray-300 px-3"
+           title="{{ __('messages.carpool') }}">
+            <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M8.25 18.75a1.5 1.5 0 01-3 0m3 0a1.5 1.5 0 00-3 0m3 0h6m-9 0H3.375a1.125 1.125 0 01-1.125-1.125V14.25m17.25 4.5a1.5 1.5 0 01-3 0m3 0a1.5 1.5 0 00-3 0m3 0h1.125c.621 0 1.129-.504 1.09-1.124a17.902 17.902 0 00-3.213-9.193 2.056 2.056 0 00-1.58-.86H14.25M16.5 18.75h-2.25m0-11.177v-.958c0-.568-.422-1.048-.987-1.106a48.554 48.554 0 00-10.026 0 1.106 1.106 0 00-.987 1.106v7.635m12-6.677v6.677m0 4.5v-4.5m0 0h-12" />
+            </svg>
+            <span class="text-sm font-medium">{{ __('messages.carpool') }}@if ($carpoolCount > 0) ({{ $carpoolCount }})@endif</span>
+        </a>
+        @endif
+        {{-- Share button --}}
+        @if ($embedEvent && ! $event->is_draft)
+        {{-- Plain script, in partials/embed-frame: inside the overlay it shares the organizer's own
+             page with this event open on it, and otherwise the event's page, never this frame's
+             address. --}}
+        <button type="button"
+                data-embed-share
+                data-share-title="{{ $eventName }}"
+                data-share-url="{{ \App\Support\EmbedEventView::pageUrl($event, $subdomain, $requestedOccurrence) }}"
+                class="gk-cta-icon flex-shrink-0 w-[42px] h-[42px] inline-flex items-center justify-center rounded-xl border border-gray-300 dark:border-gray-600 text-gray-600 dark:text-gray-300"
+                title="{{ $role->customLabel('share') }}" aria-label="{{ $role->customLabel('share') }}">
+          <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" class="gk-share-icon w-5 h-5" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" d="M7.217 10.907a2.25 2.25 0 1 0 0 2.186m0-2.186c.18.324.283.696.283 1.093s-.103.77-.283 1.093m0-2.186 9.566-5.314m-9.566 7.5 9.566 5.314m0 0a2.25 2.25 0 1 0 3.935 2.186 2.25 2.25 0 0 0-3.935-2.186Zm0-12.814a2.25 2.25 0 1 0 3.933-2.185 2.25 2.25 0 0 0-3.933 2.185Z" /></svg>
+          <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" class="gk-share-done w-5 h-5 text-green-600 dark:text-green-400" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" d="m4.5 12.75 6 6 9-13.5" /></svg>
+        </button>
+        @elseif (!$event->is_draft)
+        <div class="gp-cta-wide">
+        <button type="button"
+                id="gp-event-share"
+                data-share-title="{{ $eventName }}"
+                @click="
+                  if (shareState !== 'idle') return;
+                  if (navigator.share) {
+                    shareState = 'sharing';
+                    navigator.share({ title: $event.currentTarget.dataset.shareTitle, url: window.location.href }).catch(function(){}).finally(() => shareState = 'idle');
+                  } else {
+                    navigator.clipboard.writeText(window.location.href);
+                    shareState = 'copied';
+                    setTimeout(() => shareState = 'idle', 2000);
+                  }
+                "
+                class="gk-cta-icon flex-shrink-0 w-[42px] h-[42px] inline-flex items-center justify-center rounded-xl border border-gray-300 dark:border-gray-600 text-gray-600 dark:text-gray-300"
+                :title="shareState === 'copied' ? '{{ __('messages.copied') }}' : '{{ $role->customLabel('share') }}'">
+          <template x-if="shareState !== 'copied'">
+            <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" class="w-5 h-5" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" d="M7.217 10.907a2.25 2.25 0 1 0 0 2.186m0-2.186c.18.324.283.696.283 1.093s-.103.77-.283 1.093m0-2.186 9.566-5.314m-9.566 7.5 9.566 5.314m0 0a2.25 2.25 0 1 0 3.935 2.186 2.25 2.25 0 0 0-3.935-2.186Zm0-12.814a2.25 2.25 0 1 0 3.933-2.185 2.25 2.25 0 0 0-3.933 2.185Z" /></svg>
+          </template>
+          <template x-if="shareState === 'copied'">
+            <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" class="w-5 h-5 text-green-600 dark:text-green-400" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" d="m4.5 12.75 6 6 9-13.5" /></svg>
+          </template>
+          <span class="gk-cta-word">{{ $role->customLabel('share') }}</span>
+        </button>
+        </div>
+        @endif
+        </div>
+
+        @if ($embedEvent)
+        {{-- What the tickets cost, to read; buying is on the event's page (the button above).
+             Inside the facts' panel, which is the one that closes just below. --}}
+        @include('event.partials.embed-ticket-list')
+        {{-- The quiet way out to everything this frame leaves off. --}}
+        <a href="{{ \App\Support\EmbedEventView::pageUrl($event, $subdomain, $requestedOccurrence) }}" target="_blank" rel="noopener" data-embed-full-page
+           class="self-start text-sm text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-200 hover:underline">
+          {{ __('messages.embed_view_full_page') }}<span class="sr-only"> ({{ __('messages.opens_in_new_tab') }})</span>
+        </a>
+        @endif
+
+        </div>
+
+
+        {{-- Interest capture. Placed ABOVE #gp-event-form deliberately: hidePanelsBelow()
+             display:none's every sibling AFTER that element while the buy/RSVP form is open, which
+             is why the subscribe panel at the foot of the page vanishes during checkout. --}}
+        @include('event.partials.interest-capture')
+
+        {{-- A cancelled payment coming back to a page with no ticket form to say it in. Where
+             there is one, the same line is inside the form's panel below. --}}
+        @if (! $embedEvent && ($event->canAcceptRsvp($date) || ! $event->canSellTickets($date)))
+            @include('event.partials.payment-cancelled')
+        @endif
+
+        {{-- RSVP form section (hidden by default, shown on CTA click). Never in a frame: see the top. --}}
+        @if ($embedEvent)
+        @elseif ($event->canAcceptRsvp($date))
+        <div id="gp-event-form" class="gk-o3 scroll-mt-4"
+             style="display: none; transition: opacity 0.2s ease, transform 0.2s ease;"
+             @if (request()->get('rsvp') === 'true' || $formRefused)
+             data-show-initial="true"
+             @endif>
+            <div class="flex flex-col gap-10 gk-card gk-band">
+              <div class="flex-1">
+                <div class="flex flex-col gap-4">
+                  <h2 class="gk-band-title">
+                    @if ($event->isRsvpFull($date))
+                        {{ __('messages.join_waitlist') }}
+                    @else
+                        {{ $role->customLabel('register') }}
+                    @endif
+                  </h2>
+                  <div class="text-base text-gray-700 dark:text-gray-300">
+                    @include('event.rsvp', ['event' => $event, 'subdomain' => $subdomain])
+                  </div>
+                </div>
+              </div>
+            </div>
+        </div>
+        @elseif ($event->canSellTickets($date))
+        {{-- Ticket form section (hidden by default, shown on CTA click).
+             The redundant `&& $event->isPro()` that used to sit here was the difference between a
+             working buy button and a dead one: the CTA above is gated on canSellTickets() alone, so
+             any event that could sell but was not Pro rendered a button whose click target
+             (#gp-event-form) had never been rendered. Keep these two conditions identical. --}}
+        <div id="gp-event-form" class="gk-o3 scroll-mt-4"
+             style="display: none; transition: opacity 0.2s ease, transform 0.2s ease;"
+             @if (request()->get('tickets') === 'true' || $formRefused)
+             data-show-initial="true"
+             @endif>
+            <div class="flex flex-col gap-10 gk-card gk-band">
+              <div class="flex-1">
+                @include('event.partials.payment-cancelled')
+                @include('event.tickets', ['event' => $event, 'subdomain' => $subdomain])
+                {{-- Where the form's bar comes to rest. Outside the form's Vue mount on purpose:
+                     Vue puts new elements in place of the ones the server sent, and an observer
+                     set on one of those would be watching something no longer on the page. --}}
+                <div data-buybar-end aria-hidden="true" style="height: 1px; margin-top: -1px;"></div>
+              </div>
+            </div>
+        </div>
+        @endif
+
+        <script {!! nonce_attr() !!}>
+        (function() {
+            var form = document.getElementById('gp-event-form');
+            if (!form) return;
+
+            var paramKey = form.querySelector('#ticket-selector') ? 'tickets' : 'rsvp';
+            var desktopCta = document.getElementById('gp-event-cta');
+
+            {{-- Looked up when it is needed, not once up here: the phone's bar is printed AFTER this
+                 script, at the foot of the document, so a lookup made now always found nothing and
+                 the bar was never hidden. It stayed on screen under the open form, offering Buy
+                 tickets beside the form's own Checkout. --}}
+            function mobileCta() { return document.getElementById('gp-mobile-cta'); }
+
+            function hideCta() {
+                if (desktopCta) { desktopCta.style.display = 'none'; }
+                if (mobileCta()) { mobileCta().style.display = 'none'; }
+                if (window.esUpdateA11yCtaClearance) { window.esUpdateA11yCtaClearance(); }
+            }
+
+            function showCta() {
+                if (desktopCta) { desktopCta.style.display = ''; }
+                if (mobileCta()) { mobileCta().style.display = ''; }
+                if (window.esUpdateA11yCtaClearance) { window.esUpdateA11yCtaClearance(); }
+            }
+
+            function hidePanelsBelow() {
+                var sibling = form.nextElementSibling;
+                while (sibling) {
+                    if (sibling.tagName !== 'SCRIPT') {
+                        sibling.setAttribute('data-hidden-by-form', '1');
+                        sibling.style.display = 'none';
+                    }
+                    sibling = sibling.nextElementSibling;
+                }
+            }
+
+            function showPanelsBelow() {
+                var els = form.parentNode.querySelectorAll('[data-hidden-by-form]');
+                for (var i = 0; i < els.length; i++) {
+                    var el = els[i];
+                    el.removeAttribute('data-hidden-by-form');
+                    el.style.opacity = '0';
+                    el.style.display = '';
+                }
+                requestAnimationFrame(function() {
+                    for (var i = 0; i < els.length; i++) {
+                        els[i].style.transition = 'opacity 0.2s ease';
+                        els[i].style.opacity = '1';
+                    }
+                });
+            }
+
+            function showForm() {
+                form.style.display = '';
+                hideCta();
+                hidePanelsBelow();
+                requestAnimationFrame(function() {
+                    form.style.opacity = '1';
+                    form.style.transform = 'none';
+                });
+                var url = new URL(window.location);
+                url.searchParams.set(paramKey, 'true');
+                history.replaceState(null, '', url);
+                setTimeout(function() {
+                    form.scrollIntoView({ behavior: 'smooth', block: 'start' });
+                    window.dispatchEvent(new CustomEvent('event-form-shown'));
+                    {{-- The sign-up form opens on its name field, so that takes the keyboard. The
+                         ticket form opens on the tickets: nothing is focused that would raise a
+                         keyboard over them. --}}
+                    var nameInput = paramKey === 'rsvp' ? document.getElementById('name') : null;
+                    if (nameInput && !nameInput.value.trim()) { nameInput.focus(); }
+                }, 50);
+            }
+
+            function hideForm() {
+                form.style.opacity = '0';
+                form.style.transform = 'translateY(-8px)';
+                var url = new URL(window.location);
+                url.searchParams.delete(paramKey);
+                history.replaceState(null, '', url);
+                setTimeout(function() {
+                    form.style.display = 'none';
+                    showCta();
+                    showPanelsBelow();
+                }, 200);
+            }
+
+            {{-- The form's bar is square while it floats over the form and takes the panel's
+                 rounded corners where it comes to rest ([data-buybar-floating] in the kit). --}}
+            var barEnd = form.querySelector('[data-buybar-end]');
+            if (barEnd && window.IntersectionObserver) {
+                new IntersectionObserver(function (entries) {
+                    form.toggleAttribute('data-buybar-floating', ! entries[0].isIntersecting);
+                }).observe(barEnd);
+            }
+
+            window.addEventListener('show-event-form', showForm);
+            window.addEventListener('hide-event-form', hideForm);
+
+            if (form.hasAttribute('data-show-initial')) {
+                form.removeAttribute('data-show-initial');
+                form.style.opacity = '0';
+                form.style.transform = 'translateY(-8px)';
+                form.style.display = '';
+                hideCta();
+                hidePanelsBelow();
+                {{-- Again once the whole page has been read. A form that opens WITH the page runs
+                     this before anything below it exists: the panels after it and the phone's bar
+                     were both left on screen, where a form opened by its button hid them. --}}
+                document.addEventListener('DOMContentLoaded', function () {
+                    if (form.style.display !== 'none') { hideCta(); hidePanelsBelow(); }
+                });
+                requestAnimationFrame(function() {
+                    form.style.opacity = '1';
+                    form.style.transform = 'none';
+                    setTimeout(function() {
+                        form.scrollIntoView({ behavior: 'smooth', block: 'start' });
+                        window.dispatchEvent(new CustomEvent('event-form-shown'));
+                        var nameInput = paramKey === 'rsvp' ? document.getElementById('name') : null;
+                        if (nameInput && !nameInput.value.trim()) { nameInput.focus(); }
+                    }, 300);
+                });
+            }
+        })();
+        </script>
+
+        @if ($galleryInFlyerSlot)
+        {{-- No flyer: the gallery stands in, and its first photo is the page's one high-priority
+             image (the hero fallback in the other column gives it up). Ordered AFTER the form on
+             a phone, as it is in the markup: an open form hides what follows it, and a gallery
+             drawn above the form used to vanish from the top of the page on pressing Buy. --}}
+        <section id="gp-gallery" aria-labelledby="es-gallery-title" class="gk-o4 gk-sec gk-sec-rule {{ $role->isRtl() ? 'rtl' : '' }}">
+          @include('partials.gallery-card', ['galleryImages' => $galleryImages, 'galleryVariant' => 'event', 'galleryName' => $eventName, 'galleryLabel' => $role->customLabel('gallery'), 'galleryPriority' => true, 'accentColor' => $accentColor])
+        </section>
+        @endif
+
+        {{-- Description --}}
+        @if ($eventDescriptionHtml)
+        @php
+          $descriptionHtml = $eventDescriptionHtml;
+          $descriptionDir = content_dir_for_language($descriptionHtml, $displayLang);
+        @endphp
+        <article id="gp-about" class="gk-o4 gk-sec gk-sec-rule">
+          <h2 class="gk-label">
+            {{ $role->customLabel('about') }}
+          </h2>
+          <div class="{{ $descriptionDir === 'rtl' ? 'rtl' : '' }}" dir="{{ $descriptionDir }}">
+            {{-- demoteH1(): the event name above is the page's one <h1>, so an owner's "# Heading"
+                 renders as a marked <h2> that keeps the H1's look (custom-content-styles). --}}
+            <div class="gk-story custom-content">
+              {!! \App\Utils\UrlUtils::convertUrlsToLinks(\App\Utils\MarkdownUtils::demoteH1($descriptionHtml)) !!}
+            </div>
+          </div>
+        </article>
+        @endif
+
+        {{-- The bill, in the words column under the story, as the mock draws it: a quiet name over
+             each act (Talent), its picture small beside it, never a card in the picture column. --}}
         @php
           // Resolved once for the whole talent loop, not per video: VideoUtils::canRemoveVideo()
           // runs an isEditor() query per call. A strict subset of that rule - the partial still
           // calls it and remains the authority - so this can only ever be more restrictive.
           $canRemoveVideos = auth()->check() && ! is_demo_mode() && auth()->user()->isEditor($role->subdomain);
         @endphp
+        @if ($talentMembers->isNotEmpty() || $bareTalent->isNotEmpty())
+        {{-- With only acts listed by name, the whole section is #gp-talent-list (a published id
+             owners hide in their custom CSS), so hiding it takes the heading too: the heading
+             stood alone over the venue's card, which then read as the act. --}}
+        <section @if ($talentMembers->isEmpty()) id="gp-talent-list" @endif class="gk-lineup gk-o6 gk-sec gk-sec-rule" aria-labelledby="es-lineup-title">
+          <h2 id="es-lineup-title" class="gk-label">{{ __('messages.talent') }}</h2>
         {{-- class="contents" so each card stays a direct flex item of the column above and the
              gap-4 spacing is unchanged; the wrapper exists only to give the whole set one id.
              display:none on a display:contents box still removes the subtree. --}}
@@ -344,7 +1606,7 @@
           $talentHeaderUrl = $each->headerImageUrl(960);
           $hasTalentHeader = (bool) $talentHeaderUrl;
         @endphp
-        <div class="bg-white/95 dark:bg-gray-900/95 backdrop-blur-sm sm:rounded-2xl overflow-hidden">
+        <div class="gk-card">
           @if ($hasTalentHeader)
             {{-- Header banner: a built-in header's bundled WebP, or an upload's 960 derivative. --}}
             @php $talentHeaderSize = $each->headerImageDimensions(); @endphp
@@ -352,10 +1614,10 @@
             <div class="px-5 pb-5">
               {{-- Profile image overlapping header --}}
               @if ($each->profile_image_url)
-                <div class="rounded-xl w-[100px] h-[100px] -mt-[60px] bg-white/95 dark:bg-gray-900/95 p-[5px] mb-3">
+                <div class="rounded-xl w-[100px] h-[100px] -mt-[60px] gk-avatar-frame p-[5px] mb-3">
                   @if ($each->isClaimed())
                     @php
-                      $talentUrl = route('role.view_guest', ['subdomain' => $each->subdomain]);
+                      $talentUrl = $each->getGuestUrl(true);
                       $tQueryParams = [];
                       if (request('category')) $tQueryParams['category'] = request('category');
                       if (request('schedule')) $tQueryParams['schedule'] = request('schedule');
@@ -390,7 +1652,7 @@
               @if ($each->profile_image_url)
                 @if ($each->isClaimed())
                   @php
-                    $talentUrl = route('role.view_guest', ['subdomain' => $each->subdomain]);
+                    $talentUrl = $each->getGuestUrl(true);
                     $tQueryParams = [];
                     if (request('category')) $tQueryParams['category'] = request('category');
                     if (request('schedule')) $tQueryParams['schedule'] = request('schedule');
@@ -409,11 +1671,12 @@
                       $talentUrl .= '?' . http_build_query($tQueryParams);
                     }
                   @endphp
-                  <a href="{{ $talentUrl }}">
-                    <img src="{{ $each->getProfileImageUrl(960) }}" @if ($eachSrcset = $each->imageVariantSrcset()) srcset="{{ $eachSrcset }}" sizes="(min-width: 1024px) 340px, (min-width: 640px) calc(100vw - 80px), calc(100vw - 40px)" @endif alt="{{ $each->nameInLanguage($displayLang) }}" class="w-full aspect-square object-cover rounded-xl mb-4"/>
+                  {{-- The name beside it is the link a reader and a keyboard meet. --}}
+                  <a href="{{ $talentUrl }}" tabindex="-1" aria-hidden="true">
+                    <img src="{{ $each->getProfileImageUrl(960) }}" @if ($eachSrcset = $each->imageVariantSrcset()) srcset="{{ $eachSrcset }}" sizes="(min-width: 1024px) 340px, (min-width: 640px) calc(100vw - 80px), calc(100vw - 40px)" @endif alt="" class="gk-card-avatar"/>
                   </a>
                 @else
-                  <img src="{{ $each->getProfileImageUrl(960) }}" @if ($eachSrcset = $each->imageVariantSrcset()) srcset="{{ $eachSrcset }}" sizes="(min-width: 1024px) 340px, (min-width: 640px) calc(100vw - 80px), calc(100vw - 40px)" @endif alt="{{ $each->nameInLanguage($displayLang) }}" class="w-full aspect-square object-cover rounded-xl mb-4"/>
+                  <img src="{{ $each->getProfileImageUrl(960) }}" @if ($eachSrcset = $each->imageVariantSrcset()) srcset="{{ $eachSrcset }}" sizes="(min-width: 1024px) 340px, (min-width: 640px) calc(100vw - 80px), calc(100vw - 40px)" @endif alt="{{ $each->nameInLanguage($displayLang) }}" class="gk-card-avatar"/>
                 @endif
               @endif
           @endif
@@ -425,7 +1688,7 @@
                     @if ($each->isClaimed())
                       @if (!isset($talentUrl))
                         @php
-                          $talentUrl = route('role.view_guest', ['subdomain' => $each->subdomain]);
+                          $talentUrl = $each->getGuestUrl(true);
                           $tQueryParams = [];
                           if (request('category')) $tQueryParams['category'] = request('category');
                           if (request('schedule')) $tQueryParams['schedule'] = request('schedule');
@@ -477,7 +1740,7 @@
                           class="inline-flex items-center justify-center">
                           <button type="button" name="follow"
                             style="background-color: var(--es-accent); color: var(--es-accent-text)"
-                            class="inline-flex items-center rounded-md px-4 py-2 text-xs font-semibold border-2 border-transparent shadow-sm transition-all duration-200 hover:scale-105 hover:shadow-md">
+                            class="inline-flex items-center rounded-md px-4 py-2 text-xs font-semibold border-2 border-transparent shadow-sm gk-fill-btn">
                             {{ __('messages.manage') }}
                           </button>
                         </a>
@@ -493,7 +1756,7 @@
                           data-accent-color="{{ $accentColor }}"
                           data-contrast-color="{{ $contrastColor }}"
                           style="background-color: var(--es-accent); color: var(--es-accent-text)"
-                          class="inline-flex items-center justify-center rounded-md px-4 py-2 transition-all duration-200 hover:scale-105 hover:shadow-md text-xs font-semibold shadow-sm">
+                          class="inline-flex items-center justify-center rounded-md px-4 py-2 gk-fill-btn text-xs font-semibold shadow-sm">
                           {{ __('messages.follow') }}
                         </button>
                       @endif
@@ -574,20 +1837,20 @@
              its own claim page where it has one, which is how an act finds out a page exists for
              them without an invitation in hand. --}}
         @if ($bareTalent->isNotEmpty())
-        <div id="gp-talent-list" class="gk-o6 bg-white/95 dark:bg-gray-900/95 backdrop-blur-sm sm:rounded-2xl p-5">
+        <div @if ($talentMembers->isNotEmpty()) id="gp-talent-list" @endif class="gk-o6 gk-card p-5">
           <h2 class="text-sm font-semibold uppercase tracking-wide text-gray-500 dark:text-gray-400">
             {{ __('messages.talents') }}
           </h2>
           <ul class="mt-2 flex flex-col gap-1">
             @foreach ($bareTalent as $bare)
-            <li dir="{{ content_dir_for_language($bare->nameInLanguage($displayLang), $displayLang) }}">
+            <li class="gk-bare-act">
               @if ($bareClaimUrl = $bare->getClaimUrl())
                 <a href="{{ $bareClaimUrl }}" rel="nofollow" class="text-base text-gray-900 dark:text-gray-100 hover:underline">
-                  {!! str_replace(' , ', '<br>', e($bare->nameInLanguage($displayLang))) !!}
+                  <bdi>{!! str_replace(' , ', '<br>', e($bare->nameInLanguage($displayLang))) !!}</bdi>
                 </a>
               @else
                 <span class="text-base text-gray-900 dark:text-gray-100">
-                  {!! str_replace(' , ', '<br>', e($bare->nameInLanguage($displayLang))) !!}
+                  <bdi>{!! str_replace(' , ', '<br>', e($bare->nameInLanguage($displayLang))) !!}</bdi>
                 </span>
               @endif
             </li>
@@ -596,1176 +1859,19 @@
         </div>
         @endif
 
-        {{-- Venue card --}}
-        @if ($event->venue && ($event->venue->name || $event->venue->formatted_address))
-        @php
-          // As for the talent cards above: the header the venue's own page shows, or none.
-          $venueHeaderUrl = $event->venue->headerImageUrl(960);
-          $hasVenueHeader = (bool) $venueHeaderUrl;
-        @endphp
-        <div id="gp-venue" class="bg-white/95 dark:bg-gray-900/95 backdrop-blur-sm sm:rounded-2xl z-20 relative {{ $role->isRtl() ? 'rtl' : '' }}">
-          @if ($hasVenueHeader)
-            <div class="overflow-hidden rounded-t-2xl">
-              @php $venueHeaderSize = $event->venue->headerImageDimensions(); @endphp
-              <img class="block max-h-40 w-full object-cover" src="{{ $venueHeaderUrl }}" @if ($venueHeaderSize) width="{{ $venueHeaderSize[0] }}" height="{{ $venueHeaderSize[1] }}" @endif alt="{{ $event->venue->nameInLanguage($displayLang) }}" loading="lazy" decoding="async"/>
-            </div>
-          @endif
-          <div class="p-5 relative z-10">
-            @if ($event->venue->profile_image_url && $hasVenueHeader)
-              <div class="rounded-lg w-[100px] h-[100px] -mt-[60px] bg-white/95 dark:bg-gray-900/95 flex items-center justify-center mb-3">
-                <img class="rounded-md w-[90px] h-[90px] object-cover" src="{{ $event->venue->getProfileImageUrl(\App\Utils\ImageUtils::VARIANT_WIDTH) }}" alt="{{ $event->venue->nameInLanguage($displayLang) }}" loading="lazy" decoding="async"/>
-              </div>
-            @elseif ($event->venue->profile_image_url)
-              <img class="w-full aspect-square object-cover rounded-xl mb-3" src="{{ $event->venue->getProfileImageUrl(960) }}" @if ($venueSrcset = $event->venue->imageVariantSrcset()) srcset="{{ $venueSrcset }}" sizes="(min-width: 1024px) 340px, (min-width: 640px) calc(100vw - 80px), calc(100vw - 40px)" @endif alt="{{ $event->venue->nameInLanguage($displayLang) }}" loading="lazy" decoding="async"/>
-            @endif
-            <div class="flex flex-col gap-2">
-              @if ($event->venue->name)
-                @if ($event->venue->isClaimed())
-                  @php
-                    $venuePanelUrl = route('role.view_guest', ['subdomain' => $event->venue->subdomain]);
-                  @endphp
-                  <a href="{{ $venuePanelUrl }}" class="group inline-flex items-center gap-2 w-fit hover:opacity-80 transition-opacity duration-200 {{ $role->isRtl() ? 'rtl' : '' }}">
-                    <span class="text-base leading-snug font-semibold text-gray-900 dark:text-gray-100 group-hover:underline" style="font-family: '{{ str_replace('_', ' ', $event->venue->font_family) }}', sans-serif;">
-                      {{ $event->venue->nameInLanguage($displayLang) }}
-                    </span>
-                    <svg class="w-5 h-5 fill-gray-900 dark:fill-gray-100 opacity-70 group-hover:opacity-100 transition-opacity {{ $role->isRtl() ? 'scale-x-[-1]' : '' }}" viewBox="0 0 24 24" aria-hidden="true">
-                      <path d="M8.59,16.58L13.17,12L8.59,7.41L10,6L16,12L10,18L8.59,16.58Z"/>
-                    </svg>
-                  </a>
-                @else
-                  <p class="text-base leading-snug font-semibold text-gray-900 dark:text-gray-100" style="font-family: '{{ str_replace('_', ' ', $event->venue->font_family) }}', sans-serif;">
-                    {{ $event->venue->nameInLanguage($displayLang) }}
-                  </p>
-                @endif
-              @else
-                <p class="text-base leading-snug font-semibold text-gray-900 dark:text-gray-100">
-                  {{ $event->venue->shortAddress() }}
-                </p>
-              @endif
-              @if ($event->venue->textInLanguage("description_html", $displayLang))
-                @php $venueDir = content_dir_for_language($event->venue->textInLanguage("description_html", $displayLang), $displayLang); @endphp
-                {{-- demoteH1(): the event name is the page's one <h1>, so the venue's "# Heading" prints as an <h2>. --}}
-                <div x-data="{ expanded: false, needsExpand: false }" x-init="$nextTick(() => { let el = $refs.collapsed; needsExpand = el.scrollHeight > el.clientHeight })">
-                  <div x-show="!expanded" x-ref="collapsed" class="text-sm text-gray-700 dark:text-gray-300 line-clamp-3 custom-content {{ $venueDir === 'rtl' ? 'rtl' : '' }}" dir="{{ $venueDir }}">
-                    {!! \App\Utils\UrlUtils::convertUrlsToLinks(\App\Utils\MarkdownUtils::demoteH1($event->venue->textInLanguage("description_html", $displayLang))) !!}
-                  </div>
-                  <div x-show="expanded" x-cloak class="text-sm text-gray-700 dark:text-gray-300 custom-content {{ $venueDir === 'rtl' ? 'rtl' : '' }}" dir="{{ $venueDir }}">
-                    {!! \App\Utils\UrlUtils::convertUrlsToLinks(\App\Utils\MarkdownUtils::demoteH1($event->venue->textInLanguage("description_html", $displayLang))) !!}
-                  </div>
-                  <button x-show="!expanded && needsExpand" :aria-expanded="expanded" @click="expanded = true" class="text-sm font-medium hover:underline mt-1 text-blue-600 dark:text-blue-400">
-                    {{ $role->customLabel('read_more') }}
-                  </button>
-                  <button x-show="expanded" x-cloak :aria-expanded="expanded" @click="expanded = false" class="text-sm font-medium hover:underline mt-1 text-blue-600 dark:text-blue-400">
-                    {{ __('messages.show_less') }}
-                  </button>
-                </div>
-              @endif
-              <div class="flex flex-col gap-4 mt-2">
-                @if ($event->venue->email && $event->venue->show_email)
-                <div class="flex flex-row gap-2 items-center relative duration-300 text-gray-700 dark:text-gray-300 fill-gray-700 dark:fill-gray-300 {{ $role->isRtl() ? 'rtl' : '' }}">
-                  <svg width="24" height="24" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
-                    <path fill-rule="evenodd" clip-rule="evenodd" d="M3.17157 5.17157C2 6.34315 2 8.22876 2 12C2 15.7712 2 17.6569 3.17157 18.8284C4.34315 20 6.22876 20 10 20H14C17.7712 20 19.6569 20 20.8284 18.8284C22 17.6569 22 15.7712 22 12C22 8.22876 22 6.34315 20.8284 5.17157C19.6569 4 17.7712 4 14 4H10C6.22876 4 4.34315 4 3.17157 5.17157ZM18.5762 7.51986C18.8413 7.83807 18.7983 8.31099 18.4801 8.57617L16.2837 10.4066C15.3973 11.1452 14.6789 11.7439 14.0448 12.1517C13.3843 12.5765 12.7411 12.8449 12 12.8449C11.2589 12.8449 10.6157 12.5765 9.95518 12.1517C9.32112 11.7439 8.60271 11.1452 7.71636 10.4066L5.51986 8.57617C5.20165 8.31099 5.15866 7.83807 5.42383 7.51986C5.68901 7.20165 6.16193 7.15866 6.48014 7.42383L8.63903 9.22291C9.57199 10.0004 10.2197 10.5384 10.7666 10.8901C11.2959 11.2306 11.6549 11.3449 12 11.3449C12.3451 11.3449 12.7041 11.2306 13.2334 10.8901C13.7803 10.5384 14.428 10.0004 15.361 9.22291L17.5199 7.42383C17.8381 7.15866 18.311 7.20165 18.5762 7.51986Z" />
-                  </svg>
-                  <a href="mailto:{{ $event->venue->email }}" class="text-sm hover:underline">{{ $event->venue->email }}</a>
-                </div>
-                @endif
-                @if ($event->venue->showsPhone())
-                <div class="flex flex-row gap-2 items-center relative duration-300 text-gray-700 dark:text-gray-300 fill-gray-700 dark:fill-gray-300 {{ $role->isRtl() ? 'rtl' : '' }}">
-                  <svg width="24" height="24" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
-                    <path d="M6.62 10.79c1.44 2.83 3.76 5.14 6.59 6.59l2.2-2.2c.27-.27.67-.36 1.02-.24 1.12.37 2.33.57 3.57.57.55 0 1 .45 1 1V20c0 .55-.45 1-1 1-9.39 0-17-7.61-17-17 0-.55.45-1 1-1h3.5c.55 0 1 .45 1 1 0 1.25.2 2.45.57 3.57.11.35.03.74-.25 1.02l-2.2 2.2z"/>
-                  </svg>
-                  <a href="tel:{{ $event->venue->phone }}" class="text-sm hover:underline">{{ $event->venue->phone }}</a>
-                </div>
-                @endif
-                @if ($event->venue->website)
-                <div class="flex flex-row gap-2 items-center relative duration-300 text-gray-700 dark:text-gray-300 fill-gray-700 dark:fill-gray-300 min-w-0 {{ $role->isRtl() ? 'rtl' : '' }}">
-                  <svg width="24" height="24" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg" aria-hidden="true" class="flex-shrink-0">
-                    <path fill-rule="evenodd" clip-rule="evenodd" d="M2.02783 11.25C2.41136 6.07745 6.72957 2 12.0001 2C11.1693 2 10.4295 2.36421 9.82093 2.92113C9.21541 3.47525 8.70371 4.24878 8.28983 5.16315C7.87352 6.08292 7.55013 7.15868 7.33126 8.32611C7.1558 9.26194 7.04903 10.2485 7.01344 11.25H2.02783ZM2.02783 12.75H7.01344C7.04903 13.7515 7.1558 14.7381 7.33126 15.6739C7.55013 16.8413 7.87351 17.9171 8.28983 18.8368C8.70371 19.7512 9.21541 20.5247 9.82093 21.0789C10.4295 21.6358 11.1693 22 12.0001 22C6.72957 22 2.41136 17.9226 2.02783 12.75Z" />
-                    <path d="M12.0001 3.39535C11.7251 3.39535 11.3699 3.51236 10.9567 3.89042C10.5406 4.27126 10.1239 4.86815 9.75585 5.68137C9.3902 6.4892 9.09329 7.46441 8.88897 8.55419C8.72806 9.41242 8.62824 10.3222 8.59321 11.25H15.4071C15.372 10.3222 15.2722 9.41242 15.1113 8.5542C14.907 7.46441 14.6101 6.48921 14.2444 5.68137C13.8763 4.86815 13.4597 4.27126 13.0435 3.89042C12.6304 3.51236 12.2751 3.39535 12.0001 3.39535Z" />
-                    <path d="M8.88897 15.4458C9.09329 16.5356 9.3902 17.5108 9.75585 18.3186C10.1239 19.1319 10.5406 19.7287 10.9567 20.1096C11.3698 20.4876 11.7251 20.6047 12.0001 20.6047C12.2751 20.6047 12.6304 20.4876 13.0435 20.1096C13.4597 19.7287 13.8763 19.1319 14.2444 18.3186C14.6101 17.5108 14.907 16.5356 15.1113 15.4458C15.2722 14.5876 15.372 13.6778 15.4071 12.75H8.59321C8.62824 13.6778 8.72806 14.5876 8.88897 15.4458Z" />
-                    <path d="M12.0001 2C12.831 2 13.5708 2.36421 14.1793 2.92113C14.7849 3.47525 15.2966 4.24878 15.7104 5.16315C16.1267 6.08292 16.4501 7.15868 16.669 8.32612C16.8445 9.26194 16.9512 10.2485 16.9868 11.25H21.9724C21.5889 6.07745 17.2707 2 12.0001 2Z" />
-                    <path d="M16.669 15.6739C16.4501 16.8413 16.1267 17.9171 15.7104 18.8368C15.2966 19.7512 14.7849 20.5247 14.1793 21.0789C13.5708 21.6358 12.831 22 12.0001 22C17.2707 22 21.5889 17.9226 21.9724 12.75H16.9868C16.9512 13.7515 16.8445 14.7381 16.669 15.6739Z" />
-                  </svg>
-                  {{-- Linked only through safeHref(): the website is free text, and a javascript:
-                       value would run on this page. Without a safe link it reads as text. --}}
-                  @if ($venueWebsiteHref = \App\Utils\UrlUtils::safeHref($event->venue->website))
-                  <x-link href="{{ $venueWebsiteHref }}" target="_blank" :nofollow="true" class="text-sm text-gray-700 dark:text-gray-300 min-w-0 break-all">
-                    {{ App\Utils\UrlUtils::clean($event->venue->website) }}
-                  </x-link>
-                  @else
-                  <span class="text-sm text-gray-700 dark:text-gray-300 min-w-0 break-all">{{ App\Utils\UrlUtils::clean($event->venue->website) }}</span>
-                  @endif
-                </div>
-                @endif
-              </div>
-
-              @if ($event->venue->social_links)
-              <div id="gp-venue-socials" class="flex flex-row gap-3 items-center mt-2 {{ $role->isRtl() ? 'rtl' : '' }}">
-                @foreach ($event->venue->decodeLinks('social_links') as $link)
-                  {{-- No icon for a link a browser should not open - see Role::socialLinkHref(). --}}
-                  @if ($venueLinkHref = $event->venue->socialLinkHref($link, $loop->index))
-                  <a
-                    href="{{ $venueLinkHref }}" target="_blank" rel="noopener noreferrer nofollow"
-                    class="w-10 h-10 rounded-full flex justify-center items-center bg-gray-100 dark:bg-gray-700 shadow-sm hover:shadow-lg hover:scale-105 transition-all duration-200"
-                    title="{{ App\Utils\UrlUtils::clean($link->url) }}"
-                    >
-                    <x-url-icon class="w-5 h-5" color="#6B7280">
-                      {{ \App\Utils\UrlUtils::clean($link->url) }}
-                    </x-url-icon>
-                  </a>
-                  @endif
-                @endforeach
-              </div>
-              @endif
-
-              {{-- Calendar links dropdown (inside venue card). Not plan-gated: this is the quiet
-                   fallback a visitor sees when an event is not selling, so it has to render for a
-                   free ticketed event too - otherwise a free schedule at its monthly allowance shows
-                   a page with no buy button AND no calendar link, which reads as broken. --}}
-              @if (!$event->is_draft && $event->tickets_enabled)
-              <div class="relative mt-4">
-                <button type="button"
-                    class="calendar-card-toggle inline-flex justify-center gap-x-1.5 rounded-xl px-6 py-3 text-base font-semibold shadow-sm transition-all duration-200 hover:scale-105 hover:shadow-lg"
-                    style="background-color: var(--es-accent); color: var(--es-accent-text);"
-                    aria-expanded="true" aria-haspopup="true">
-                  {{ $role->customLabel('add_to_calendar') }}
-                  <svg class="-me-1 h-5 w-5" viewBox="0 0 20 20" fill="currentColor" aria-hidden="true">
-                    <path fill-rule="evenodd" d="M5.23 7.21a.75.75 0 011.06.02L10 11.168l3.71-3.938a.75.75 0 111.08 1.04l-4.25 4.5a.75.75 0 01-1.08 0l-4.25-4.5a.75.75 0 01.02-1.06z" clip-rule="evenodd" />
-                  </svg>
-                </button>
-
-                {{-- Calendar dropdown menu --}}
-                <div id="calendar-card-dropdown" class="pop-up-menu gp-dropdown hidden absolute top-full {{ $role->isRtl() ? 'end-0 origin-top-right' : 'start-0 origin-top-left' }} z-50 mt-2 w-56 rounded-xl bg-white shadow-lg focus:outline-none" role="menu" aria-orientation="vertical" tabindex="-1">
-                  <div class="py-1 stop-propagation" role="none">
-                    <a data-funnel="calendar_add" href="{{ $event->getGoogleCalendarUrl($date) }}" target="_blank" rel="noopener noreferrer" class="group flex items-center px-4 py-3 text-sm text-gray-700 dark:text-gray-200 rounded-lg transition-all duration-200 gp-dropdown-item" role="menuitem" tabindex="-1">
-                      <svg class="me-3 h-5 w-5 text-gray-400 group-hover:text-gray-500" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
-                        <path d="M21.35,11.1H12.18V13.83H18.69C18.36,17.64 15.19,19.27 12.19,19.27C8.36,19.27 5,16.25 5,12C5,7.9 8.2,4.73 12.2,4.73C15.29,4.73 17.1,6.7 17.1,6.7L19,4.72C19,4.72 16.56,2 12.1,2C6.42,2 2.03,6.8 2.03,12C2.03,17.05 6.16,22 12.25,22C17.6,22 21.5,18.33 21.5,12.91C21.5,11.76 21.35,11.1 21.35,11.1V11.1Z" />
-                      </svg>
-                      Google Calendar
-                    </a>
-                    <a data-funnel="calendar_add" href="{{ $event->getAppleCalendarUrl($date, $role->subdomain) }}" class="group flex items-center px-4 py-3 text-sm text-gray-700 dark:text-gray-200 rounded-lg transition-all duration-200 gp-dropdown-item" role="menuitem" tabindex="-1">
-                      <svg class="me-3 h-5 w-5 text-gray-400 group-hover:text-gray-500" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
-                        <path d="M18.71,19.5C17.88,20.74 17,21.95 15.66,21.97C14.32,22 13.89,21.18 12.37,21.18C10.84,21.18 10.37,21.95 9.1,22C7.79,22.05 6.8,20.68 5.96,19.47C4.25,17 2.94,12.45 4.7,9.39C5.57,7.87 7.13,6.91 8.82,6.88C10.1,6.86 11.32,7.75 12.11,7.75C12.89,7.75 14.37,6.68 15.92,6.84C16.57,6.87 18.39,7.1 19.56,8.82C19.47,8.88 17.39,10.1 17.41,12.63C17.44,15.65 20.06,16.66 20.09,16.67C20.06,16.74 19.67,18.11 18.71,19.5M13,3.5C13.73,2.67 14.94,2.04 15.94,2C16.07,3.17 15.6,4.35 14.9,5.19C14.21,6.04 13.07,6.7 11.95,6.61C11.8,5.46 12.36,4.26 13,3.5Z" />
-                      </svg>
-                      Apple Calendar
-                    </a>
-                    <a data-funnel="calendar_add" href="{{ $event->getMicrosoftCalendarUrl($date) }}" target="_blank" rel="noopener noreferrer" class="group flex items-center px-4 py-3 text-sm text-gray-700 dark:text-gray-200 rounded-lg transition-all duration-200 gp-dropdown-item" role="menuitem" tabindex="-1">
-                      <svg class="me-3 h-5 w-5 text-gray-400 group-hover:text-gray-500" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
-                        <path d="M2,3H11V12H2V3M11,22H2V13H11V22M21,3V12H12V3H21M21,22H12V13H21V22Z" />
-                      </svg>
-                      Microsoft Outlook
-                    </a>
-                  </div>
-                </div>
-              </div>
-              @endif
-            </div>
-          </div>
-          @if ($event->venue->formatted_address && config('services.google.maps') && !request()->attributes->get('custom_domain_host'))
-          <div id="gp-venue-map" class="overflow-hidden sm:rounded-b-2xl" style="height: 200px;">
-            {{-- Interactive Google Maps only once the visitor wants it (components/consent-embed);
-                 until then the static map this install proxies, which sends Google nothing. --}}
-            <x-consent-embed
-                kind="map"
-                :src="'https://www.google.com/maps/embed/v1/place?key='.config('services.google.maps').'&q='.($event->venue->google_place_id ? 'place_id:'.$event->venue->google_place_id : urlencode($event->venue->bestAddress()))"
-                :title="__('messages.map_of_venue', ['venue' => $event->venue->nameInLanguage($displayLang)])"
-                frame-class="w-full border-0"
-                frame-style="height: 200px;"
-                :poster="config('services.google.backend') && $event->venue->geo_lat ? route('map.image', ['id' => \App\Utils\UrlUtils::encodeId($event->venue->id)]) : null" />
-          </div>
-          @elseif ($event->venue->formatted_address && config('services.google.backend') && $event->venue->geo_lat)
-          <div id="gp-venue-map" class="overflow-hidden sm:rounded-b-2xl" style="height: 200px;">
-            <a href="https://www.google.com/maps/search/?api=1&query={{ $event->venue->geo_lat }},{{ $event->venue->geo_lon }}" target="_blank" rel="noopener noreferrer">
-              <img src="{{ route('map.image', ['id' => \App\Utils\UrlUtils::encodeId($event->venue->id)]) }}"
-                   alt="{{ $event->venue->bestAddress() }}"
-                   width="600" height="200"
-                   loading="lazy"
-                   style="width: 100%; height: 200px; object-fit: cover;">
-            </a>
-          </div>
-          @endif
-        </div>
-        @endif
-
-        {{-- Accommodation near the venue. A sibling of the venue card rather than a child of
-             it: the card's last element carries sm:rounded-b-2xl, so appending inside would
-             break that edge, and "where to stay" is a different subject that wants its own
-             heading and landmark. Its own gate is the venue's coordinates, which is not the
-             same predicate as the card's formatted_address. --}}
-        <x-stay22-map :role="$role" :event="$event" :date="$date" :accent-color="$accentColor" />
-
-        {{-- Calendar links dropdown (fallback when no venue). Not plan-gated, same reason as the
-             copy inside the venue card above. --}}
-        @if (!$event->is_draft && !($event->venue && ($event->venue->name || $event->venue->formatted_address)) && $event->tickets_enabled)
-        <div class="relative {{ $role->isRtl() ? 'rtl' : '' }}">
-          <button type="button"
-              class="calendar-card-toggle inline-flex justify-center gap-x-1.5 rounded-xl px-6 py-3 text-base font-semibold shadow-sm transition-all duration-200 hover:scale-105 hover:shadow-lg"
-              style="background-color: var(--es-accent); color: var(--es-accent-text);"
-              aria-expanded="true" aria-haspopup="true">
-            {{ $role->customLabel('add_to_calendar') }}
-            <svg class="-me-1 h-5 w-5" viewBox="0 0 20 20" fill="currentColor" aria-hidden="true">
-              <path fill-rule="evenodd" d="M5.23 7.21a.75.75 0 011.06.02L10 11.168l3.71-3.938a.75.75 0 111.08 1.04l-4.25 4.5a.75.75 0 01-1.08 0l-4.25-4.5a.75.75 0 01.02-1.06z" clip-rule="evenodd" />
-            </svg>
-          </button>
-
-          {{-- Calendar dropdown menu --}}
-          <div id="calendar-card-dropdown" class="pop-up-menu gp-dropdown hidden absolute top-full {{ $role->isRtl() ? 'end-0 origin-top-right' : 'start-0 origin-top-left' }} z-50 mt-2 w-56 rounded-xl bg-white shadow-lg focus:outline-none" role="menu" aria-orientation="vertical" tabindex="-1">
-            <div class="py-1 stop-propagation" role="none">
-              <a data-funnel="calendar_add" href="{{ $event->getGoogleCalendarUrl($date) }}" target="_blank" rel="noopener noreferrer" class="group flex items-center px-4 py-3 text-sm text-gray-700 dark:text-gray-200 rounded-lg transition-all duration-200 gp-dropdown-item" role="menuitem" tabindex="-1">
-                <svg class="me-3 h-5 w-5 text-gray-400 group-hover:text-gray-500" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
-                  <path d="M21.35,11.1H12.18V13.83H18.69C18.36,17.64 15.19,19.27 12.19,19.27C8.36,19.27 5,16.25 5,12C5,7.9 8.2,4.73 12.2,4.73C15.29,4.73 17.1,6.7 17.1,6.7L19,4.72C19,4.72 16.56,2 12.1,2C6.42,2 2.03,6.8 2.03,12C2.03,17.05 6.16,22 12.25,22C17.6,22 21.5,18.33 21.5,12.91C21.5,11.76 21.35,11.1 21.35,11.1V11.1Z" />
-                </svg>
-                Google Calendar
-              </a>
-              <a data-funnel="calendar_add" href="{{ $event->getAppleCalendarUrl($date, $role->subdomain) }}" class="group flex items-center px-4 py-3 text-sm text-gray-700 dark:text-gray-200 rounded-lg transition-all duration-200 gp-dropdown-item" role="menuitem" tabindex="-1">
-                <svg class="me-3 h-5 w-5 text-gray-400 group-hover:text-gray-500" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
-                  <path d="M18.71,19.5C17.88,20.74 17,21.95 15.66,21.97C14.32,22 13.89,21.18 12.37,21.18C10.84,21.18 10.37,21.95 9.1,22C7.79,22.05 6.8,20.68 5.96,19.47C4.25,17 2.94,12.45 4.7,9.39C5.57,7.87 7.13,6.91 8.82,6.88C10.1,6.86 11.32,7.75 12.11,7.75C12.89,7.75 14.37,6.68 15.92,6.84C16.57,6.87 18.39,7.1 19.56,8.82C19.47,8.88 17.39,10.1 17.41,12.63C17.44,15.65 20.06,16.66 20.09,16.67C20.06,16.74 19.67,18.11 18.71,19.5M13,3.5C13.73,2.67 14.94,2.04 15.94,2C16.07,3.17 15.6,4.35 14.9,5.19C14.21,6.04 13.07,6.7 11.95,6.61C11.8,5.46 12.36,4.26 13,3.5Z" />
-                </svg>
-                Apple Calendar
-              </a>
-              <a data-funnel="calendar_add" href="{{ $event->getMicrosoftCalendarUrl($date) }}" target="_blank" rel="noopener noreferrer" class="group flex items-center px-4 py-3 text-sm text-gray-700 dark:text-gray-200 rounded-lg transition-all duration-200 gp-dropdown-item" role="menuitem" tabindex="-1">
-                <svg class="me-3 h-5 w-5 text-gray-400 group-hover:text-gray-500" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
-                  <path d="M2,3H11V12H2V3M11,22H2V13H11V22M21,3V12H12V3H21M21,22H12V13H21V22Z" />
-                </svg>
-                Microsoft Outlook
-              </a>
-            </div>
-          </div>
-        </div>
-        @endif
-
-        {{-- The schedule's other upcoming events carry on down this column, as they always
-             did (event/partials/more-events says what changed about how). --}}
-        @include('event.partials.more-events')
-
-        </div>
-      </div>
-
-      @php
-          // ONE eligibility decision for the interest capture, shared by the card and by every
-          // link that points at it. It used to live only inside the partial, so the two
-          // Add-to-Calendar rows were gated on $showCalendarPopup while the card they pointed at
-          // ALSO refused on unlisted, cancelled, hidden, password-protected, demo and past events -
-          // and on a cancelled event, where the mobile sheet definitely renders, the menu offered
-          // "Tell me when tickets go on sale" and clicking it did nothing.
-          //
-          // Mirrors the noindex conditions in layouts/app-guest.blade.php:71 plus the guards the
-          // checkout opt-in already carries. Anything not publicly and durably visible has no
-          // business collecting an address against it.
-          //
-          // The event-level half, including the owner's switch, is Event::offersInterestCapture(),
-          // which EventInterestController::store() calls too. The switch it reads is the event
-          // CREATOR's, not $role's: the list and its emails belong to the creator, and this page
-          // is often not the creator's (a claimed talent's subdomain is the canonical URL).
-          $showInterestCapture = ! request()->embed
-              && ! request('graphic')
-              && $event->exists
-              && $event->offersInterestCapture()
-              && ! is_demo_role($role);
-
-          if ($showInterestCapture) {
-              // Nothing to promise about a date that has already gone. Mirrors canAcceptRsvp()'s
-              // check: end of the occurrence's day AT THE VENUE, because Carbon::parse() without
-              // the zone would use the app timezone and call a 9pm New York show over an hour
-              // before doors. A dateless event is never past.
-              if (\App\Models\Event::isOccurrenceDate($date ?? null)) {
-                  $showInterestCapture = ! \Carbon\Carbon::parse($date, $event->scheduleTimezone())->endOfDay()->isPast();
-              } elseif ($event->starts_at) {
-                  $showInterestCapture = ! $event->getEndDateTime(null, true)->endOfDay()->isPast();
-              }
-          }
-      @endphp
-
-      {{-- RIGHT COLUMN: the facts and the button, the form, the story --}}
-      <div class="gk-event-col gk-event-main">
-        <div id="gp-event-details" class="gk-o2 bg-white/95 dark:bg-gray-900/95 backdrop-blur-sm sm:rounded-2xl p-6 sm:p-8 flex flex-col gap-6 z-10">
-
-        {{-- Breadcrumb --}}
-        <nav id="gp-back-link" aria-label="Breadcrumb" class="flex items-center gap-3 text-sm text-gray-500 dark:text-gray-400 {{ $role->isRtl() ? 'rtl' : '' }}">
-          <a href="{{ $backUrl }}" class="px-3 py-2 -mx-3 hover:underline hover:text-gray-700 dark:hover:text-gray-200">
-            {{ $role->isRtl() ? '→' : '←' }} {{ $role->customLabel('back_to_schedule') }}
-          </a>
-          @if (auth()->user() && auth()->user()->canEditEvent($event))
-            <span>|</span>
-            <a href="{{ app_url(route('event.edit', ['subdomain' => $role->subdomain, 'hash' => App\Utils\UrlUtils::encodeId($event->id)], false)) }}" class="px-3 py-2 -mx-3 hover:underline hover:text-gray-700 dark:hover:text-gray-200">
-              {{ __('messages.edit_event') }}
-            </a>
-          @endif
-        </nav>
-
-        @php
-            $translateMode = showing_translation($role);
-        @endphp
-
-        {{-- Event title --}}
-        <h1
-          id="gp-event-title"
-          class="text-gray-900 dark:text-gray-100 text-[28px] sm:text-[36px] lg:text-[44px] leading-snug font-bold {{ $role->isRtl() ? 'rtl text-right' : '' }}"
-          dir="{{ content_dir_for_language($eventName, $displayLang) }}"
-        >
-          {!! str_replace(' , ', '<br>', e($eventName)) !!}
-          @if ($event->isPasswordProtected())
-            <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" class="inline-block w-8 h-8 text-gray-400 ms-2 align-[-0.15em]"><path stroke-linecap="round" stroke-linejoin="round" d="M16.5 10.5V6.75a4.5 4.5 0 10-9 0v3.75m-.75 11.25h10.5a2.25 2.25 0 002.25-2.25v-6.75a2.25 2.25 0 00-2.25-2.25H6.75a2.25 2.25 0 00-2.25 2.25v6.75a2.25 2.25 0 002.25 2.25z" /></svg>
-          @endif
-        </h1>
-
-        {{-- Short description --}}
-        @if ($eventShortDescription)
-        <p id="gp-event-short-description" class="text-gray-600 dark:text-gray-400 text-lg mt-2 {{ $role->isRtl() ? 'rtl text-right' : '' }}"
-          dir="{{ content_dir_for_language($eventShortDescription, $displayLang) }}">
-          {{ $eventShortDescription }}
-        </p>
-        @endif
-
-        {{-- When. The day in the tile, then what a visitor has to know to be there: the year
-             when it is not this one, the hours with the zone they are in, how it repeats and the
-             next days it is on.
-
-             A show that runs past midnight is one night, not two days. Event::isMultiDay() is
-             true the moment an event crosses midnight, so a 10 PM to 2 AM show was drawn as
-             "16-17" with a date range; is_multi_day (a day or longer) is what a range is for. --}}
-        @php
-          // Venue-local: this feeds the machine-readable <time datetime> attribute below.
-          $startDt = $event->getStartDateTime($date, true, $event->scheduleTimezone());
-          $manyDays = (bool) $event->is_multi_day;
-          $endDt = $event->duration > 0 ? (clone $startDt)->addMinutes($event->durationInMinutes()) : null;
-          $use24 = get_use_24_hour_time($role);
-          $otherYear = $startDt->year !== \Carbon\Carbon::now($event->scheduleTimezone())->year;
-          // A date with no time of day has no zone worth naming. Carbon prints an offset for a
-          // zone with no abbreviation of its own.
-          $hasTime = strlen((string) $event->starts_at) > 10;
-          $zone = $hasTime ? $startDt->format('T') : '';
-          // "+0545" as "GMT+5:45", "+08" as "GMT+8".
-          if (preg_match('/^([+-])(\d{2})(\d{2})?$/', $zone, $offset)) {
-              $zone = 'GMT'.$offset[1].((int) $offset[2]).(($offset[3] ?? '00') !== '00' ? ':'.$offset[3] : '');
-          }
-          // "10:00 PM - 2:00 AM" needs no help. An end well into the next morning says its day.
-          $endsNextDay = ! $manyDays && $endDt && ! $endDt->isSameDay($startDt) && (int) $endDt->format('G') >= 6;
-          // The other days of a series, and how it repeats. Asked of every series, one of
-          // hand-added dates included (it has no pattern to name, and still has other days).
-          // A series that has run its course says neither: "Weekly" under a date of a course
-          // that ended in the spring reads as though it were still on.
-          $moreDates = $event->days_of_week ? $event->occurrencesAfter($date ?: null, 3) : [];
-          $recurrence = ($moreDates || ($event->recurring_end_type ?? 'never') !== 'after_events') ? $event->recurrenceSummary() : null;
-        @endphp
-        <div id="gp-event-date" class="flex items-center gap-4 {{ $role->isRtl() ? 'rtl' : '' }}">
-          @if ($manyDays && $endDt && $startDt->format('m') === $endDt->format('m'))
-          <div class="flex-shrink-0 w-16 h-16 rounded-xl border border-gray-200 dark:border-gray-700
-                      bg-white dark:bg-gray-900 flex flex-col items-center justify-center shadow-sm">
-            <span class="text-[11px] font-bold uppercase tracking-wider leading-none pt-1"
-                  style="color: var(--es-accent-readable);">
-              {{ $startDt->translatedFormat('M') }}
-            </span>
-            <span class="text-lg font-bold text-gray-900 dark:text-white leading-none">
-              {{ $startDt->format('j') }}-{{ $endDt->format('j') }}
-            </span>
-          </div>
-          @else
-          <div class="flex-shrink-0 w-16 h-16 rounded-xl border border-gray-200 dark:border-gray-700
-                      bg-white dark:bg-gray-900 flex flex-col items-center justify-center shadow-sm">
-            <span class="text-[11px] font-bold uppercase tracking-wider leading-none pt-1"
-                  style="color: var(--es-accent-readable);">
-              {{ $startDt->translatedFormat('M') }}
-            </span>
-            <span class="text-2xl font-bold text-gray-900 dark:text-white leading-none">
-              {{ $startDt->format('j') }}
-            </span>
-          </div>
-          @endif
-          <div class="flex flex-col min-w-0">
-            @if ($manyDays && $endDt)
-              <span class="text-lg font-semibold text-gray-900 dark:text-white">
-                <time datetime="{{ $startDt->format('Y-m-d\TH:i:sP') }}">
-                  {{ $event->getDateRangeDisplay($date) }}
-                </time>
-              </span>
-              @php
-                $timeFormat = $use24 ? 'H:i' : 'g:i A';
-                $multiStartTime = $startDt->format($timeFormat);
-                $multiEndTime = $endDt->format($timeFormat);
-              @endphp
-              <span class="text-sm text-gray-500 dark:text-gray-400">
-                @if ($startDt->format('m') === $endDt->format('m'))
-                  {{ $startDt->translatedFormat('M j') }}, <bdi dir="ltr">{{ $multiStartTime }}</bdi> - {{ $endDt->format('j') }}, <bdi dir="ltr">{{ $multiEndTime }}</bdi>
-                @else
-                  {{ $startDt->translatedFormat('M j') }}, <bdi dir="ltr">{{ $multiStartTime }}</bdi> - {{ $endDt->translatedFormat('M j') }}, <bdi dir="ltr">{{ $multiEndTime }}</bdi>
-                @endif
-                @if ($zone) <bdi dir="ltr" data-event-zone>{{ $zone }}</bdi>@endif
-              </span>
-            @else
-              <span class="text-lg font-semibold text-gray-900 dark:text-white">
-                <time datetime="{{ $startDt->format('Y-m-d\TH:i:sP') }}">
-                  {{-- The tile has no room for a year, and next October is not this October. --}}
-                  {{ $otherYear ? $startDt->translatedFormat('l, F j, Y') : $startDt->translatedFormat('l') }}
-                </time>
-              </span>
-              <span class="text-sm text-gray-500 dark:text-gray-400">
-                <time dir="ltr" datetime="{{ $startDt->format('Y-m-d\TH:i:sP') }}">{{ $event->getStartEndTime($date, $use24) }}</time>@if ($endsNextDay) <span data-event-ends>({{ $endDt->translatedFormat('D') }})</span>@endif
-                @if ($zone) <bdi dir="ltr" data-event-zone>{{ $zone }}</bdi>@endif
-              </span>
-            @endif
-            @if ($recurrence)
-              {{-- A label and a list, not a sentence (Event::recurrenceSummary() says why). --}}
-              <span class="text-sm text-gray-500 dark:text-gray-400" data-event-repeats>
-                {{ $recurrence['label'] }}@if ($recurrence['days']) · {{ implode(', ', $recurrence['days']) }}@endif
-                @if ($recurrence['until'])
-                  · {{ __('messages.repeats_until', ['date' => \Carbon\Carbon::parse($recurrence['until'])->translatedFormat('M j, Y')]) }}
-                @endif
-              </span>
-            @endif
-          </div>
-        </div>
-        @if ($moreDates)
-          {{-- The other days it is on, each a link to that day's own page: a page for one date
-               of a series used to offer no way to any other. A day with nothing left says so.
-
-               nofollow, and never a day past the horizon Event::occurrencesAfter() keeps from
-               today: each of these is a real page, and a link from every date to the next
-               three is a chain a crawler would follow for ever. --}}
-          <div class="gk-more-dates flex flex-wrap items-baseline gap-x-3 gap-y-1 text-sm {{ $role->isRtl() ? 'rtl' : '' }}" data-event-more-dates>
-            <span class="text-gray-500 dark:text-gray-400">{{ __('messages.more_dates') }}</span>
-            @foreach ($moreDates as $moreDate)
-              @php
-                $moreDt = $event->getStartDateTime($moreDate, true, $event->scheduleTimezone());
-                $moreGone = $event->rowsSoldOutOn($moreDate);
-              @endphp
-              <span class="whitespace-nowrap">
-                <a href="{{ $event->getGuestUrl($subdomain, $moreDate) }}" class="gk-link" rel="nofollow">{{ $moreDt->translatedFormat($moreDt->year !== $startDt->year ? 'D, M j, Y' : 'D, M j') }}</a>@if ($moreGone) <span class="text-gray-500 dark:text-gray-400">({{ __('messages.sold_out') }})</span>@endif
-              </span>
-            @endforeach
-          </div>
-        @endif
-
-        {{-- Location icon badge. An online event shows the domain of its link, or "Online" when
-             the link is free text or has no public domain - never the link itself. --}}
-        @if (($event->venue && ($event->venue->name || $event->venue->shortAddress())) || $event->event_url)
-        <div id="gp-event-location">
-          <div class="flex items-center gap-4 {{ $role->isRtl() ? 'rtl' : '' }}">
-            <div class="flex-shrink-0 w-16 h-16 rounded-xl border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-900
-                        flex items-center justify-center shadow-sm">
-              @if ($event->venue && $event->venue->profile_image_url)
-                <img src="{{ $event->venue->getProfileImageUrl(\App\Utils\ImageUtils::VARIANT_WIDTH) }}" alt="{{ $event->venue->nameInLanguage($displayLang) }}" class="w-11 h-11 rounded-lg object-cover" loading="lazy" decoding="async">
-              @else
-                <svg width="24" height="24" viewBox="0 0 24 24" fill="currentColor" style="color: var(--es-accent)" aria-hidden="true">
-                  <path fill-rule="evenodd" clip-rule="evenodd" d="M12 2C7.58172 2 4 6.00258 4 10.5C4 14.9622 6.55332 19.8124 10.5371 21.6744C11.4657 22.1085 12.5343 22.1085 13.4629 21.6744C17.4467 19.8124 20 14.9622 20 10.5C20 6.00258 16.4183 2 12 2ZM12 12C13.1046 12 14 11.1046 14 10C14 8.89543 13.1046 8 12 8C10.8954 8 10 8.89543 10 10C10 11.1046 10.8954 12 12 12Z" />
-                </svg>
-              @endif
-            </div>
-            <div class="flex flex-col">
-              <span>
-                @if ($event->venue && $event->venue->nameInLanguage($displayLang))
-                  @if ($event->venue->isClaimed())
-                    @php
-                      $venueUrl = route('role.view_guest', ['subdomain' => $event->venue->subdomain]);
-                      $queryParams = [];
-                      if (request('category')) $queryParams['category'] = request('category');
-                      if (request('schedule')) $queryParams['schedule'] = request('schedule');
-                      // Scratch name, never $date - see the breadcrumb block above.
-                      if ($rawDateParam) {
-                        $tDate = $rawDateParam;
-                        if (preg_match('/^\d{4}-\d{2}-\d{2}$/', $tDate)) {
-                          $tDateParts = explode('-', $tDate);
-                          $queryParams['month'] = (int)$tDateParts[1];
-                          $queryParams['year'] = (int)$tDateParts[0];
-                        }
-                      } else {
-                        if (request('month')) $queryParams['month'] = request('month');
-                        if (request('year')) $queryParams['year'] = request('year');
-                      }
-                      if (!empty($queryParams)) {
-                        $venueUrl .= '?' . http_build_query($queryParams);
-                      }
-                    @endphp
-                    <a href="{{ $venueUrl }}" class="group inline-flex items-center gap-1 w-fit">
-                      <span dir="{{ content_dir_for_language($event->venue->nameInLanguage($displayLang), $displayLang) }}" class="text-lg font-semibold text-gray-900 dark:text-white group-hover:underline">{!! str_replace(' , ', '<br>', e($event->venue->nameInLanguage($displayLang))) !!}</span>
-                      <svg class="w-5 h-5 fill-gray-900 dark:fill-gray-100 opacity-70 group-hover:opacity-100 transition-opacity {{ $role->isRtl() ? 'scale-x-[-1]' : '' }}" viewBox="0 0 24 24" aria-hidden="true">
-                        <path d="M8.59,16.58L13.17,12L8.59,7.41L10,6L16,12L10,18L8.59,16.58Z"/>
-                      </svg>
-                    </a>
-                  @else
-                    <span dir="{{ content_dir_for_language($event->venue->nameInLanguage($displayLang), $displayLang) }}" class="text-lg font-semibold text-gray-900 dark:text-white">{!! str_replace(' , ', '<br>', e($event->venue->nameInLanguage($displayLang))) !!}</span>
-                  @endif
-                @else
-                  {{-- Also reached by a venue with no name in this language, which must never read
-                       "Online": the fallback is only for an event that has a link. --}}
-                  <span class="text-lg font-semibold text-gray-900 dark:text-white">{{ $event->event_url ? ($event->getEventUrlDomain() ?: __('messages.online')) : '' }}</span>
-                @endif
-              </span>
-              @if ($event->venue && $event->venue->shortAddress())
-              <span class="text-sm text-gray-500 dark:text-gray-400">
-                <x-link href="https://www.google.com/maps/search/?api=1&query={{ urlencode($event->venue->bestAddress()) }}" target="_blank" :nofollow="true">
-                  {{ $event->venue->shortAddress() }}
-                </x-link>
-              </span>
-              @endif
-            </div>
-          </div>
-        </div>
-        @endif
-
-        {{-- The schedule's own facts about this event: the custom fields its owner ticked "On
-             event page" (the room, the floor, a dress code). One row beside one tile, like When
-             and Where above it. Whose fields they are, and that a private one is never here, is
-             CustomFieldDisplay::forEventPage()'s to say.
-
-             Two forms. A schedule with ONE field ticked gets it read as the rows above are: the
-             answer, then what it is. Any other gets a list of pairs, so six facts are six lines
-             and not six rows. Which form is the SCHEDULE's doing, never this event's: with two
-             fields ticked, an event that answered one of them keeps the list, or the room would
-             change size and place from one of a schedule's events to the next. A long answer
-             takes the list too (a paragraph over its own label reads upside down). A lone Yes/No
-             field leads with its name ("Step-free access", not "Yes"), and so does a lone date:
-             "Oct 12, 2026" in large type directly under the event's own date row reads as a
-             second date for the event. The label comes first in the markup either way; .gk-fact
-             turns the pair over for the eye. v-pre is a precaution: nothing mounts Vue on this
-             card today, and an owner's label or a visitor's answer must stay text on the day
-             something does. --}}
-        @php
-          $eventFacts = \App\Utils\CustomFieldDisplay::forEventPage($event, $role);
-          $loneFact = count($eventFacts) === 1 ? $eventFacts[0] : null;
-          $factList = $eventFacts && (! $loneFact
-              || \App\Utils\CustomFieldDisplay::eventPageFieldCount($event) > 1
-              || $loneFact['type'] === 'multiline_string'
-              || mb_strlen($loneFact['value']) > 60);
-          $factLead = 'text-lg font-semibold text-gray-900 dark:text-white';
-          $factQuiet = 'text-sm text-gray-500 dark:text-gray-400';
-        @endphp
-        @if ($eventFacts)
-        <div id="gp-event-fields" class="flex {{ $factList ? 'items-start' : 'items-center' }} gap-4 {{ $role->isRtl() ? 'rtl' : '' }}">
-          <div class="flex-shrink-0 w-16 h-16 rounded-xl border border-gray-200 dark:border-gray-700
-                      bg-white dark:bg-gray-900 flex items-center justify-center shadow-sm">
-            <svg width="24" height="24" viewBox="0 0 20 20" fill="currentColor" style="color: var(--es-accent)" aria-hidden="true">
-              <path fill-rule="evenodd" d="M18 10a8 8 0 11-16 0 8 8 0 0116 0zm-7-4a1 1 0 11-2 0 1 1 0 012 0zM9 9a.75.75 0 000 1.5h.253a.25.25 0 01.244.304l-.459 2.066A1.75 1.75 0 0010.747 15H11a.75.75 0 000-1.5h-.253a.25.25 0 01-.244-.304l.459-2.066A1.75 1.75 0 009.253 9H9z" clip-rule="evenodd" />
-            </svg>
-          </div>
-          @if ($factList)
-          <dl class="gk-facts gk-facts-pairs" v-pre>
-            @foreach ($eventFacts as $fact)
-            <div class="gk-fact-pair" data-event-field="{{ $fact['key'] }}">
-              <dt class="{{ $factQuiet }} gk-fact-text"><bdi>{{ $fact['label'] }}</bdi></dt>
-              <dd class="text-base {{ $fact['type'] === 'multiline_string' ? 'font-normal' : 'font-semibold' }} text-gray-900 dark:text-white gk-fact-text"><bdi>{{ $fact['value'] }}</bdi></dd>
-            </div>
-            @endforeach
-          </dl>
-          @elseif (in_array($loneFact['type'], ['switch', 'date'], true))
-          <dl class="gk-facts" v-pre>
-            <div class="gk-fact-flag" data-event-field="{{ $loneFact['key'] }}">
-              <dt class="{{ $factLead }} gk-fact-text"><bdi>{{ $loneFact['label'] }}</bdi></dt>
-              <dd class="{{ $factQuiet }} gk-fact-text">{{ $loneFact['value'] }}</dd>
-            </div>
-          </dl>
-          @else
-          <dl class="gk-facts" v-pre>
-            <div class="gk-fact" data-event-field="{{ $loneFact['key'] }}">
-              <dt class="{{ $factQuiet }} gk-fact-text"><bdi>{{ $loneFact['label'] }}</bdi></dt>
-              <dd class="{{ $factLead }} gk-fact-text"><bdi>{{ $loneFact['value'] }}</bdi></dd>
-            </div>
-          </dl>
-          @endif
-        </div>
-        @endif
-
-        {{-- RSVP Free badge --}}
-        @if ($event->rsvp_enabled)
-        <div id="gp-event-price" class="flex items-center gap-4 {{ $role->isRtl() ? 'rtl' : '' }}">
-          <div class="flex-shrink-0 w-16 h-16 rounded-xl border border-gray-200 dark:border-gray-700
-                      bg-white dark:bg-gray-900 flex items-center justify-center shadow-sm">
-            <svg width="24" height="24" viewBox="0 0 20 20" fill="currentColor" style="color: var(--es-accent)" aria-hidden="true">
-              <path fill-rule="evenodd" d="M5.5 3A2.5 2.5 0 003 5.5v2.879a2.5 2.5 0 00.732 1.767l7.5 7.5a2.5 2.5 0 003.536 0l2.878-2.878a2.5 2.5 0 000-3.536l-7.5-7.5A2.5 2.5 0 008.38 3H5.5zM6 7a1 1 0 100-2 1 1 0 000 2z" clip-rule="evenodd" />
-            </svg>
-          </div>
-          <div class="flex flex-col">
-            <span class="text-lg font-semibold text-gray-900 dark:text-white">
-              {{ __('messages.free_entry') }}
-            </span>
-          </div>
-        </div>
-        @endif
-
-        {{-- Ticket price. The registration link is read through registrationHref() here and at
-             every CTA below, never the column: a legacy value that is no link offers nothing. --}}
-        @if ($event->registrationHref() && $event->ticket_price !== null && !$event->tickets_enabled && !$event->rsvp_enabled)
-        <div id="gp-event-price" class="flex items-center gap-4 {{ $role->isRtl() ? 'rtl' : '' }}">
-          <div class="flex-shrink-0 w-16 h-16 rounded-xl border border-gray-200 dark:border-gray-700
-                      bg-white dark:bg-gray-900 flex items-center justify-center shadow-sm">
-            <svg width="24" height="24" viewBox="0 0 20 20" fill="currentColor" style="color: var(--es-accent)" aria-hidden="true">
-              <path fill-rule="evenodd" d="M5.5 3A2.5 2.5 0 003 5.5v2.879a2.5 2.5 0 00.732 1.767l7.5 7.5a2.5 2.5 0 003.536 0l2.878-2.878a2.5 2.5 0 000-3.536l-7.5-7.5A2.5 2.5 0 008.38 3H5.5zM6 7a1 1 0 100-2 1 1 0 000 2z" clip-rule="evenodd" />
-            </svg>
-          </div>
-          <div class="flex flex-col">
-            <span class="text-lg font-semibold text-gray-900 dark:text-white">
-              @if ($event->ticket_price == 0)
-                {{ __('messages.free_entry') }}
-              @else
-                {{ \App\Utils\MoneyUtils::format($event->ticket_price, $event->ticket_currency_code) }}
-              @endif
-            </span>
-            @php
-                // Either half can stand alone: a bare "15% off" is as useful as a bare code.
-                $eventCouponBits = array_filter([
-                    $event->coupon_code ? __('messages.coupon_code').': '.$event->coupon_code : null,
-                    $event->couponDiscountLabel() ?: null,
-                ]);
-            @endphp
-            @if ($eventCouponBits)
-            <span class="text-sm text-gray-500 dark:text-gray-400">
-              {{ implode(' • ', $eventCouponBits) }}
-            </span>
-            @endif
-          </div>
-        </div>
-        @endif
-
-        {{-- What a ticket costs, for an event that sells its own. The page said nothing about
-             price until Buy tickets was pressed. One #gp-event-price a page: the two rows above
-             are for sign-up and for tickets sold elsewhere, and neither is this case. --}}
-        @php
-            $ticketPrice = (! $event->rsvp_enabled && $event->canSellTickets($date)) ? $event->ticketPriceSummary($date) : null;
-        @endphp
-        @if ($ticketPrice)
-        <div id="gp-event-price" class="flex items-center gap-4 {{ $role->isRtl() ? 'rtl' : '' }}">
-          <div class="flex-shrink-0 w-16 h-16 rounded-xl border border-gray-200 dark:border-gray-700
-                      bg-white dark:bg-gray-900 flex items-center justify-center shadow-sm">
-            <svg width="24" height="24" viewBox="0 0 20 20" fill="currentColor" style="color: var(--es-accent)" aria-hidden="true">
-              <path fill-rule="evenodd" d="M5.5 3A2.5 2.5 0 003 5.5v2.879a2.5 2.5 0 00.732 1.767l7.5 7.5a2.5 2.5 0 003.536 0l2.878-2.878a2.5 2.5 0 000-3.536l-7.5-7.5A2.5 2.5 0 008.38 3H5.5zM6 7a1 1 0 100-2 1 1 0 000 2z" clip-rule="evenodd" />
-            </svg>
-          </div>
-          <div class="flex flex-col">
-            <span class="text-lg font-semibold text-gray-900 dark:text-white" data-ticket-price>
-              @if ($ticketPrice['says'] === 'free')
-                {{ $role->customLabel('free_entry') }}
-              @elseif ($ticketPrice['says'] === 'from')
-                {{ __('messages.price_from', ['price' => \App\Utils\MoneyUtils::format($ticketPrice['min'], $ticketPrice['currency'])]) }}
-              @else
-                {{ \App\Utils\MoneyUtils::format($ticketPrice['min'], $ticketPrice['currency']) }}
-              @endif
-            </span>
-            @if ($ticketPrice['low'])
-            <span class="text-sm font-medium text-amber-700 dark:text-amber-300" data-ticket-low>{{ __('messages.few_left') }}</span>
-            @endif
-          </div>
-        </div>
-        @endif
-
-        {{-- Already registered indicator --}}
-        @if ($userSale)
-        <div class="flex items-center gap-4 {{ $role->isRtl() ? 'rtl' : '' }}">
-          <div class="flex-shrink-0 w-16 h-16 rounded-xl border border-gray-200 dark:border-gray-700
-                      bg-white dark:bg-gray-900 flex items-center justify-center shadow-sm">
-            <svg width="24" height="24" viewBox="0 0 20 20" fill="none" aria-hidden="true">
-              <path fill-rule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm3.857-9.809a.75.75 0 00-1.214-.882l-3.483 4.79-1.88-1.88a.75.75 0 10-1.06 1.061l2.5 2.5a.75.75 0 001.137-.089l4-5.5z" clip-rule="evenodd" style="fill: var(--es-accent)" />
-            </svg>
-          </div>
-          <div class="flex flex-col">
-            @php
-              // How many places that is. A buyer's own sale counts its whole party and a guest's
-              // row counts itself; the controller has already left out a guest's row whose
-              // party this same visitor bought.
-              $userTicketCount = (int) $userSales->sum(fn ($s) => $s->isRsvp() ? 0 : ($s->isPrimarySale() ? $s->legTotalQuantity() : $s->quantity()));
-            @endphp
-            <span class="text-lg font-semibold text-gray-900 dark:text-white" data-user-tickets="{{ $userTicketCount }}">
-              {{-- "You're registered" said nothing of how many, to somebody deciding whether to
-                   get one more. A sign-up has no tickets to count. --}}
-              {{ $userTicketCount > 0 ? trans_choice('messages.you_have_tickets', $userTicketCount, ['count' => $userTicketCount]) : __('messages.you_are_registered') }}
-            </span>
-            <span class="flex flex-wrap gap-x-3 gap-y-1">
-              @foreach ($userSales->take(6) as $userSaleIndex => $oneSale)
-                <x-link href="{{ route('ticket.view', ['event_id' => \App\Utils\UrlUtils::encodeId($event->id), 'secret' => $oneSale->secret]) }}"
-                   target="_blank"
-                   class="text-sm font-medium">
-                  {{ __('messages.view_ticket') }}@if ($userSales->count() > 1) {{ $userSaleIndex + 1 }}@endif
-                </x-link>
-              @endforeach
-            </span>
-          </div>
-        </div>
-        @endif
-
-        {{-- Moment B: the exit ramp for somebody who is interested but not buying today.
-             Deliberately a quiet text link rather than a second button - it sits beside the primary
-             conversion action, and the point is to catch the visitor who was going to leave, not to
-             compete for the one who was going to buy.
-
-             Placed ABOVE #gp-event-form on purpose: hidePanelsBelow() display:none's every
-             sibling after that element while the buy form is open, which is why the subscribe panel
-             at the foot of the page vanishes during checkout. --}}
-        @if ($showInterestCapture && ($event->canSellTickets($date) || $event->canAcceptRsvp($date)))
-        <a href="#gp-event-interest" class="self-start text-sm text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-200 hover:underline">
-            {{-- "Not buying today?" only where buying today is possible. --}}
-            {{ ($event->canAcceptRsvp($date) || $saleState === 'open')
-                ? __('messages.event_interest_not_ready')
-                : ($saleState === 'not_started' ? __('messages.event_interest_cta') : __('messages.event_interest_cta_changes')) }}
-        </a>
-        @endif
-
-        {{-- CTA buttons --}}
-        <div id="gp-event-cta" style="font-family: sans-serif" x-data="{ shareState: 'idle' }" class="relative items-center gap-3 text-left {{ $showCarpool ? 'inline-flex flex-wrap' : 'hidden sm:inline-flex' }} self-start {{ $role->isRtl() ? 'rtl' : '' }}">
-        <div class="gp-cta-wide">
-        @if ($event->is_cancelled)
-            <span class="text-base text-red-600 dark:text-red-400 font-medium">{{ __('messages.event_cancelled_guest_notice') }}</span>
-        @elseif ($event->canAcceptRsvp($date))
-            <button type="button"
-                  @click="$dispatch('show-event-form')"
-                  class="min-w-[180px] inline-flex justify-center gap-x-1.5 rounded-md px-6 py-3 text-lg font-semibold shadow-sm transition-all duration-200 hover:scale-105 hover:shadow-lg"
-                  style="background-color: var(--es-accent); color: var(--es-accent-text);">
-              @if ($event->isRsvpFull($date))
-                {{ __('messages.join_waitlist') }}
-              @else
-                {{ $role->customLabel('register') }}
-              @endif
-            </button>
-        @elseif ($event->canSellTickets($date) || ($event->registrationHref() && (!$event->tickets_enabled || $event->blockedByPlanOnly($date)) && !$event->rsvp_enabled))
-          @if ($event->canSellTickets($date) && ! $saleOffersForm)
-            {{-- "Selling" with nothing to buy: sold out where there is no waitlist, or no ticket
-                 inside its sales window. Say which, and do not say Buy. --}}
-            <span class="text-base font-semibold text-gray-700 dark:text-gray-200" data-sale-state="{{ $saleState }}">{{ $saleStateLabel }}</span>
-            @if ($saleShowsRows)
-            <button type="button" data-sale-rows
-                  @click="$dispatch('show-event-form')"
-                  class="inline-flex justify-center rounded-md border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 px-5 py-3 text-base font-semibold text-gray-900 dark:text-gray-100 shadow-sm transition-all duration-200 hover:shadow-md">
-              {{ $role->customLabel('tickets') }}
-            </button>
-            @endif
-            {{-- ! is_draft, as every other branch that offers the calendar and as the phone bar
-                 has it: a draft is on nobody's calendar yet. --}}
-            @if ($saleState !== 'sold_out' && ! $event->is_draft)
-              @php $showCalendarPopup = true; @endphp
-            @endif
-          @elseif ($event->canSellTickets($date))
-            <button type="button"
-                  @click="$dispatch('show-event-form')"
-                  class="min-w-[180px] inline-flex justify-center gap-x-1.5 rounded-md px-6 py-3 text-lg font-semibold shadow-sm transition-all duration-200 hover:scale-105 hover:shadow-lg"
-                  style="background-color: var(--es-accent); color: var(--es-accent-text);">
-              @if ($saleState === 'sold_out')
-                {{-- Only reached where a waitlist will be accepted: $saleOffersForm is false otherwise. --}}
-                {{ __('messages.join_waitlist') }}
-              @else
-                {{ $event->areTicketsFree() ? $role->customLabel('get_tickets') : $role->customLabel('buy_tickets') }}
-              @endif
-            </button>
-          @else
-            <a href="{{ $event->registrationHref() }}" target="_blank" rel="noopener noreferrer nofollow"
-              @if ($event->payment_method === 'payment_url' && $event->user && $event->user->paymentUrlMobileOnly() && ! is_mobile())
-                class="payment-mobile-only-link"
-                data-mobile-msg="{{ __('messages.payment_url_mobile_only') }}"
-              @endif
-            >
-                <button type="button"
-                      class="min-w-[180px] inline-flex justify-center gap-x-1.5 rounded-md px-6 py-3 text-lg font-semibold shadow-sm transition-all duration-200 hover:scale-105 hover:shadow-lg bg-green-600 hover:bg-green-700 text-white">
-                  {{ __('messages.view_event') }}
-                </button>
-            </a>
-          @endif
-        @elseif (!$event->is_draft && $event->allTicketSalesEnded() && $event->tickets_enabled)
-              <span class="text-sm text-gray-500 dark:text-gray-400">{{ __('messages.ticket_sales_ended') }}</span>
-              @php $showCalendarPopup = true; @endphp
-        @elseif (!$event->is_draft && $event->allTicketSalesNotStarted() && $event->tickets_enabled)
-              <span class="text-sm text-gray-500 dark:text-gray-400">{{ __('messages.sales_not_started') }}</span>
-              @php $showCalendarPopup = true; @endphp
-        @elseif (!$event->is_draft)
-              @php $showCalendarPopup = true; @endphp
-        @endif
-
-        @if (!empty($showCalendarPopup))
-              <button type="button"
-                  class="calendar-popup-toggle inline-flex justify-center gap-x-1.5 rounded-md px-6 py-3 text-lg font-semibold shadow-sm transition-all duration-200 hover:scale-105 hover:shadow-lg"
-                  style="background-color: var(--es-accent); color: var(--es-accent-text);"
-                  id="menu-button" aria-expanded="true" aria-haspopup="true">
-              {{ $role->customLabel('add_to_calendar') }}
-              <svg class="-me-1 h-5 w-5" viewBox="0 0 20 20" fill="currentColor" aria-hidden="true">
-                  <path fill-rule="evenodd" d="M5.23 7.21a.75.75 0 011.06.02L10 11.168l3.71-3.938a.75.75 0 111.08 1.04l-4.25 4.5a.75.75 0 01-1.08 0l-4.25-4.5a.75.75 0 01.02-1.06z" clip-rule="evenodd" />
-              </svg>
-              </button>
-
-            {{-- Desktop calendar dropdown --}}
-            <div id="calendar-pop-up-menu" class="pop-up-menu gp-dropdown hidden absolute top-full end-0 z-50 mt-2 w-72 {{ $role->isRtl() ? 'origin-top-left' : 'origin-top-right' }} rounded-xl bg-white shadow-lg focus:outline-none" role="menu" aria-orientation="vertical" aria-labelledby="menu-button" tabindex="-1">
-                <div class="py-1 stop-propagation" role="none">
-                    <a data-funnel="calendar_add" href="{{ $event->getGoogleCalendarUrl($date) }}" target="_blank" rel="noopener noreferrer" class="group flex items-center px-4 py-3 text-sm text-gray-700 dark:text-gray-200 rounded-lg transition-all duration-200 gp-dropdown-item" role="menuitem" tabindex="-1" id="menu-item-0">
-                        <svg class="me-3 h-5 w-5 text-gray-400 group-hover:text-gray-500" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
-                        <path d="M21.35,11.1H12.18V13.83H18.69C18.36,17.64 15.19,19.27 12.19,19.27C8.36,19.27 5,16.25 5,12C5,7.9 8.2,4.73 12.2,4.73C15.29,4.73 17.1,6.7 17.1,6.7L19,4.72C19,4.72 16.56,2 12.1,2C6.42,2 2.03,6.8 2.03,12C2.03,17.05 6.16,22 12.25,22C17.6,22 21.5,18.33 21.5,12.91C21.5,11.76 21.35,11.1 21.35,11.1V11.1Z" />
-                        </svg>
-                        Google Calendar
-                    </a>
-                    <a data-funnel="calendar_add" href="{{ $event->getAppleCalendarUrl($date, $role->subdomain) }}" class="group flex items-center px-4 py-3 text-sm text-gray-700 dark:text-gray-200 rounded-lg transition-all duration-200 gp-dropdown-item" role="menuitem" tabindex="-1" id="menu-item-1">
-                        <svg class="me-3 h-5 w-5 text-gray-400 group-hover:text-gray-500" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
-                        <path d="M18.71,19.5C17.88,20.74 17,21.95 15.66,21.97C14.32,22 13.89,21.18 12.37,21.18C10.84,21.18 10.37,21.95 9.1,22C7.79,22.05 6.8,20.68 5.96,19.47C4.25,17 2.94,12.45 4.7,9.39C5.57,7.87 7.13,6.91 8.82,6.88C10.1,6.86 11.32,7.75 12.11,7.75C12.89,7.75 14.37,6.68 15.92,6.84C16.57,6.87 18.39,7.1 19.56,8.82C19.47,8.88 17.39,10.1 17.41,12.63C17.44,15.65 20.06,16.66 20.09,16.67C20.06,16.74 19.67,18.11 18.71,19.5M13,3.5C13.73,2.67 14.94,2.04 15.94,2C16.07,3.17 15.6,4.35 14.9,5.19C14.21,6.04 13.07,6.7 11.95,6.61C11.8,5.46 12.36,4.26 13,3.5Z" />
-                        </svg>
-                        Apple Calendar
-                    </a>
-                    <a data-funnel="calendar_add" href="{{ $event->getMicrosoftCalendarUrl($date) }}" target="_blank" rel="noopener noreferrer" class="group flex items-center px-4 py-3 text-sm text-gray-700 dark:text-gray-200 rounded-lg transition-all duration-200 gp-dropdown-item" role="menuitem" tabindex="-1" id="menu-item-2">
-                        <svg class="me-3 h-5 w-5 text-gray-400 group-hover:text-gray-500" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
-                        <path d="M2,3H11V12H2V3M11,22H2V13H11V22M21,3V12H12V3H21M21,22H12V13H21V22Z" />
-                        </svg>
-                        Microsoft Outlook
-                    </a>
-                    {{-- Everything above hands over a SNAPSHOT: a .ics never updates, and the
-                         Google/Outlook links are one-shot too. These two are what a calendar entry
-                         cannot do. Plain anchors, so nothing is added to the Alpine scope this
-                         dropdown lives in. --}}
-                    <div class="my-1 border-t border-gray-100 dark:border-gray-700"></div>
-                    @if ($showInterestCapture)
-                    <a href="#gp-event-interest" class="group flex items-center px-4 py-3 text-sm text-gray-700 dark:text-gray-200 rounded-lg transition-all duration-200 gp-dropdown-item" role="menuitem" tabindex="-1" id="menu-item-3">
-                        <svg class="me-3 h-5 w-5 text-gray-400 group-hover:text-gray-500" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
-                            <path stroke-linecap="round" stroke-linejoin="round" d="M3 8l7.89 5.26a2 2 0 002.22 0L21 8M5 19h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z" />
-                        </svg>
-                        {{ ($event->canSellTickets($date) && $saleState !== 'not_started') ? __('messages.event_interest_cta_changes') : __('messages.event_interest_cta') }}
-                    </a>
-                    @endif
-                    <a href="{{ route('feed.ical', ['subdomain' => $role->subdomain]) }}" class="group flex items-center px-4 py-3 text-sm text-gray-700 dark:text-gray-200 rounded-lg transition-all duration-200 gp-dropdown-item" role="menuitem" tabindex="-1" id="menu-item-4">
-                        <svg class="me-3 h-5 w-5 text-gray-400 group-hover:text-gray-500" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
-                            <path stroke-linecap="round" stroke-linejoin="round" d="M8 7V3m8 4V3M3 11h18M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z" />
-                        </svg>
-                        {{-- v-pre: the schedule name is user-controlled, and Blade's {{ }} escaping
-                             does NOT stop Vue compiling a mustache in the VALUE. This row currently
-                             sits outside every Vue mount on the page (#ticket-selector, #rsvp-form,
-                             #es-cart-app, #calendar-app), but that is a property of where the markup
-                             happens to be, not a guarantee - and the cost of being wrong is
-                             arbitrary JS. The element carries no Vue bindings, so v-pre costs
-                             nothing. --}}
-                        <span v-pre>{{ __('messages.event_interest_subscribe_feed', ['schedule' => $role->translatedName()]) }}</span>
-                    </a>
-                </div>
-            </div>
-
-        @endif
-        {{-- Carpool link --}}
-        </div>
-        {{-- Outside .gp-cta-wide: this is the one button of the row a phone draws. It used to sit
-             in a row that was hidden below 640px, so a phone had no way to the ride board. One
-             link, not a second copy in the phone bar: #gp-event-carpool is a documented id and an
-             owner's rule for it must reach the only one there is. --}}
-        @if ($showCarpool)
-        @php
-            $carpoolUrl = config('app.hosted')
-                ? route('carpool.index', ['subdomain' => $carpoolRole->subdomain, 'event_hash' => \App\Utils\UrlUtils::encodeId($event->id)])
-                : '/' . $carpoolRole->subdomain . '/carpool/' . \App\Utils\UrlUtils::encodeId($event->id);
-            if ($date && $event->days_of_week) {
-                $carpoolUrl .= '/' . $date;
-            }
-            $carpoolCount = $event->carpoolOffers()->where('status', 'active')
-                ->when($date && $event->days_of_week, fn ($q) => $q->where('event_date', $date))
-                ->count();
-        @endphp
-        <a href="{{ $carpoolUrl }}"
-           id="gp-event-carpool"
-           class="flex-shrink-0 h-[42px] inline-flex items-center justify-center gap-1.5 rounded-xl border border-gray-300 dark:border-gray-600 text-gray-600 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors px-3"
-           title="{{ __('messages.carpool') }}">
-            <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M8.25 18.75a1.5 1.5 0 01-3 0m3 0a1.5 1.5 0 00-3 0m3 0h6m-9 0H3.375a1.125 1.125 0 01-1.125-1.125V14.25m17.25 4.5a1.5 1.5 0 01-3 0m3 0a1.5 1.5 0 00-3 0m3 0h1.125c.621 0 1.129-.504 1.09-1.124a17.902 17.902 0 00-3.213-9.193 2.056 2.056 0 00-1.58-.86H14.25M16.5 18.75h-2.25m0-11.177v-.958c0-.568-.422-1.048-.987-1.106a48.554 48.554 0 00-10.026 0 1.106 1.106 0 00-.987 1.106v7.635m12-6.677v6.677m0 4.5v-4.5m0 0h-12" />
-            </svg>
-            <span class="text-sm font-medium">{{ __('messages.carpool') }}@if ($carpoolCount > 0) ({{ $carpoolCount }})@endif</span>
-        </a>
-        @endif
-        {{-- Share button --}}
-        @if (!$event->is_draft)
-        <div class="gp-cta-wide">
-        <button type="button"
-                id="gp-event-share"
-                data-share-title="{{ $eventName }}"
-                @click="
-                  if (shareState !== 'idle') return;
-                  if (navigator.share) {
-                    shareState = 'sharing';
-                    navigator.share({ title: $event.currentTarget.dataset.shareTitle, url: window.location.href }).catch(function(){}).finally(() => shareState = 'idle');
-                  } else {
-                    navigator.clipboard.writeText(window.location.href);
-                    shareState = 'copied';
-                    setTimeout(() => shareState = 'idle', 2000);
-                  }
-                "
-                class="flex-shrink-0 w-[42px] h-[42px] inline-flex items-center justify-center rounded-xl border border-gray-300 dark:border-gray-600 text-gray-600 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors"
-                :title="shareState === 'copied' ? '{{ __('messages.copied') }}' : '{{ $role->customLabel('share') }}'">
-          <template x-if="shareState !== 'copied'">
-            <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" class="w-5 h-5" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" d="M7.217 10.907a2.25 2.25 0 1 0 0 2.186m0-2.186c.18.324.283.696.283 1.093s-.103.77-.283 1.093m0-2.186 9.566-5.314m-9.566 7.5 9.566 5.314m0 0a2.25 2.25 0 1 0 3.935 2.186 2.25 2.25 0 0 0-3.935-2.186Zm0-12.814a2.25 2.25 0 1 0 3.933-2.185 2.25 2.25 0 0 0-3.933 2.185Z" /></svg>
-          </template>
-          <template x-if="shareState === 'copied'">
-            <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" class="w-5 h-5 text-green-600 dark:text-green-400" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" d="m4.5 12.75 6 6 9-13.5" /></svg>
-          </template>
-        </button>
-        </div>
-        @endif
-        </div>
-
-        </div>
-
-        {{-- Mobile calendar bottom sheet (outside hidden sm:block container so it's visible on mobile).
-             $phoneCalendar is the same flag the bar's button reads: they come together or not at all. --}}
-        @if ($phoneCalendar)
-        <div id="calendar-mobile-sheet" class="hidden fixed inset-0 z-50 sm:hidden">
-          <div class="fixed inset-0 bg-black/60" id="calendar-mobile-overlay"></div>
-          <div class="gp-bottom-sheet fixed inset-x-0 bottom-0 rounded-t-2xl shadow-xl">
-            <div class="flex justify-center py-3">
-              <div class="gp-bottom-sheet-handle w-12 h-1.5 rounded-full"></div>
-            </div>
-            <div class="px-6 pb-6 space-y-1 {{ $role->isRtl() ? 'rtl' : '' }}">
-              <a data-funnel="calendar_add" href="{{ $event->getGoogleCalendarUrl($date) }}" target="_blank" rel="noopener noreferrer" class="gp-bottom-sheet-item flex items-center gap-3 px-4 py-3 rounded-xl text-gray-700 transition-all duration-200">
-                <svg class="h-5 w-5 text-gray-400" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
-                  <path d="M21.35,11.1H12.18V13.83H18.69C18.36,17.64 15.19,19.27 12.19,19.27C8.36,19.27 5,16.25 5,12C5,7.9 8.2,4.73 12.2,4.73C15.29,4.73 17.1,6.7 17.1,6.7L19,4.72C19,4.72 16.56,2 12.1,2C6.42,2 2.03,6.8 2.03,12C2.03,17.05 6.16,22 12.25,22C17.6,22 21.5,18.33 21.5,12.91C21.5,11.76 21.35,11.1 21.35,11.1V11.1Z" />
-                </svg>
-                Google Calendar
-              </a>
-              <a data-funnel="calendar_add" href="{{ $event->getAppleCalendarUrl($date, $role->subdomain) }}" class="gp-bottom-sheet-item flex items-center gap-3 px-4 py-3 rounded-xl text-gray-700 transition-all duration-200">
-                <svg class="h-5 w-5 text-gray-400" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
-                  <path d="M18.71,19.5C17.88,20.74 17,21.95 15.66,21.97C14.32,22 13.89,21.18 12.37,21.18C10.84,21.18 10.37,21.95 9.1,22C7.79,22.05 6.8,20.68 5.96,19.47C4.25,17 2.94,12.45 4.7,9.39C5.57,7.87 7.13,6.91 8.82,6.88C10.1,6.86 11.32,7.75 12.11,7.75C12.89,7.75 14.37,6.68 15.92,6.84C16.57,6.87 18.39,7.1 19.56,8.82C19.47,8.88 17.39,10.1 17.41,12.63C17.44,15.65 20.06,16.66 20.09,16.67C20.06,16.74 19.67,18.11 18.71,19.5M13,3.5C13.73,2.67 14.94,2.04 15.94,2C16.07,3.17 15.6,4.35 14.9,5.19C14.21,6.04 13.07,6.7 11.95,6.61C11.8,5.46 12.36,4.26 13,3.5Z" />
-                </svg>
-                Apple Calendar
-              </a>
-              <a data-funnel="calendar_add" href="{{ $event->getMicrosoftCalendarUrl($date) }}" target="_blank" rel="noopener noreferrer" class="gp-bottom-sheet-item flex items-center gap-3 px-4 py-3 rounded-xl text-gray-700 transition-all duration-200">
-                <svg class="h-5 w-5 text-gray-400" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
-                  <path d="M2,3H11V12H2V3M11,22H2V13H11V22M21,3V12H12V3H21M21,22H12V13H21V22Z" />
-                </svg>
-                Microsoft Outlook
-              </a>
-              {{-- The same two rows as the desktop dropdown. This sheet only renders when the
-                   event sells nothing, which is exactly where most of the platform's guest traffic
-                   lands and where the page is otherwise a dead end. --}}
-              <div class="my-1 border-t border-gray-200 dark:border-gray-700"></div>
-              @if ($showInterestCapture)
-              <a href="#gp-event-interest" class="gp-bottom-sheet-item flex items-center gap-3 px-4 py-3 rounded-xl text-gray-700 transition-all duration-200">
-                <svg class="h-5 w-5 text-gray-400" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
-                  <path stroke-linecap="round" stroke-linejoin="round" d="M3 8l7.89 5.26a2 2 0 002.22 0L21 8M5 19h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z" />
-                </svg>
-                {{ __('messages.event_interest_cta') }}
-              </a>
-              @endif
-              <a href="{{ route('feed.ical', ['subdomain' => $role->subdomain]) }}" class="gp-bottom-sheet-item flex items-center gap-3 px-4 py-3 rounded-xl text-gray-700 transition-all duration-200">
-                <svg class="h-5 w-5 text-gray-400" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
-                  <path stroke-linecap="round" stroke-linejoin="round" d="M8 7V3m8 4V3M3 11h18M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z" />
-                </svg>
-                {{-- v-pre for the same reason as the desktop row above. --}}
-                <span v-pre>{{ __('messages.event_interest_subscribe_feed', ['schedule' => $role->translatedName()]) }}</span>
-              </a>
-            </div>
-          </div>
-        </div>
-        @endif
-
-        {{-- Interest capture. Placed ABOVE #gp-event-form deliberately: hidePanelsBelow()
-             display:none's every sibling AFTER that element while the buy/RSVP form is open, which
-             is why the subscribe panel at the foot of the page vanishes during checkout. --}}
-        @include('event.partials.interest-capture')
-
-        {{-- A cancelled payment coming back to a page with no ticket form to say it in. Where
-             there is one, the same line is inside the form's panel below. --}}
-        @if ($event->canAcceptRsvp($date) || ! $event->canSellTickets($date))
-            @include('event.partials.payment-cancelled')
-        @endif
-
-        {{-- RSVP form section (hidden by default, shown on CTA click) --}}
-        @if ($event->canAcceptRsvp($date))
-        <div id="gp-event-form" class="gk-o3 scroll-mt-4"
-             style="display: none; transition: opacity 0.2s ease, transform 0.2s ease;"
-             @if (request()->get('rsvp') === 'true' || $formRefused)
-             data-show-initial="true"
-             @endif>
-            <div class="flex flex-col gap-10 bg-white/95 dark:bg-gray-900/95 backdrop-blur-sm sm:rounded-2xl border border-gray-200 dark:border-gray-700 px-5 py-6 sm:p-8">
-              <div class="flex-1">
-                <div class="flex flex-col gap-4">
-                  <h2 class="text-[28px] leading-snug text-gray-900 dark:text-gray-100">
-                    @if ($event->isRsvpFull($date))
-                        {{ __('messages.join_waitlist') }}
-                    @else
-                        {{ $role->customLabel('register') }}
-                    @endif
-                  </h2>
-                  <div class="text-base text-gray-700 dark:text-gray-300">
-                    @include('event.rsvp', ['event' => $event, 'subdomain' => $subdomain])
-                  </div>
-                </div>
-              </div>
-            </div>
-        </div>
-        @elseif ($event->canSellTickets($date))
-        {{-- Ticket form section (hidden by default, shown on CTA click).
-             The redundant `&& $event->isPro()` that used to sit here was the difference between a
-             working buy button and a dead one: the CTA above is gated on canSellTickets() alone, so
-             any event that could sell but was not Pro rendered a button whose click target
-             (#gp-event-form) had never been rendered. Keep these two conditions identical. --}}
-        <div id="gp-event-form" class="gk-o3 scroll-mt-4"
-             style="display: none; transition: opacity 0.2s ease, transform 0.2s ease;"
-             @if (request()->get('tickets') === 'true' || $formRefused)
-             data-show-initial="true"
-             @endif>
-            <div class="flex flex-col gap-10 bg-white/95 dark:bg-gray-900/95 backdrop-blur-sm sm:rounded-2xl border border-gray-200 dark:border-gray-700 px-5 py-6 sm:p-8">
-              <div class="flex-1">
-                @include('event.partials.payment-cancelled')
-                @include('event.tickets', ['event' => $event, 'subdomain' => $subdomain])
-                {{-- Where the form's bar comes to rest. Outside the form's Vue mount on purpose:
-                     Vue puts new elements in place of the ones the server sent, and an observer
-                     set on one of those would be watching something no longer on the page. --}}
-                <div data-buybar-end aria-hidden="true" style="height: 1px; margin-top: -1px;"></div>
-              </div>
-            </div>
-        </div>
-        @endif
-
-        <script {!! nonce_attr() !!}>
-        (function() {
-            var form = document.getElementById('gp-event-form');
-            if (!form) return;
-
-            var paramKey = form.querySelector('#ticket-selector') ? 'tickets' : 'rsvp';
-            var desktopCta = document.getElementById('gp-event-cta');
-
-            // Looked up when it is needed, not once up here: the phone's bar is printed AFTER this
-            // script, at the foot of the document, so a lookup made now always found nothing and
-            // the bar was never hidden. It stayed on screen under the open form, offering Buy
-            // tickets beside the form's own Checkout.
-            function mobileCta() { return document.getElementById('gp-mobile-cta'); }
-
-            function hideCta() {
-                if (desktopCta) { desktopCta.style.display = 'none'; }
-                if (mobileCta()) { mobileCta().style.display = 'none'; }
-                if (window.esUpdateA11yCtaClearance) { window.esUpdateA11yCtaClearance(); }
-            }
-
-            function showCta() {
-                if (desktopCta) { desktopCta.style.display = ''; }
-                if (mobileCta()) { mobileCta().style.display = ''; }
-                if (window.esUpdateA11yCtaClearance) { window.esUpdateA11yCtaClearance(); }
-            }
-
-            function hidePanelsBelow() {
-                var sibling = form.nextElementSibling;
-                while (sibling) {
-                    if (sibling.tagName !== 'SCRIPT') {
-                        sibling.setAttribute('data-hidden-by-form', '1');
-                        sibling.style.display = 'none';
-                    }
-                    sibling = sibling.nextElementSibling;
-                }
-            }
-
-            function showPanelsBelow() {
-                var els = form.parentNode.querySelectorAll('[data-hidden-by-form]');
-                for (var i = 0; i < els.length; i++) {
-                    var el = els[i];
-                    el.removeAttribute('data-hidden-by-form');
-                    el.style.opacity = '0';
-                    el.style.display = '';
-                }
-                requestAnimationFrame(function() {
-                    for (var i = 0; i < els.length; i++) {
-                        els[i].style.transition = 'opacity 0.2s ease';
-                        els[i].style.opacity = '1';
-                    }
-                });
-            }
-
-            function showForm() {
-                form.style.display = '';
-                hideCta();
-                hidePanelsBelow();
-                requestAnimationFrame(function() {
-                    form.style.opacity = '1';
-                    form.style.transform = 'none';
-                });
-                var url = new URL(window.location);
-                url.searchParams.set(paramKey, 'true');
-                history.replaceState(null, '', url);
-                setTimeout(function() {
-                    form.scrollIntoView({ behavior: 'smooth', block: 'start' });
-                    window.dispatchEvent(new CustomEvent('event-form-shown'));
-                    // The sign-up form opens on its name field, so that takes the keyboard. The
-                    // ticket form opens on the tickets: nothing is focused that would raise a
-                    // keyboard over them.
-                    var nameInput = paramKey === 'rsvp' ? document.getElementById('name') : null;
-                    if (nameInput && !nameInput.value.trim()) { nameInput.focus(); }
-                }, 50);
-            }
-
-            function hideForm() {
-                form.style.opacity = '0';
-                form.style.transform = 'translateY(-8px)';
-                var url = new URL(window.location);
-                url.searchParams.delete(paramKey);
-                history.replaceState(null, '', url);
-                setTimeout(function() {
-                    form.style.display = 'none';
-                    showCta();
-                    showPanelsBelow();
-                }, 200);
-            }
-
-            // The form's bar is square while it floats over the form and takes the panel's
-            // rounded corners where it comes to rest ([data-buybar-floating] in the kit).
-            var barEnd = form.querySelector('[data-buybar-end]');
-            if (barEnd && window.IntersectionObserver) {
-                new IntersectionObserver(function (entries) {
-                    form.toggleAttribute('data-buybar-floating', ! entries[0].isIntersecting);
-                }).observe(barEnd);
-            }
-
-            window.addEventListener('show-event-form', showForm);
-            window.addEventListener('hide-event-form', hideForm);
-
-            if (form.hasAttribute('data-show-initial')) {
-                form.removeAttribute('data-show-initial');
-                form.style.opacity = '0';
-                form.style.transform = 'translateY(-8px)';
-                form.style.display = '';
-                hideCta();
-                hidePanelsBelow();
-                // Again once the whole page has been read. A form that opens WITH the page runs
-                // this before anything below it exists: the panels after it and the phone's bar
-                // were both left on screen, where a form opened by its button hid them.
-                document.addEventListener('DOMContentLoaded', function () {
-                    if (form.style.display !== 'none') { hideCta(); hidePanelsBelow(); }
-                });
-                requestAnimationFrame(function() {
-                    form.style.opacity = '1';
-                    form.style.transform = 'none';
-                    setTimeout(function() {
-                        form.scrollIntoView({ behavior: 'smooth', block: 'start' });
-                        window.dispatchEvent(new CustomEvent('event-form-shown'));
-                        var nameInput = paramKey === 'rsvp' ? document.getElementById('name') : null;
-                        if (nameInput && !nameInput.value.trim()) { nameInput.focus(); }
-                    }, 300);
-                });
-            }
-        })();
-        </script>
-
-        @if ($galleryInFlyerSlot)
-        {{-- No flyer: the gallery stands in, and its first photo is the page's one high-priority
-             image (the hero fallback in the other column gives it up). Ordered AFTER the form on
-             a phone, as it is in the markup: an open form hides what follows it, and a gallery
-             drawn above the form used to vanish from the top of the page on pressing Buy. --}}
-        <section id="gp-gallery" aria-labelledby="es-gallery-title" class="gk-o4 bg-white/95 dark:bg-gray-900/95 backdrop-blur-sm sm:rounded-2xl p-6 sm:p-8 {{ $role->isRtl() ? 'rtl' : '' }}">
-          @include('partials.gallery-card', ['galleryImages' => $galleryImages, 'galleryVariant' => 'event', 'galleryName' => $eventName, 'galleryLabel' => $role->customLabel('gallery'), 'galleryPriority' => true, 'accentColor' => $accentColor])
         </section>
-        @endif
-
-        {{-- Description --}}
-        @if ($eventDescriptionHtml)
-        @php
-          $descriptionHtml = $eventDescriptionHtml;
-          $descriptionDir = content_dir_for_language($descriptionHtml, $displayLang);
-        @endphp
-        <article id="gp-about" class="gk-o4 bg-white/95 dark:bg-gray-900/95 backdrop-blur-sm sm:rounded-2xl p-6 sm:p-8">
-          <h2 class="text-xs font-semibold uppercase tracking-wider text-gray-500 dark:text-gray-400 mb-4">
-            {{ $role->customLabel('about') }}
-          </h2>
-          <div class="{{ $descriptionDir === 'rtl' ? 'rtl' : '' }}" dir="{{ $descriptionDir }}">
-            {{-- demoteH1(): the event name above is the page's one <h1>, so an owner's "# Heading"
-                 renders as a marked <h2> that keeps the H1's look (custom-content-styles). --}}
-            <div class="text-gray-700 dark:text-gray-300 text-base custom-content">
-              {!! \App\Utils\UrlUtils::convertUrlsToLinks(\App\Utils\MarkdownUtils::demoteH1($descriptionHtml)) !!}
-            </div>
-          </div>
-        </article>
         @endif
 
         {{-- The organizer's gallery, after the description when a flyer leads the page. --}}
         @if ($galleryImages->isNotEmpty() && ! $galleryInFlyerSlot)
-        <section id="gp-gallery" aria-labelledby="es-gallery-title" class="gk-o4 bg-white/95 dark:bg-gray-900/95 backdrop-blur-sm sm:rounded-2xl p-6 sm:p-8 {{ $role->isRtl() ? 'rtl' : '' }}">
+        <section id="gp-gallery" aria-labelledby="es-gallery-title" class="gk-o4 gk-sec gk-sec-rule {{ $role->isRtl() ? 'rtl' : '' }}">
           @include('partials.gallery-card', ['galleryImages' => $galleryImages, 'galleryVariant' => 'event', 'galleryName' => $eventName, 'galleryLabel' => $role->customLabel('gallery'), 'galleryPriority' => false, 'accentColor' => $accentColor])
         </section>
         @endif
 
         {{-- Agenda image --}}
         @if ($event->agenda_image_url)
-        <div id="gp-agenda-image" class="gk-o5 bg-white/95 dark:bg-gray-900/95 backdrop-blur-sm sm:rounded-2xl overflow-hidden">
+        <div id="gp-agenda-image" class="gk-o5 gk-poster">
           <img src="{{ $event->agenda_image_url }}"
             alt="{{ $eventName }} - {{ $role->customLabel('agenda') }}"
             class="w-full" loading="lazy" decoding="async"/>
@@ -1774,7 +1880,7 @@
 
         {{-- Event parts --}}
         @if ($event->parts->count() > 0)
-        <div id="gp-agenda" class="gk-o5 bg-white/95 dark:bg-gray-900/95 backdrop-blur-sm sm:rounded-2xl p-6 sm:p-8 {{ $role->isRtl() ? 'rtl' : '' }}">
+        <div id="gp-agenda" class="gk-o5 gk-sec gk-sec-rule {{ $role->isRtl() ? 'rtl' : '' }}">
           @php
             $hasTimes = $event->parts->contains(fn($part) => !empty($part->start_time));
           @endphp
@@ -1795,7 +1901,7 @@
                   @if ($part->descriptionHtmlInLanguage($displayLang, $eventTargetLang))
                   <div dir="{{ content_dir_for_language($part->descriptionHtmlInLanguage($displayLang, $eventTargetLang), $displayLang) }}" class="text-sm text-gray-500 dark:text-gray-400 mt-0.5 prose prose-sm dark:prose-invert max-w-none">{!! \App\Utils\MarkdownUtils::demoteH1($part->descriptionHtmlInLanguage($displayLang, $eventTargetLang)) !!}</div>
                   @endif
-                  @if (!is_demo_role($role))
+                  @if (!is_demo_role($role) && ! $embedEvent)
                   @php
                     $partVideos = $part->approvedVideos;
                     $partComments = $part->approvedComments;
@@ -1882,19 +1988,19 @@
                   @if ($event->isFanContentEnabled())
                   <div class="mt-2 flex flex-wrap gap-3" x-data="{ showVideo: false, showComment: false, showPhoto: false, dragging: false, photoPreview: null }">
                     @if ($event->isFanPhotosEnabled() && ! $photoLimitReached)
-                    <button @click="showPhoto = !showPhoto; showVideo = false; showComment = false" class="accent-hover-btn inline-flex items-center gap-1.5 px-4 py-2 text-sm font-medium text-gray-900 dark:text-white rounded-lg border transition-all duration-200 hover:scale-105 hover:shadow-md active:scale-95" style="border-color: var(--es-accent);" data-accent="var(--es-accent)" data-contrast="var(--es-accent-text)">
+                    <button @click="showPhoto = !showPhoto; showVideo = false; showComment = false" class="accent-hover-btn inline-flex items-center gap-1.5 px-4 py-2 text-sm font-medium text-gray-900 dark:text-white rounded-lg border">
                       <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" class="w-4 h-4" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" d="M6.827 6.175A2.31 2.31 0 0 1 5.186 7.23c-.38.054-.757.112-1.134.175C2.999 7.58 2.25 8.507 2.25 9.574V18a2.25 2.25 0 0 0 2.25 2.25h15A2.25 2.25 0 0 0 21.75 18V9.574c0-1.067-.75-1.994-1.802-2.169a47.865 47.865 0 0 0-1.134-.175 2.31 2.31 0 0 1-1.64-1.055l-.822-1.316a2.192 2.192 0 0 0-1.736-1.039 48.774 48.774 0 0 0-5.232 0 2.192 2.192 0 0 0-1.736 1.039l-.821 1.316Z" /><path stroke-linecap="round" stroke-linejoin="round" d="M16.5 12.75a4.5 4.5 0 1 1-9 0 4.5 4.5 0 0 1 9 0Z" /></svg>
                       {{ __('messages.add_photo') }}
                     </button>
                     @endif
                     @if ($event->isFanVideosEnabled())
-                    <button @click="showVideo = !showVideo; showComment = false; showPhoto = false; showVideo && setTimeout(() => $refs.videoInput.focus(), 50)" class="accent-hover-btn inline-flex items-center gap-1.5 px-4 py-2 text-sm font-medium text-gray-900 dark:text-white rounded-lg border transition-all duration-200 hover:scale-105 hover:shadow-md active:scale-95" style="border-color: var(--es-accent);" data-accent="var(--es-accent)" data-contrast="var(--es-accent-text)">
+                    <button @click="showVideo = !showVideo; showComment = false; showPhoto = false; showVideo && setTimeout(() => $refs.videoInput.focus(), 50)" class="accent-hover-btn inline-flex items-center gap-1.5 px-4 py-2 text-sm font-medium text-gray-900 dark:text-white rounded-lg border">
                       <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" class="w-4 h-4" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" d="m15.75 10.5 4.72-4.72a.75.75 0 0 1 1.28.53v11.38a.75.75 0 0 1-1.28.53l-4.72-4.72M4.5 18.75h9a2.25 2.25 0 0 0 2.25-2.25v-9a2.25 2.25 0 0 0-2.25-2.25h-9A2.25 2.25 0 0 0 2.25 7.5v9a2.25 2.25 0 0 0 2.25 2.25Z" /></svg>
                       {{ __('messages.add_video') }}
                     </button>
                     @endif
                     @if ($event->isFanCommentsEnabled())
-                    <button @click="showComment = !showComment; showVideo = false; showPhoto = false; showComment && setTimeout(() => $refs.commentInput.focus(), 50)" class="accent-hover-btn inline-flex items-center gap-1.5 px-4 py-2 text-sm font-medium text-gray-900 dark:text-white rounded-lg border transition-all duration-200 hover:scale-105 hover:shadow-md active:scale-95" style="border-color: var(--es-accent);" data-accent="var(--es-accent)" data-contrast="var(--es-accent-text)">
+                    <button @click="showComment = !showComment; showVideo = false; showPhoto = false; showComment && setTimeout(() => $refs.commentInput.focus(), 50)" class="accent-hover-btn inline-flex items-center gap-1.5 px-4 py-2 text-sm font-medium text-gray-900 dark:text-white rounded-lg border">
                       <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" class="w-4 h-4" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" d="M7.5 8.25h9m-9 3H12m-9.75 1.51c0 1.6 1.123 2.994 2.707 3.227 1.129.166 2.27.293 3.423.379.35.026.67.21.865.501L12 21l2.755-4.133a1.14 1.14 0 0 1 .865-.501 48.172 48.172 0 0 0 3.423-.379c1.584-.233 2.707-1.626 2.707-3.228V6.741c0-1.602-1.123-2.995-2.707-3.228A48.394 48.394 0 0 0 12 3c-2.392 0-4.744.175-7.043.513C3.373 3.746 2.25 5.14 2.25 6.741v6.018Z" /></svg>
                       {{ __('messages.add_comment') }}
                     </button>
@@ -1913,7 +2019,7 @@
                         @endif
                         <input x-ref="videoInput" type="url" name="youtube_url" pattern="https?://(www\.)?((m\.)?youtube\.com|youtu\.be)/.+" title="{{ __('messages.invalid_youtube_url') }}" placeholder="{{ __('messages.paste_youtube_url') }}" class="w-full text-sm rounded border-gray-300 dark:border-gray-600 dark:bg-gray-700 dark:text-gray-200 px-3 py-2" required>
                         @include('partials.fan-content-guest-fields')
-                        <button type="submit" class="self-start font-semibold text-sm px-4 py-2 rounded transition-all duration-200 hover:scale-105 hover:shadow-md" style="background-color: var(--es-accent); color: var(--es-accent-text);">{{ __('messages.submit') }}</button>
+                        <button type="submit" class="self-start font-semibold text-sm px-4 py-2 rounded gk-fill-btn" style="background-color: var(--es-accent); color: var(--es-accent-text);">{{ __('messages.submit') }}</button>
                       </form>
                     </div>
                     @endif
@@ -1953,7 +2059,7 @@
                                @change="if ($event.target.files[0]) { const f = $event.target.files[0]; const dt = new DataTransfer(); dt.items.add(f); $refs.photoInput.files = dt.files; const r = new FileReader(); r.onload = e => photoPreview = e.target.result; r.readAsDataURL(f); }">
                         <input x-ref="photoInput" type="file" name="photo" accept="image/*" class="hidden" @change="if ($event.target.files[0]) { const r = new FileReader(); r.onload = e => photoPreview = e.target.result; r.readAsDataURL($event.target.files[0]); }">
                         @include('partials.fan-content-guest-fields')
-                        <button x-show="photoPreview" type="submit" class="self-start font-semibold text-sm px-4 py-2 rounded transition-all duration-200 hover:scale-105 hover:shadow-md" style="background-color: var(--es-accent); color: var(--es-accent-text);">{{ __('messages.upload_photo') }}</button>
+                        <button x-show="photoPreview" type="submit" class="self-start font-semibold text-sm px-4 py-2 rounded gk-fill-btn" style="background-color: var(--es-accent); color: var(--es-accent-text);">{{ __('messages.upload_photo') }}</button>
                       </form>
                     </div>
                     @endif
@@ -1967,7 +2073,7 @@
                         @endif
                         <textarea x-ref="commentInput" name="comment" placeholder="{{ __('messages.write_a_comment') }}" maxlength="1000" class="w-full text-sm rounded border-gray-300 dark:border-gray-600 dark:bg-gray-700 dark:text-gray-200 px-3 py-2" rows="2" required></textarea>
                         @include('partials.fan-content-guest-fields')
-                        <button type="submit" class="font-semibold text-sm px-4 py-2 rounded self-start transition-all duration-200 hover:scale-105 hover:shadow-md" style="background-color: var(--es-accent); color: var(--es-accent-text);">{{ __('messages.submit') }}</button>
+                        <button type="submit" class="font-semibold text-sm px-4 py-2 rounded self-start gk-fill-btn" style="background-color: var(--es-accent); color: var(--es-accent-text);">{{ __('messages.submit') }}</button>
                       </form>
                     </div>
                     @endif
@@ -1989,7 +2095,7 @@
                   @if ($part->descriptionHtmlInLanguage($displayLang, $eventTargetLang))
                   <div dir="{{ content_dir_for_language($part->descriptionHtmlInLanguage($displayLang, $eventTargetLang), $displayLang) }}" class="text-sm text-gray-500 dark:text-gray-400 block mt-0.5 prose prose-sm dark:prose-invert max-w-none">{!! \App\Utils\MarkdownUtils::demoteH1($part->descriptionHtmlInLanguage($displayLang, $eventTargetLang)) !!}</div>
                   @endif
-                  @if (!is_demo_role($role))
+                  @if (!is_demo_role($role) && ! $embedEvent)
                   @php
                     $partVideos = $part->approvedVideos;
                     $partComments = $part->approvedComments;
@@ -2076,19 +2182,19 @@
                   @if ($event->isFanContentEnabled())
                   <div class="mt-2 flex flex-wrap gap-3" x-data="{ showVideo: false, showComment: false, showPhoto: false, dragging: false, photoPreview: null }">
                     @if ($event->isFanPhotosEnabled() && ! $photoLimitReached)
-                    <button @click="showPhoto = !showPhoto; showVideo = false; showComment = false" class="accent-hover-btn inline-flex items-center gap-1.5 px-4 py-2 text-sm font-medium text-gray-900 dark:text-white rounded-lg border transition-all duration-200 hover:scale-105 hover:shadow-md active:scale-95" style="border-color: var(--es-accent);" data-accent="var(--es-accent)" data-contrast="var(--es-accent-text)">
+                    <button @click="showPhoto = !showPhoto; showVideo = false; showComment = false" class="accent-hover-btn inline-flex items-center gap-1.5 px-4 py-2 text-sm font-medium text-gray-900 dark:text-white rounded-lg border">
                       <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" class="w-4 h-4" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" d="M6.827 6.175A2.31 2.31 0 0 1 5.186 7.23c-.38.054-.757.112-1.134.175C2.999 7.58 2.25 8.507 2.25 9.574V18a2.25 2.25 0 0 0 2.25 2.25h15A2.25 2.25 0 0 0 21.75 18V9.574c0-1.067-.75-1.994-1.802-2.169a47.865 47.865 0 0 0-1.134-.175 2.31 2.31 0 0 1-1.64-1.055l-.822-1.316a2.192 2.192 0 0 0-1.736-1.039 48.774 48.774 0 0 0-5.232 0 2.192 2.192 0 0 0-1.736 1.039l-.821 1.316Z" /><path stroke-linecap="round" stroke-linejoin="round" d="M16.5 12.75a4.5 4.5 0 1 1-9 0 4.5 4.5 0 0 1 9 0Z" /></svg>
                       {{ __('messages.add_photo') }}
                     </button>
                     @endif
                     @if ($event->isFanVideosEnabled())
-                    <button @click="showVideo = !showVideo; showComment = false; showPhoto = false; showVideo && setTimeout(() => $refs.videoInput.focus(), 50)" class="accent-hover-btn inline-flex items-center gap-1.5 px-4 py-2 text-sm font-medium text-gray-900 dark:text-white rounded-lg border transition-all duration-200 hover:scale-105 hover:shadow-md active:scale-95" style="border-color: var(--es-accent);" data-accent="var(--es-accent)" data-contrast="var(--es-accent-text)">
+                    <button @click="showVideo = !showVideo; showComment = false; showPhoto = false; showVideo && setTimeout(() => $refs.videoInput.focus(), 50)" class="accent-hover-btn inline-flex items-center gap-1.5 px-4 py-2 text-sm font-medium text-gray-900 dark:text-white rounded-lg border">
                       <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" class="w-4 h-4" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" d="m15.75 10.5 4.72-4.72a.75.75 0 0 1 1.28.53v11.38a.75.75 0 0 1-1.28.53l-4.72-4.72M4.5 18.75h9a2.25 2.25 0 0 0 2.25-2.25v-9a2.25 2.25 0 0 0-2.25-2.25h-9A2.25 2.25 0 0 0 2.25 7.5v9a2.25 2.25 0 0 0 2.25 2.25Z" /></svg>
                       {{ __('messages.add_video') }}
                     </button>
                     @endif
                     @if ($event->isFanCommentsEnabled())
-                    <button @click="showComment = !showComment; showVideo = false; showPhoto = false; showComment && setTimeout(() => $refs.commentInput.focus(), 50)" class="accent-hover-btn inline-flex items-center gap-1.5 px-4 py-2 text-sm font-medium text-gray-900 dark:text-white rounded-lg border transition-all duration-200 hover:scale-105 hover:shadow-md active:scale-95" style="border-color: var(--es-accent);" data-accent="var(--es-accent)" data-contrast="var(--es-accent-text)">
+                    <button @click="showComment = !showComment; showVideo = false; showPhoto = false; showComment && setTimeout(() => $refs.commentInput.focus(), 50)" class="accent-hover-btn inline-flex items-center gap-1.5 px-4 py-2 text-sm font-medium text-gray-900 dark:text-white rounded-lg border">
                       <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" class="w-4 h-4" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" d="M7.5 8.25h9m-9 3H12m-9.75 1.51c0 1.6 1.123 2.994 2.707 3.227 1.129.166 2.27.293 3.423.379.35.026.67.21.865.501L12 21l2.755-4.133a1.14 1.14 0 0 1 .865-.501 48.172 48.172 0 0 0 3.423-.379c1.584-.233 2.707-1.626 2.707-3.228V6.741c0-1.602-1.123-2.995-2.707-3.228A48.394 48.394 0 0 0 12 3c-2.392 0-4.744.175-7.043.513C3.373 3.746 2.25 5.14 2.25 6.741v6.018Z" /></svg>
                       {{ __('messages.add_comment') }}
                     </button>
@@ -2107,7 +2213,7 @@
                         @endif
                         <input x-ref="videoInput" type="url" name="youtube_url" pattern="https?://(www\.)?((m\.)?youtube\.com|youtu\.be)/.+" title="{{ __('messages.invalid_youtube_url') }}" placeholder="{{ __('messages.paste_youtube_url') }}" class="w-full text-sm rounded border-gray-300 dark:border-gray-600 dark:bg-gray-700 dark:text-gray-200 px-3 py-2" required>
                         @include('partials.fan-content-guest-fields')
-                        <button type="submit" class="self-start font-semibold text-sm px-4 py-2 rounded transition-all duration-200 hover:scale-105 hover:shadow-md" style="background-color: var(--es-accent); color: var(--es-accent-text);">{{ __('messages.submit') }}</button>
+                        <button type="submit" class="self-start font-semibold text-sm px-4 py-2 rounded gk-fill-btn" style="background-color: var(--es-accent); color: var(--es-accent-text);">{{ __('messages.submit') }}</button>
                       </form>
                     </div>
                     @endif
@@ -2147,7 +2253,7 @@
                                @change="if ($event.target.files[0]) { const f = $event.target.files[0]; const dt = new DataTransfer(); dt.items.add(f); $refs.photoInput.files = dt.files; const r = new FileReader(); r.onload = e => photoPreview = e.target.result; r.readAsDataURL(f); }">
                         <input x-ref="photoInput" type="file" name="photo" accept="image/*" class="hidden" @change="if ($event.target.files[0]) { const r = new FileReader(); r.onload = e => photoPreview = e.target.result; r.readAsDataURL($event.target.files[0]); }">
                         @include('partials.fan-content-guest-fields')
-                        <button x-show="photoPreview" type="submit" class="self-start font-semibold text-sm px-4 py-2 rounded transition-all duration-200 hover:scale-105 hover:shadow-md" style="background-color: var(--es-accent); color: var(--es-accent-text);">{{ __('messages.upload_photo') }}</button>
+                        <button x-show="photoPreview" type="submit" class="self-start font-semibold text-sm px-4 py-2 rounded gk-fill-btn" style="background-color: var(--es-accent); color: var(--es-accent-text);">{{ __('messages.upload_photo') }}</button>
                       </form>
                     </div>
                     @endif
@@ -2161,7 +2267,7 @@
                         @endif
                         <textarea x-ref="commentInput" name="comment" placeholder="{{ __('messages.write_a_comment') }}" maxlength="1000" class="w-full text-sm rounded border-gray-300 dark:border-gray-600 dark:bg-gray-700 dark:text-gray-200 px-3 py-2" rows="2" required></textarea>
                         @include('partials.fan-content-guest-fields')
-                        <button type="submit" class="font-semibold text-sm px-4 py-2 rounded self-start transition-all duration-200 hover:scale-105 hover:shadow-md" style="background-color: var(--es-accent); color: var(--es-accent-text);">{{ __('messages.submit') }}</button>
+                        <button type="submit" class="font-semibold text-sm px-4 py-2 rounded self-start gk-fill-btn" style="background-color: var(--es-accent); color: var(--es-accent-text);">{{ __('messages.submit') }}</button>
                       </form>
                     </div>
                     @endif
@@ -2193,8 +2299,8 @@
             $myEventLevelPendingPhotos = $myEventLevelPendingPhotos->filter(fn($p) => $p->event_date === $date || $p->event_date === null);
           }
         @endphp
-        @if (!is_demo_role($role) && ($eventLevelVideos->count() > 0 || $eventLevelComments->count() > 0 || $eventLevelPhotos->count() > 0 || $myEventLevelPendingVideos->count() > 0 || $myEventLevelPendingComments->count() > 0 || $myEventLevelPendingPhotos->count() > 0 || ($role->isPro() && $event->polls->count() > 0) || $allPhotoData->count() > 0 || ($event->parts->count() == 0 && $event->isFanContentEnabled())))
-        <div id="gp-fan-content" class="gk-o8 bg-white/95 dark:bg-gray-900/95 backdrop-blur-sm sm:rounded-2xl p-6 sm:p-8 {{ $role->isRtl() ? 'rtl' : '' }}">
+        @if (!is_demo_role($role) && ! $embedEvent && ($eventLevelVideos->count() > 0 || $eventLevelComments->count() > 0 || $eventLevelPhotos->count() > 0 || $myEventLevelPendingVideos->count() > 0 || $myEventLevelPendingComments->count() > 0 || $myEventLevelPendingPhotos->count() > 0 || ($role->isPro() && $event->polls->count() > 0) || $allPhotoData->count() > 0 || ($event->parts->count() == 0 && $event->isFanContentEnabled())))
+        <div id="gp-fan-content" class="gk-o8 gk-sec gk-sec-rule {{ $role->isRtl() ? 'rtl' : '' }}">
 
           {{-- Polls --}}
           @if ($role->isPro() && $event->polls->count() > 0)
@@ -2426,19 +2532,19 @@
           @if ($event->parts->count() == 0 && $event->isFanContentEnabled())
           <div class="flex flex-wrap gap-3" x-data="{ showVideo: false, showComment: false, showPhoto: false, dragging: false, photoPreview: null }">
             @if ($event->isFanPhotosEnabled() && ! $photoLimitReached)
-            <button @click="showPhoto = !showPhoto; showVideo = false; showComment = false" class="accent-hover-btn inline-flex items-center gap-1.5 px-4 py-2 text-sm font-medium text-gray-900 dark:text-white rounded-lg border transition-all duration-200 hover:scale-105 hover:shadow-md active:scale-95" style="border-color: var(--es-accent);" data-accent="var(--es-accent)" data-contrast="var(--es-accent-text)">
+            <button @click="showPhoto = !showPhoto; showVideo = false; showComment = false" class="accent-hover-btn inline-flex items-center gap-1.5 px-4 py-2 text-sm font-medium text-gray-900 dark:text-white rounded-lg border">
               <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" class="w-4 h-4" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" d="M6.827 6.175A2.31 2.31 0 0 1 5.186 7.23c-.38.054-.757.112-1.134.175C2.999 7.58 2.25 8.507 2.25 9.574V18a2.25 2.25 0 0 0 2.25 2.25h15A2.25 2.25 0 0 0 21.75 18V9.574c0-1.067-.75-1.994-1.802-2.169a47.865 47.865 0 0 0-1.134-.175 2.31 2.31 0 0 1-1.64-1.055l-.822-1.316a2.192 2.192 0 0 0-1.736-1.039 48.774 48.774 0 0 0-5.232 0 2.192 2.192 0 0 0-1.736 1.039l-.821 1.316Z" /><path stroke-linecap="round" stroke-linejoin="round" d="M16.5 12.75a4.5 4.5 0 1 1-9 0 4.5 4.5 0 0 1 9 0Z" /></svg>
               {{ __('messages.add_photo') }}
             </button>
             @endif
             @if ($event->isFanVideosEnabled())
-            <button @click="showVideo = !showVideo; showComment = false; showPhoto = false; showVideo && setTimeout(() => $refs.videoInput.focus(), 50)" class="accent-hover-btn inline-flex items-center gap-1.5 px-4 py-2 text-sm font-medium text-gray-900 dark:text-white rounded-lg border transition-all duration-200 hover:scale-105 hover:shadow-md active:scale-95" style="border-color: var(--es-accent);" data-accent="var(--es-accent)" data-contrast="var(--es-accent-text)">
+            <button @click="showVideo = !showVideo; showComment = false; showPhoto = false; showVideo && setTimeout(() => $refs.videoInput.focus(), 50)" class="accent-hover-btn inline-flex items-center gap-1.5 px-4 py-2 text-sm font-medium text-gray-900 dark:text-white rounded-lg border">
               <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" class="w-4 h-4" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" d="m15.75 10.5 4.72-4.72a.75.75 0 0 1 1.28.53v11.38a.75.75 0 0 1-1.28.53l-4.72-4.72M4.5 18.75h9a2.25 2.25 0 0 0 2.25-2.25v-9a2.25 2.25 0 0 0-2.25-2.25h-9A2.25 2.25 0 0 0 2.25 7.5v9a2.25 2.25 0 0 0 2.25 2.25Z" /></svg>
               {{ __('messages.add_video') }}
             </button>
             @endif
             @if ($event->isFanCommentsEnabled())
-            <button @click="showComment = !showComment; showVideo = false; showPhoto = false; showComment && setTimeout(() => $refs.commentInput.focus(), 50)" class="accent-hover-btn inline-flex items-center gap-1.5 px-4 py-2 text-sm font-medium text-gray-900 dark:text-white rounded-lg border transition-all duration-200 hover:scale-105 hover:shadow-md active:scale-95" style="border-color: var(--es-accent);" data-accent="var(--es-accent)" data-contrast="var(--es-accent-text)">
+            <button @click="showComment = !showComment; showVideo = false; showPhoto = false; showComment && setTimeout(() => $refs.commentInput.focus(), 50)" class="accent-hover-btn inline-flex items-center gap-1.5 px-4 py-2 text-sm font-medium text-gray-900 dark:text-white rounded-lg border">
               <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" class="w-4 h-4" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" d="M7.5 8.25h9m-9 3H12m-9.75 1.51c0 1.6 1.123 2.994 2.707 3.227 1.129.166 2.27.293 3.423.379.35.026.67.21.865.501L12 21l2.755-4.133a1.14 1.14 0 0 1 .865-.501 48.172 48.172 0 0 0 3.423-.379c1.584-.233 2.707-1.626 2.707-3.228V6.741c0-1.602-1.123-2.995-2.707-3.228A48.394 48.394 0 0 0 12 3c-2.392 0-4.744.175-7.043.513C3.373 3.746 2.25 5.14 2.25 6.741v6.018Z" /></svg>
               {{ __('messages.add_comment') }}
             </button>
@@ -2456,7 +2562,7 @@
                 @endif
                 <input x-ref="videoInput" type="url" name="youtube_url" pattern="https?://(www\.)?((m\.)?youtube\.com|youtu\.be)/.+" title="{{ __('messages.invalid_youtube_url') }}" placeholder="{{ __('messages.paste_youtube_url') }}" class="w-full text-sm rounded border-gray-300 dark:border-gray-600 dark:bg-gray-700 dark:text-gray-200 px-3 py-2" required>
                 @include('partials.fan-content-guest-fields')
-                <button type="submit" class="self-start font-semibold text-sm px-4 py-2 rounded transition-all duration-200 hover:scale-105 hover:shadow-md" style="background-color: var(--es-accent); color: var(--es-accent-text);">{{ __('messages.submit') }}</button>
+                <button type="submit" class="self-start font-semibold text-sm px-4 py-2 rounded gk-fill-btn" style="background-color: var(--es-accent); color: var(--es-accent-text);">{{ __('messages.submit') }}</button>
               </form>
             </div>
             @endif
@@ -2495,7 +2601,7 @@
                        @change="if ($event.target.files[0]) { const f = $event.target.files[0]; const dt = new DataTransfer(); dt.items.add(f); $refs.photoInput.files = dt.files; const r = new FileReader(); r.onload = e => photoPreview = e.target.result; r.readAsDataURL(f); }">
                 <input x-ref="photoInput" type="file" name="photo" accept="image/*" class="hidden" @change="if ($event.target.files[0]) { const r = new FileReader(); r.onload = e => photoPreview = e.target.result; r.readAsDataURL($event.target.files[0]); }">
                 @include('partials.fan-content-guest-fields')
-                <button x-show="photoPreview" type="submit" class="self-start font-semibold text-sm px-4 py-2 rounded transition-all duration-200 hover:scale-105 hover:shadow-md" style="background-color: var(--es-accent); color: var(--es-accent-text);">{{ __('messages.upload_photo') }}</button>
+                <button x-show="photoPreview" type="submit" class="self-start font-semibold text-sm px-4 py-2 rounded gk-fill-btn" style="background-color: var(--es-accent); color: var(--es-accent-text);">{{ __('messages.upload_photo') }}</button>
               </form>
             </div>
             @endif
@@ -2508,7 +2614,7 @@
                 @endif
                 <textarea x-ref="commentInput" name="comment" placeholder="{{ __('messages.write_a_comment') }}" maxlength="1000" class="w-full text-sm rounded border-gray-300 dark:border-gray-600 dark:bg-gray-700 dark:text-gray-200 px-3 py-2" rows="2" required></textarea>
                 @include('partials.fan-content-guest-fields')
-                <button type="submit" class="font-semibold text-sm px-4 py-2 rounded self-start transition-all duration-200 hover:scale-105 hover:shadow-md" style="background-color: var(--es-accent); color: var(--es-accent-text);">{{ __('messages.submit') }}</button>
+                <button type="submit" class="font-semibold text-sm px-4 py-2 rounded self-start gk-fill-btn" style="background-color: var(--es-accent); color: var(--es-accent-text);">{{ __('messages.submit') }}</button>
               </form>
             </div>
             @endif
@@ -2519,7 +2625,7 @@
 
         {{-- Public feedback / reviews --}}
         @if ($publicFeedbacks->count() > 0)
-        <div id="gp-reviews" class="bg-white/95 dark:bg-gray-900/95 backdrop-blur-sm sm:rounded-2xl p-6 sm:p-8 {{ $role->isRtl() ? 'rtl' : '' }}">
+        <div id="gp-reviews" class="gk-sec gk-sec-rule {{ $role->isRtl() ? 'rtl' : '' }}">
           <h3 class="text-lg font-semibold text-gray-900 dark:text-white mb-4">{{ __('messages.feedback_reviews') }}</h3>
 
           {{-- Average rating summary --}}
@@ -2588,14 +2694,21 @@
              written assumption that the container was still open. It was not, so the panel
              rendered straight onto the schedule's background: on a light background image in
              dark mode, near-white heading and body text on a photo, which is unreadable. --}}
-        @include('partials.subscribe-panel')
-
         {{-- End of content section --}}
 
       </div>
       {{-- End RIGHT COLUMN --}}
 
     </div>
+
+    {{-- Under both columns, across the sheet: the mailing list as a band of its own, then the
+         schedule's other events, as cards side by side under each day. --}}
+    @unless ($embedEvent)
+    <div class="gk-event-after">
+      @include('partials.subscribe-panel', ['panelClass' => 'gk-card gk-band'])
+      @include('event.partials.more-events')
+    </div>
+    @endunless
 
     {{-- The foot, under both columns: the free tier's "create your own". The wrapper is drawn
          only with the card: empty, it was a blank 2.5rem at the end of every paid schedule's
@@ -2605,13 +2718,16 @@
            disagree. It used to read
            `! $event->isPro()`, which is true when any schedule on the bill is paid - so a
            free curator's page dropped this card while still carrying the free-tier credit. --}}
-    @if ($role->showBranding())
+    @if ($role->showBranding() && ! $embedEvent)
     <div class="gk-event-foot">
       <div id="gp-create-your-own" class="gk-panel gk-panel-flush gk-create bg-white/95 dark:bg-gray-900/95 backdrop-blur-sm {{ $role->isRtl() ? 'rtl' : '' }}">
         <p class="text-base leading-snug font-semibold text-gray-900 dark:text-gray-100">
           {{ __('messages.create_your_own_event_schedule') }}
         </p>
-        <x-guest.button variant="secondary" size="sm" href="{{ marketing_url() }}" target="_blank" rel="noopener noreferrer">
+        {{-- Straight to sign-up, marked as from a schedule's page (users.arrival_intent =
+             guest_page): it used to open the marketing homepage, and nothing could say whether
+             the card ever brought anybody. --}}
+        <x-guest.button variant="secondary" size="sm" href="{{ app_url('/sign_up?ref=gp') }}" target="_blank" rel="noopener noreferrer">
           {{ __('messages.create_schedule') }}
         </x-guest.button>
       </div>
@@ -2627,14 +2743,69 @@
 
   </main>
 
-  {{-- Sticky mobile CTA --}}
+        {{-- Mobile calendar bottom sheet. $phoneCalendar is the same flag the bar's button reads:
+             they come together or not at all. Outside the stage, beside the bar: .gk-stage is a
+             stacking context (isolation), so a z-50 inside it painted under the bar's z-40. --}}
+        @if ($phoneCalendar && ! $embedEvent)
+        <div id="calendar-mobile-sheet" class="hidden fixed inset-0 z-50 sm:hidden">
+          <div class="fixed inset-0 bg-black/60" id="calendar-mobile-overlay"></div>
+          <div class="gp-bottom-sheet fixed inset-x-0 bottom-0 rounded-t-2xl shadow-xl">
+            <div class="flex justify-center py-3">
+              <div class="gp-bottom-sheet-handle w-12 h-1.5 rounded-full"></div>
+            </div>
+            <div class="px-6 pb-6 space-y-1 {{ $role->isRtl() ? 'rtl' : '' }}">
+              <a data-funnel="calendar_add" href="{{ $event->getGoogleCalendarUrl($date) }}" target="_blank" rel="noopener noreferrer" class="gp-bottom-sheet-item flex items-center gap-3 px-4 py-3 rounded-xl text-gray-700 transition-all duration-200">
+                <svg class="h-5 w-5 text-gray-400" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
+                  <path d="M21.35,11.1H12.18V13.83H18.69C18.36,17.64 15.19,19.27 12.19,19.27C8.36,19.27 5,16.25 5,12C5,7.9 8.2,4.73 12.2,4.73C15.29,4.73 17.1,6.7 17.1,6.7L19,4.72C19,4.72 16.56,2 12.1,2C6.42,2 2.03,6.8 2.03,12C2.03,17.05 6.16,22 12.25,22C17.6,22 21.5,18.33 21.5,12.91C21.5,11.76 21.35,11.1 21.35,11.1V11.1Z" />
+                </svg>
+                Google Calendar
+              </a>
+              <a data-funnel="calendar_add" href="{{ $event->getAppleCalendarUrl($date, $role->subdomain) }}{{ $role->langQuerySuffix($displayLang) }}" class="gp-bottom-sheet-item flex items-center gap-3 px-4 py-3 rounded-xl text-gray-700 transition-all duration-200">
+                <svg class="h-5 w-5 text-gray-400" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
+                  <path d="M18.71,19.5C17.88,20.74 17,21.95 15.66,21.97C14.32,22 13.89,21.18 12.37,21.18C10.84,21.18 10.37,21.95 9.1,22C7.79,22.05 6.8,20.68 5.96,19.47C4.25,17 2.94,12.45 4.7,9.39C5.57,7.87 7.13,6.91 8.82,6.88C10.1,6.86 11.32,7.75 12.11,7.75C12.89,7.75 14.37,6.68 15.92,6.84C16.57,6.87 18.39,7.1 19.56,8.82C19.47,8.88 17.39,10.1 17.41,12.63C17.44,15.65 20.06,16.66 20.09,16.67C20.06,16.74 19.67,18.11 18.71,19.5M13,3.5C13.73,2.67 14.94,2.04 15.94,2C16.07,3.17 15.6,4.35 14.9,5.19C14.21,6.04 13.07,6.7 11.95,6.61C11.8,5.46 12.36,4.26 13,3.5Z" />
+                </svg>
+                Apple Calendar
+              </a>
+              <a data-funnel="calendar_add" href="{{ $event->getMicrosoftCalendarUrl($date) }}" target="_blank" rel="noopener noreferrer" class="gp-bottom-sheet-item flex items-center gap-3 px-4 py-3 rounded-xl text-gray-700 transition-all duration-200">
+                <svg class="h-5 w-5 text-gray-400" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
+                  <path d="M2,3H11V12H2V3M11,22H2V13H11V22M21,3V12H12V3H21M21,22H12V13H21V22Z" />
+                </svg>
+                Microsoft Outlook
+              </a>
+              {{-- The same two rows as the desktop dropdown. This sheet only renders when the
+                   event sells nothing, which is exactly where most of the platform's guest traffic
+                   lands and where the page is otherwise a dead end. --}}
+              <div class="my-1 border-t border-gray-200 dark:border-gray-700"></div>
+              @if ($showInterestCapture)
+              <a href="#gp-event-interest" class="gp-bottom-sheet-item flex items-center gap-3 px-4 py-3 rounded-xl text-gray-700 transition-all duration-200">
+                <svg class="h-5 w-5 text-gray-400" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
+                  <path stroke-linecap="round" stroke-linejoin="round" d="M3 8l7.89 5.26a2 2 0 002.22 0L21 8M5 19h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z" />
+                </svg>
+                {{ __('messages.event_interest_cta') }}
+              </a>
+              @endif
+              <a href="{{ route('feed.ical', ['subdomain' => $role->subdomain]) }}" class="gp-bottom-sheet-item flex items-center gap-3 px-4 py-3 rounded-xl text-gray-700 transition-all duration-200">
+                <svg class="h-5 w-5 text-gray-400" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
+                  <path stroke-linecap="round" stroke-linejoin="round" d="M8 7V3m8 4V3M3 11h18M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z" />
+                </svg>
+                {{-- v-pre for the same reason as the desktop row above. --}}
+                <span v-pre>{{ __('messages.event_interest_subscribe_feed', ['schedule' => $role->translatedName()]) }}</span>
+              </a>
+            </div>
+          </div>
+        </div>
+        @endif
+
+  {{-- Sticky mobile CTA. Not in a frame, whose one row of buttons is drawn at every width. --}}
+  @unless ($embedEvent)
   <div id="gp-mobile-cta" x-data="{ shareState: 'idle' }"
-       class="sm:hidden fixed bottom-0 inset-x-0 z-40 bg-white dark:bg-gray-800 border-t border-gray-200 dark:border-gray-700 px-5 py-3 shadow-lg" style="font-family: sans-serif; padding-bottom: max(0.75rem, env(safe-area-inset-bottom));">
+       class="gk-phonebar sm:hidden fixed bottom-0 inset-x-0 z-40 border-t px-5 py-3 shadow-lg" style="padding-bottom: max(0.75rem, env(safe-area-inset-bottom));">
     <div class="flex items-center gap-3 {{ $role->isRtl() ? 'rtl' : '' }}">
       {{-- Mobile share button --}}
       @if (!$event->is_draft)
       <button type="button"
               data-share-title="{{ $eventName }}"
+              aria-label="{{ __('messages.share') }}"
               @click="
                 if (shareState !== 'idle') return;
                 if (navigator.share) {
@@ -2646,7 +2817,7 @@
                   setTimeout(() => shareState = 'idle', 2000);
                 }
               "
-              class="flex-shrink-0 w-[48px] h-[48px] inline-flex items-center justify-center rounded-xl border border-gray-300 dark:border-gray-600 text-gray-600 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors">
+              class="flex-shrink-0 w-[48px] h-[48px] inline-flex items-center justify-center rounded-xl border border-gray-300 dark:border-gray-600 text-gray-600 dark:text-gray-300">
         <template x-if="shareState !== 'copied'">
           <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" class="w-5 h-5" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" d="M7.217 10.907a2.25 2.25 0 1 0 0 2.186m0-2.186c.18.324.283.696.283 1.093s-.103.77-.283 1.093m0-2.186 9.566-5.314m-9.566 7.5 9.566 5.314m0 0a2.25 2.25 0 1 0 3.935 2.186 2.25 2.25 0 0 0-3.935-2.186Zm0-12.814a2.25 2.25 0 1 0 3.933-2.185 2.25 2.25 0 0 0-3.933 2.185Z" /></svg>
         </template>
@@ -2670,7 +2841,7 @@
       @elseif ($event->canAcceptRsvp($date))
           <button type="button"
                 @click="$dispatch('show-event-form')"
-                class="flex-1 justify-center rounded-md px-6 py-3 text-lg font-semibold shadow-sm transition-all duration-200 hover:scale-105 hover:shadow-lg"
+                class="flex-1 justify-center rounded-md px-6 py-3 text-lg font-semibold shadow-sm"
                 style="background-color: var(--es-accent); color: var(--es-accent-text);">
             @if ($event->isRsvpFull($date))
               {{ __('messages.join_waitlist') }}
@@ -2685,7 +2856,7 @@
           @if ($saleShowsRows)
           <button type="button" data-sale-rows
                 @click="$dispatch('show-event-form')"
-                class="flex-shrink-0 inline-flex justify-center rounded-md border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 px-4 py-3 text-base font-semibold text-gray-900 dark:text-gray-100 shadow-sm transition-all duration-200 hover:shadow-md">
+                class="flex-shrink-0 inline-flex justify-center rounded-md border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 px-4 py-3 text-base font-semibold text-gray-900 dark:text-gray-100 shadow-sm">
             {{ $role->customLabel('tickets') }}
           </button>
           @elseif ($phoneCalendar)
@@ -2699,7 +2870,7 @@
         @elseif ($event->canSellTickets($date))
           <button type="button"
                 @click="$dispatch('show-event-form')"
-                class="flex-1 justify-center rounded-md px-6 py-3 text-lg font-semibold shadow-sm transition-all duration-200 hover:scale-105 hover:shadow-lg"
+                class="flex-1 justify-center rounded-md px-6 py-3 text-lg font-semibold shadow-sm"
                 style="background-color: var(--es-accent); color: var(--es-accent-text);">
             @if ($saleState === 'sold_out')
               {{ __('messages.join_waitlist') }}
@@ -2717,7 +2888,7 @@
             @endif
           >
             <button type="button"
-                  class="w-full justify-center rounded-md px-6 py-3 text-lg font-semibold shadow-sm transition-all duration-200 hover:scale-105 hover:shadow-lg bg-green-600 hover:bg-green-700 text-white">
+                  class="w-full justify-center rounded-md px-6 py-3 text-lg font-semibold shadow-sm bg-green-600 text-white">
               {{ __('messages.view_event') }}
             </button>
           </a>
@@ -2745,13 +2916,14 @@
       @elseif ($phoneCalendar)
         <button type="button"
             id="mobile-calendar-cta"
-            class="flex-1 justify-center rounded-md px-6 py-3 text-lg font-semibold shadow-sm transition-all duration-200 hover:scale-105 hover:shadow-lg"
+            class="flex-1 justify-center rounded-md px-6 py-3 text-lg font-semibold shadow-sm"
             style="background-color: var(--es-accent); color: var(--es-accent-text);">
           {{ $role->customLabel('add_to_calendar') }}
         </button>
       @endif
     </div>
   </div>
+  @endunless
 
   {{-- Lift the fixed things in the bottom corner clear of whichever bar is at the foot of the
        screen: the phone's bar, or, while the form is open, the form's own (.gk-buybar), which
@@ -2946,20 +3118,6 @@
       }
     }
 
-    // Accent hover buttons (onmouseover/onmouseout replacement)
-    document.querySelectorAll('.accent-hover-btn').forEach(function(btn) {
-      var accent = btn.getAttribute('data-accent');
-      var contrast = btn.getAttribute('data-contrast');
-      btn.addEventListener('mouseover', function() {
-        this.style.backgroundColor = accent;
-        this.style.color = contrast;
-      });
-      btn.addEventListener('mouseout', function() {
-        this.style.backgroundColor = 'transparent';
-        this.style.color = '';
-      });
-    });
-
     // Clear videos buttons
     document.querySelectorAll('.clear-videos-btn').forEach(function(btn) {
       btn.addEventListener('click', function() {
@@ -3019,12 +3177,14 @@
       });
     }
 
-    // Close calendar pop-up menu on document click
+    {{-- Close either calendar menu on a click anywhere else (the card's own used to stay open). --}}
     document.addEventListener('click', function() {
-      var m = document.getElementById('calendar-pop-up-menu');
-      if (m && !m.classList.contains('hidden')) {
-        m.classList.add('hidden');
-      }
+      ['calendar-pop-up-menu', 'calendar-card-dropdown'].forEach(function(id) {
+        var m = document.getElementById(id);
+        if (m && !m.classList.contains('hidden')) {
+          m.classList.add('hidden');
+        }
+      });
     });
 
     if (window.location.hash === '#gp-agenda') {
@@ -3042,7 +3202,7 @@
     @endif
   </script>
 
-@if (! is_demo_mode())
+@if (! is_demo_mode() && ! $embedEvent)
     @include('partials.follow-consent-modal')
 @endif
 
@@ -3051,10 +3211,14 @@
 @endif
 
 {{-- $formCounts: the form can lead to an order (a sign-up with room, a ticket that can be bought).
-     $formOpen: the same test that opens the form with the page, minus the refused-submit cases. --}}
+     $formOpen: the same test that opens the form with the page, minus the refused-submit cases.
+     Not in a frame: it has no form, and its event_view is counted by the controller, which knows
+     who is really signed in (this page is rendered as nobody). --}}
+@unless ($embedEvent)
 @include('partials.guest-funnel', [
     'formCounts' => $event->canAcceptRsvp($date) ? ! $event->isRsvpFull($date) : ($event->canSellTickets($date) && $saleState === 'open'),
     'formOpen' => ($event->canAcceptRsvp($date) && request()->get('rsvp') === 'true') || (! $event->canAcceptRsvp($date) && $event->canSellTickets($date) && request()->get('tickets') === 'true'),
 ])
+@endunless
 
 </x-app-guest-layout>

@@ -1,3 +1,8 @@
+{{-- Outlook sync is described only where it can be used: on hosted it is hidden while the
+     operator has not set it up; a selfhost operator reads about it either way. --}}
+@php
+    $guideOutlook = outlook_sync_offered();
+@endphp
 <x-docs-page
     key="creating-events"
     title="Creating Events: Tickets, Repeats, Privacy - Event Schedule"
@@ -12,6 +17,7 @@
             <x-doc-nav-link href="#venue">Location</x-doc-nav-link>
             <x-doc-nav-link href="#ai-details-generator">AI Details Generator</x-doc-nav-link>
             <x-doc-nav-link href="#custom-fields">Custom Fields</x-doc-nav-link>
+            <x-doc-nav-link href="#translation">Translation</x-doc-nav-link>
         </x-doc-nav-group>
         <x-doc-nav-link href="#tickets">Tickets</x-doc-nav-link>
         <x-doc-nav-group label="Participants" href="#participants">
@@ -110,7 +116,7 @@
                     </tr>
                     <tr>
                         <td><span class="font-semibold text-gray-900 dark:text-white">Listing</span></td>
-                        <td>Visibility, the event's link, its category, the other schedules it appears on, and <strong>Calendar sync</strong> on a saved event whose schedule sends its events to a connected Google or Outlook calendar</td>
+                        <td>Visibility, the event's link, its category, the other schedules it appears on, and <strong>Calendar sync</strong> on a saved event whose schedule sends its events to a connected {{ $guideOutlook ? 'Google or Outlook calendar' : 'Google calendar' }}</td>
                         <td>Always</td>
                     </tr>
                     <tr>
@@ -191,7 +197,7 @@
             <li><strong class="text-gray-900 dark:text-white">Import.</strong> Bring events in from a link, pasted text, a flyer image or a Google calendar. See <a href="{{ route('marketing.docs.ai_import') }}" class="doc-link">AI Import</a>.</li>
             <li><strong class="text-gray-900 dark:text-white">A copy or a template.</strong> <strong class="text-gray-900 dark:text-white">Clone Event</strong> starts a new event from an existing one, and a saved <a href="{{ route('marketing.docs.managing_schedules') }}#templates" class="doc-link">template</a> <x-doc-badge plan="pro" /> does the same for a format you repeat.</li>
             <li><strong class="text-gray-900 dark:text-white">Event requests.</strong> If your schedule <a href="{{ route('marketing.docs.creating_schedules') }}#engagement-requests" class="doc-link">accepts event requests</a> with <strong class="text-gray-900 dark:text-white">Require Approval</strong> enabled, events submitted by other people wait for your review. Approve or reject them on the <strong class="text-gray-900 dark:text-white">Requests</strong> tab of your schedule's admin page, which only appears while there is something waiting.</li>
-            <li><strong class="text-gray-900 dark:text-white">Calendar sync.</strong> A schedule that reads a connected Google, Outlook or CalDAV calendar adds its entries as <a href="#draft" class="doc-link">drafts</a>, unless you chose to publish them as they arrive. See <a href="{{ route('marketing.docs.creating_schedules') }}#calendar-sync" class="doc-link">Calendar sync</a>.</li>
+            <li><strong class="text-gray-900 dark:text-white">Calendar sync.</strong> A schedule that reads a connected {{ $guideOutlook ? 'Google, Outlook or CalDAV' : 'Google or CalDAV' }} calendar adds its entries as <a href="#draft" class="doc-link">drafts</a>, unless you chose to publish them as they arrive. See <a href="{{ route('marketing.docs.creating_schedules') }}#calendar-sync" class="doc-link">Calendar sync</a>.</li>
             <li><strong class="text-gray-900 dark:text-white">Feeds</strong> <x-doc-badge plan="enterprise" />. Somebody else's calendar, RSS feed or events page, read about once an hour. See <a href="{{ route('marketing.docs.managing_schedules') }}#feeds" class="doc-link">Feeds</a>.</li>
             <li><strong class="text-gray-900 dark:text-white">Event sources.</strong> A Curator schedule lists everything the talent and venue schedules it names as sources publish, as it goes live. See <a href="{{ route('marketing.docs.creating_schedules') }}#event-sources" class="doc-link">Event Sources</a>.</li>
             <li><strong class="text-gray-900 dark:text-white">WhatsApp</strong> <x-doc-badge plan="enterprise" />. Send the details or a photo of a flyer in a message. See <a href="#whatsapp" class="doc-link">Creating Events via WhatsApp</a>.</li>
@@ -204,8 +210,9 @@
             <li><strong class="text-gray-900 dark:text-white">When you save a change.</strong> Change the date or time of a one-time event, or the venue or online link of any event, and saving first asks <strong class="text-gray-900 dark:text-white">Notify attendees of this change?</strong>, as long as there is someone to tell. Add a note of up to 280 characters if you like, check it with <strong class="text-gray-900 dark:text-white">Preview email</strong>, then choose <strong class="text-gray-900 dark:text-white">Notify attendees</strong> or <strong class="text-gray-900 dark:text-white">Don't notify</strong>. Either button saves the change. A new date or time on a recurring event is not detected, so it never asks.</li>
             <li><strong class="text-gray-900 dark:text-white">When you cancel.</strong> Choosing <strong class="text-gray-900 dark:text-white">Cancel event</strong> from the Actions menu asks <strong class="text-gray-900 dark:text-white">Cancel this event?</strong> first. When there is someone to tell, the button reads <strong class="text-gray-900 dark:text-white">Cancel and notify</strong> and the notice goes to all of them, with your note if you add one; otherwise it reads <strong class="text-gray-900 dark:text-white">Cancel event</strong>. <strong class="text-gray-900 dark:text-white">Keep event</strong> backs out.</li>
             <li>Nothing is sent for a draft. A change to a one-time event whose start time has already passed notifies nobody, and on a recurring event only people with a date still to come are told.</li>
+            <li>A buyer's confirmation email carries a calendar invite. The change email moves that entry in their calendar and the cancellation email takes it off, in mail apps that read invites (Gmail, Outlook and Apple Mail among them).</li>
         </ul>
-        <p class="text-gray-600 dark:text-gray-300 mb-6">Cancelling keeps the event's tickets and refund records, stops any boost campaign and any installment plan still charging for it, takes it off connected Google, Outlook and CalDAV calendars (except an event the sync read in from your own calendar, whose original entry stays; see <a href="#google-calendar" class="doc-link">Calendar Sync</a>), and shows guests a notice that it has been cancelled. You can restore the event later. It does not refund anyone: refund each sale from the <a href="{{ route('marketing.docs.tickets') }}#managing-sales" class="doc-link">Sales page</a>, where a Stripe, PayPal or Razorpay payment goes back through the provider and any other method is marked as refunded.</p>
+        <p class="text-gray-600 dark:text-gray-300 mb-6">Cancelling keeps the event's tickets and refund records, stops any boost campaign and any installment plan still charging for it, takes it off connected {{ $guideOutlook ? 'Google, Outlook and CalDAV' : 'Google and CalDAV' }} calendars (except an event the sync read in from your own calendar, whose original entry stays; see <a href="#google-calendar" class="doc-link">Calendar Sync</a>), and shows guests a notice that it has been cancelled. You can restore the event later. It does not refund anyone: refund each sale from the <a href="{{ route('marketing.docs.tickets') }}#managing-sales" class="doc-link">Sales page</a>, where a Stripe, PayPal or Razorpay payment goes back through the provider and any other method is marked as refunded.</p>
     </section>
 
     <!-- Details -->
@@ -329,7 +336,7 @@
 
         <div class="doc-callout doc-callout-tip">
             <div class="doc-callout-title">Recurring events in calendars</div>
-            <p>A recurring event is pushed to a connected <a href="{{ route('marketing.docs.creating_schedules') }}#integrations" class="doc-link">Google, Outlook, or CalDAV calendar</a> as a single entry on the series start date, not as a repeating appointment. Guests who want every date can subscribe to your schedule's <a href="{{ route('marketing.docs.sharing') }}#calendar-feeds" class="doc-link">live calendar feed</a>, offered as <strong class="text-gray-900 dark:text-white">Subscribe to all events from</strong> your schedule on your event and schedule pages, which lists each occurrence in the next 90 days individually.</p>
+            <p>A recurring event is pushed to a connected <a href="{{ route('marketing.docs.creating_schedules') }}#integrations" class="doc-link">{{ $guideOutlook ? 'Google, Outlook, or CalDAV calendar' : 'Google or CalDAV calendar' }}</a> as a single entry on the series start date, not as a repeating appointment. Guests who want every date can subscribe to your schedule's <a href="{{ route('marketing.docs.sharing') }}#calendar-feeds" class="doc-link">live calendar feed</a>, offered as <strong class="text-gray-900 dark:text-white">Subscribe to all events from</strong> your schedule on your event and schedule pages, which lists each occurrence in the next 90 days individually.</p>
         </div>
     </section>
 
@@ -452,7 +459,7 @@
             </div>
             <div class="doc-field">
                 <h4 class="font-semibold text-gray-900 dark:text-white mb-2">Private</h4>
-                <p class="text-sm text-gray-500 dark:text-gray-400">Hides the value from the guest portal. Private fields show a small lock icon next to their label on the event form. The value stays visible in the admin portal and can still be rendered into graphic templates and slug patterns via <code class="doc-inline-code">{custom_N}</code>.</p>
+                <p class="text-sm text-gray-500 dark:text-gray-400">Hides the value from the guest portal. Private fields show a small lock icon next to their label on the event form. The value stays visible in the admin portal, but it is never written into anything other people see: its <code class="doc-inline-code">{custom_N}</code> comes out empty in graphic templates and slug patterns.</p>
             </div>
             <div class="doc-field">
                 <h4 class="font-semibold text-gray-900 dark:text-white mb-2">On request form</h4>
@@ -472,6 +479,23 @@
             </div>
         </div>
         <p class="text-gray-600 dark:text-gray-300 mb-6">Typical uses are age restrictions, dress codes, support acts and door times. Each field's number is shown next to it on the schedule form as <code class="doc-inline-code">{custom_N}</code>, for use in <a href="{{ route('marketing.docs.event_graphics') }}#variables" class="doc-link">event graphics text templates</a> and slug patterns.</p>
+    </section>
+
+    <!-- Translation -->
+    <section id="translation" class="doc-section">
+        <h2 class="doc-heading">
+            <svg aria-hidden="true" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" class="w-5 h-5 text-gray-500 dark:text-gray-400 flex-shrink-0">
+                <path stroke-linecap="round" stroke-linejoin="round" d="M10.5 21l5.25-11.25L21 21m-9-3h7.5M3 5.621a48.474 48.474 0 016-.371m0 0c1.12 0 2.233.038 3.334.114M9 5.25V3m3.334 2.364C11.176 10.658 7.69 15.08 3 17.502m9.334-12.138c.896.061 1.785.147 2.666.257m-4.589 8.495a18.023 18.023 0 01-3.827-5.802" />
+            </svg>
+            Correcting the Translation
+        </h2>
+        <p class="text-gray-600 dark:text-gray-300 mb-6">When your schedule <a href="{{ route('marketing.docs.creating_schedules') }}#details-localization" class="doc-link">offers a second language</a>, each event's name, short description and description are translated into it automatically, in the background, usually within a few minutes of saving (see <a href="{{ route('marketing.docs.creating_schedules') }}#details-translation" class="doc-link">how automatic translation works</a>). Once the event is saved it has a <strong class="text-gray-900 dark:text-white">Translation into ...</strong> row on the Event tab, under <strong class="text-gray-900 dark:text-white">About</strong>, named after the language it translates into, for example <strong class="text-gray-900 dark:text-white">Translation into English</strong>. It is folded until you press it, and while folded it says whether everything is automatic, which fields you corrected, or that the original changed since. Available on all plans.</p>
+        <ul class="doc-list mb-6">
+            <li><strong class="text-gray-900 dark:text-white">Correct a field.</strong> Press <strong class="text-gray-900 dark:text-white">Edit</strong> under it, change the wording and save the event. The original text is shown above the box for reference, and the description takes Markdown, as the original does. A corrected field is marked <strong class="text-gray-900 dark:text-white">Corrected by hand</strong>, and the automatic translation never writes over it.</li>
+            <li><strong class="text-gray-900 dark:text-white">When you edit the original later.</strong> Your correction stays, and is still what visitors read. The folded row is flagged with the original's language, for example <strong class="text-gray-900 dark:text-white">Portuguese (Portugal) changed</strong>, and the field shows a notice that the original changed since, with the new text: press <strong class="text-gray-900 dark:text-white">Keep mine</strong> when your wording still fits, <strong class="text-gray-900 dark:text-white">Translate again automatically</strong> to replace it, or <strong class="text-gray-900 dark:text-white">Edit</strong> to adjust it. Fields you did not correct are translated again on their own, as before.</li>
+            <li><strong class="text-gray-900 dark:text-white">Going back to automatic.</strong> <strong class="text-gray-900 dark:text-white">Reset to automatic</strong> under a corrected field drops your wording when you save, and a new automatic translation appears, usually within a few minutes. Until then visitors read the original.</li>
+        </ul>
+        <p class="text-gray-600 dark:text-gray-300 mb-6">A copy of the event keeps your corrections. Choosing another language to translate into, or switching translation off, discards them along with every other translation, because they were written in the old language. Over the <a href="{{ route('marketing.docs.developer.api') }}#update-event-removes" class="doc-link">API</a>, creating or updating an event can send <code class="doc-inline-code">translations</code> with <code class="doc-inline-code">name</code>, <code class="doc-inline-code">short_description</code> or <code class="doc-inline-code">description</code>: text corrects that field, and an empty value or null gives it back to the automatic translation. <code class="doc-inline-code">translations_keep</code>, a list of the same field names, is Keep mine.</p>
     </section>
 
     <!-- Tickets -->
@@ -543,6 +567,7 @@
             <div class="doc-field">
                 <h3 class="font-semibold text-gray-900 dark:text-white mb-2">Adding Participants</h3>
                 <p class="text-sm text-gray-500 dark:text-gray-400">Click <strong class="text-gray-900 dark:text-white">+ Add Participant</strong>, then either pick one of <strong class="text-gray-900 dark:text-white">Your schedules</strong> from the list, or choose <strong class="text-gray-900 dark:text-white">Someone New</strong> and fill in a name (required) and an optional email. A phone number and a <strong class="text-gray-900 dark:text-white">Youtube Video URL</strong> wait behind <strong class="text-gray-900 dark:text-white">+ Phone or video link</strong>. When you leave the email field, anyone on Event Schedule with that address is offered under <strong class="text-gray-900 dark:text-white">Matching schedules</strong> with a <strong class="text-gray-900 dark:text-white">Select</strong> button. The email matters beyond your own records: it is what lets that person claim the page created for them. Click <strong class="text-gray-900 dark:text-white">Add</strong> to put them on the list. A participant you typed and did not add is still saved with the event, as long as it has a name.</p>
+                <p class="text-sm text-gray-500 dark:text-gray-400 mt-2">A <strong class="text-gray-900 dark:text-white">Someone New</strong> participant with only a name goes on the schedule you already have by that name in the same country, if you run it or it is a page created for others that you follow, so a team you add for every game stays one page. To keep a different person of the same name apart, give them an email, a phone number or a video link. Copies made before are merged from <a href="{{ route('marketing.docs.creating_schedules') }}#merge-participants" class="doc-link">Merge Duplicate Participants</a>.</p>
             </div>
             <div class="doc-field">
                 <h4 class="font-semibold text-gray-900 dark:text-white mb-2">The List</h4>
@@ -766,7 +791,7 @@
                     </tr>
                     <tr>
                         <td><span class="font-semibold text-gray-900 dark:text-white">Calendar sync</span></td>
-                        <td>On a saved event whose schedule sends its events to a connected Google or Outlook calendar: whether this event is in each calendar, with <strong>Sync Now</strong> and <strong>Remove</strong>. See <a href="#google-calendar" class="doc-link">Calendar Sync</a> below.</td>
+                        <td>On a saved event whose schedule sends its events to a connected {{ $guideOutlook ? 'Google or Outlook calendar' : 'Google calendar' }}: whether this event is in each calendar, with <strong>Sync Now</strong> and <strong>Remove</strong>. See <a href="#google-calendar" class="doc-link">Calendar Sync</a> below.</td>
                     </tr>
                 </tbody>
             </table>
@@ -907,9 +932,19 @@
         </h2>
         <p class="text-gray-600 dark:text-gray-300 mb-4">A published event is copied to your connected calendar each time you save it. <strong class="text-gray-900 dark:text-white">Calendar sync</strong>, at the end of the <a href="#listing" class="doc-link">Listing</a> tab, is where you see that for one event and step in by hand. It appears on a saved event only, and only when the schedule is connected to a calendar and set to send its events there.</p>
 
-        <p class="text-gray-600 dark:text-gray-300 mb-4">It has a line per calendar: <strong class="text-gray-900 dark:text-white">Google Calendar</strong>, <strong class="text-gray-900 dark:text-white">Outlook Calendar</strong>, or both. Each line reads <strong class="text-gray-900 dark:text-white">Synced</strong> or <strong class="text-gray-900 dark:text-white">Not synced</strong>, with <strong class="text-gray-900 dark:text-white">Sync Now</strong> to copy the event at once or <strong class="text-gray-900 dark:text-white">Remove</strong> to take it off the calendar. Both act immediately, not with Save (with unsaved changes on the form they ask you to save first), and anything that goes wrong is said on the calendar's own line. After either one the page comes back on Calendar sync. An event that is not synced says why: a Draft or Internal event is not copied because only an event guests can see is, a cancelled event is not copied while it is cancelled, and any other event is copied the next time you save it. A Draft, Internal or cancelled event is not offered <strong class="text-gray-900 dark:text-white">Sync Now</strong>. The Listing tab's summary names a calendar the event should be in and is not, as in "Public &middot; Google: Not synced".</p>
+        <p class="text-gray-600 dark:text-gray-300 mb-4">
+            @if ($guideOutlook)
+            It has a line per calendar: <strong class="text-gray-900 dark:text-white">Google Calendar</strong>, <strong class="text-gray-900 dark:text-white">Outlook Calendar</strong>, or both.
+            @else
+            It has a line for <strong class="text-gray-900 dark:text-white">Google Calendar</strong>.
+            @endif
+            Each line reads <strong class="text-gray-900 dark:text-white">Synced</strong> or <strong class="text-gray-900 dark:text-white">Not synced</strong>, with <strong class="text-gray-900 dark:text-white">Sync Now</strong> to copy the event at once or <strong class="text-gray-900 dark:text-white">Remove</strong> to take it off the calendar. Both act immediately, not with Save (with unsaved changes on the form they ask you to save first), and anything that goes wrong is said on the calendar's own line. After either one the page comes back on Calendar sync. An event that is not synced says why: a Draft or Internal event is not copied because only an event guests can see is, a cancelled event is not copied while it is cancelled, and any other event is copied the next time you save it. A Draft, Internal or cancelled event is not offered <strong class="text-gray-900 dark:text-white">Sync Now</strong>. The Listing tab's summary names a calendar the event should be in and is not, as in "Public &middot; Google: Not synced".</p>
 
+        @if ($guideOutlook)
         <p class="text-gray-600 dark:text-gray-300 mb-6">For connecting a calendar and choosing the direction of the sync, see <a href="{{ route('marketing.docs.creating_schedules') }}#integrations-google" class="doc-link">Google Calendar</a> and <a href="{{ route('marketing.docs.creating_schedules') }}#integrations-microsoft" class="doc-link">Outlook Calendar</a>.</p>
+        @else
+        <p class="text-gray-600 dark:text-gray-300 mb-6">For connecting a calendar and choosing the direction of the sync, see <a href="{{ route('marketing.docs.creating_schedules') }}#integrations-google" class="doc-link">Google Calendar</a>.</p>
+        @endif
 
         <div class="doc-callout doc-callout-info">
             <div class="doc-callout-title">What gets synced</div>
@@ -958,7 +993,7 @@
             <li><strong class="text-gray-900 dark:text-white">Members only on Draft and Internal events</strong> - only members of your schedule can vote on those. On an Unlisted event, anyone signed in who has the link can vote, after entering the event's password if it has one.</li>
             <li><strong class="text-gray-900 dark:text-white">One click to vote</strong> - guests click the option they want.</li>
             <li><strong class="text-gray-900 dark:text-white">One vote per poll</strong> - votes cannot be changed afterwards. On a recurring event, votes are counted per date, so a regular can vote again for the next occurrence.</li>
-            <li><strong class="text-gray-900 dark:text-white">Instant results</strong> - the results come back as soon as the vote is cast, so guests immediately see how others voted.</li>
+            <li><strong class="text-gray-900 dark:text-white">Instant results</strong> - the results come back as soon as the vote is cast, so guests immediately see how others voted. They show the count at that moment and do not refresh while the page stays open.</li>
         </ul>
 
         <h3 class="doc-subheading">Viewing Results</h3>
@@ -966,7 +1001,7 @@
             Once a guest has voted, results are shown as bars with the count and percentage for each option, and the leading option is highlighted.
         </p>
         <p class="text-gray-600 dark:text-gray-300 mb-6">
-            As the organizer you can always see the results and the total vote count on the event form, whether or not you voted. Once a poll has votes its options are locked, so retitling the choices cannot change what people voted for.
+            As the organizer you can always see the results and the total vote count on the event form, whether or not you voted. On a recurring event, the form's count adds the votes of every date together. Once a poll has votes its options are locked, so retitling the choices cannot change what people voted for.
         </p>
 
         <h3 class="doc-subheading">User-Suggested Options</h3>
@@ -983,7 +1018,7 @@
             Each saved poll carries an <strong class="text-gray-900 dark:text-white">Active</strong> or <strong class="text-gray-900 dark:text-white">Closed</strong> badge showing its current state:
         </p>
         <ul class="doc-list mb-6">
-            <li><strong class="text-gray-900 dark:text-white">Active polls</strong> - guests can vote, and results update as votes arrive.</li>
+            <li><strong class="text-gray-900 dark:text-white">Active polls</strong> - guests can vote, and see the results once they have voted.</li>
             <li><strong class="text-gray-900 dark:text-white">Closed polls</strong> - results are still visible, but no new votes are accepted.</li>
         </ul>
         <p class="text-gray-600 dark:text-gray-300 mb-4">
@@ -1113,7 +1148,7 @@
             <li><a href="{{ route('marketing.docs.tickets') }}" class="doc-link">Selling Tickets</a> - Add tickets or free registration to your events</li>
             <li><a href="{{ route('marketing.docs.event_graphics') }}" class="doc-link">Event Graphics</a> - Create promotional images</li>
             <li><a href="{{ route('marketing.docs.sharing') }}" class="doc-link">Sharing Your Schedule</a> - Share, embed, and subscribe to your events</li>
-            <li><a href="{{ route('marketing.docs.creating_schedules') }}#integrations" class="doc-link">Calendar Integrations</a> - Set up Google Calendar, Outlook, and CalDAV sync</li>
+            <li><a href="{{ route('marketing.docs.creating_schedules') }}#integrations" class="doc-link">Calendar Integrations</a> - Set up {{ $guideOutlook ? 'Google Calendar, Outlook, and CalDAV' : 'Google Calendar and CalDAV' }} sync</li>
             <li><a href="{{ route('marketing.docs.managing_schedules') }}" class="doc-link">Managing Schedules</a> - Templates, cloning, and day-to-day upkeep</li>
         </ul>
     </section>

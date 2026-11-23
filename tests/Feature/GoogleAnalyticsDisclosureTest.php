@@ -45,6 +45,7 @@ class GoogleAnalyticsDisclosureTest extends TestCase
     private const ALLOWED_VIEWS = [
         'marketing/faq.blade.php' => 'says the product has no Google Analytics integration for schedules',
         'marketing/index.blade.php' => 'says the built-in analytics need no Google Analytics account',
+        'marketing/partials/home-new.blade.php' => 'the new homepage says the same: the built-in analytics need no Google Analytics account',
         'marketing/docs/selfhost/admin.blade.php' => 'operator docs: what ANALYTICS_ID and the header code box do',
     ];
 
@@ -96,8 +97,8 @@ class GoogleAnalyticsDisclosureTest extends TestCase
         $this->assertStringNotContainsString('_ga, _ga_', $html);
 
         // What the Analytics category still covers is said in full: clause 04, then clause 12.
-        $this->assertStringContainsString('The identified version of our live view, and remembering in your browser which homepage headline you saw', $html);
-        $this->assertStringContainsString('the identified version of our live view (below), and remembering in your browser, until the tab closes, which homepage headline you saw.', $html);
+        $this->assertStringContainsString('The identified version of our live view, and remembering in your browser which version of our homepage you saw', $html);
+        $this->assertStringContainsString('the identified version of our live view (below), and remembering in your browser, until the tab closes, which version of our homepage you saw.', $html);
         $this->assertStringContainsString('Separately, we keep our own visit statistics', $html);
         $this->assertStringContainsString('es_hero, es_hero_clicked', $html);
     }
@@ -109,7 +110,7 @@ class GoogleAnalyticsDisclosureTest extends TestCase
         $html = $this->get('/privacy')->assertOk()->getContent();
 
         $this->assertStringContainsString('>Google Analytics<', $html, 'the provider schedule (clause 10)');
-        $this->assertStringContainsString('Google Analytics, the identified live view, and remembering in your browser which homepage headline you saw', $html, 'the legal bases (clause 04)');
+        $this->assertStringContainsString('Google Analytics, the identified live view, and remembering in your browser which version of our homepage you saw', $html, 'the legal bases (clause 04)');
         $this->assertStringContainsString('Google Analytics 4, the identified version of our live view (below)', $html, 'the Analytics category (clause 12)');
         $this->assertStringContainsString("Google Analytics' advertising features;", $html, 'the marketing category (clause 12)');
         $this->assertStringContainsString('Separately from Google, we keep our own visit statistics', $html);

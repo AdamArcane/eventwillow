@@ -2,6 +2,7 @@
 
 namespace App\Mail;
 
+use App\Mail\Concerns\RepliesToEventSupport;
 use App\Models\Event;
 use App\Models\Role;
 use App\Models\Sale;
@@ -15,7 +16,7 @@ use Illuminate\Queue\SerializesModels;
 
 class FeedbackRequest extends Mailable
 {
-    use Queueable, SerializesModels;
+    use Queueable, RepliesToEventSupport, SerializesModels;
 
     protected $sale;
 
@@ -46,24 +47,25 @@ class FeedbackRequest extends Mailable
         }
 
         return new Envelope(
-            subject: __('messages.feedback_request_subject').' - '.$this->event->name,
+            subject: __('messages.feedback_request_subject').' - '.$this->sale->eventAsRead($this->event)->name,
             from: new Address($fromAddress, $fromName),
+            replyTo: $this->eventSupportReplyTo($this->scheduleOrEventSupportEmail($this->role, $this->event)),
         );
     }
 
     public function content(): Content
     {
-        $feedbackUrl = route('feedback.show', [
+        $feedbackUrl = Sale::withLanguage(route('feedback.show', [
             'event_id' => UrlUtils::encodeId($this->event->id),
             'secret' => $this->sale->secret,
-        ]);
+        ]), $this->sale->linkLanguage($this->role, $this->event));
 
         return new Content(
             view: 'emails.feedback_request',
             text: 'emails.feedback_request_text',
             with: [
                 'sale' => $this->sale,
-                'event' => $this->event,
+                'event' => $this->sale->eventAsRead($this->event),
                 'role' => $this->role,
                 'feedbackUrl' => $feedbackUrl,
             ]

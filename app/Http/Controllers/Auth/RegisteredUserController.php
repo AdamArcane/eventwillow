@@ -77,6 +77,19 @@ class RegisteredUserController extends Controller
             session(['signup_schedule_name' => $requestedName]);
         }
 
+        // Why they came (users.arrival_intent): the seller pages pass ?intent=, the guest page's
+        // "Create your own" card passes ?ref=gp, and the bar on an example schedule's pages
+        // ?ref=example. Kept like the type, through Google too.
+        $requestedIntent = request('intent');
+        if (request('ref') === 'gp') {
+            $requestedIntent = 'guest_page';
+        } elseif (request('ref') === 'example') {
+            $requestedIntent = 'example';
+        }
+        if (in_array($requestedIntent, User::ARRIVAL_INTENTS, true)) {
+            session(['signup_arrival_intent' => $requestedIntent]);
+        }
+
         if (! public_registration_enabled() && config('app.url') && ! config('app.is_testing') && ! selfhost_needs_setup() && User::exists()) {
             return redirect()->route('login');
         }
@@ -719,6 +732,7 @@ class RegisteredUserController extends Controller
                 // Keep the stub's original acquisition context (team invite,
                 // newsletter subscriber) rather than re-labeling it organizer
                 'signup_intent' => $existingUser->signup_intent ?? $signupIntent,
+                'arrival_intent' => $existingUser->arrival_intent ?? arrival_intent_from_session(),
                 ...pending_schedule_from_session(),
             ]);
             $user = $existingUser;
@@ -739,6 +753,7 @@ class RegisteredUserController extends Controller
                 'landing_page' => $landingPage,
                 'hero_variant' => CaptureUtmParameters::heroVariant($request),
                 'signup_intent' => $signupIntent,
+                'arrival_intent' => arrival_intent_from_session(),
                 ...pending_schedule_from_session(),
             ]);
         }
@@ -761,7 +776,7 @@ class RegisteredUserController extends Controller
             }
         }
 
-        session()->forget(['utm_params', 'utm_referrer_url', 'utm_landing_page', 'guest_language', 'referral_code', HeroExperiment::SESSION_KEY]);
+        session()->forget(['utm_params', 'utm_referrer_url', 'utm_landing_page', 'guest_language', 'referral_code', 'signup_arrival_intent', HeroExperiment::SESSION_KEY]);
 
         // Record the consent that was just validated. `terms` is only required on hosted - on
         // selfhost the first account is the operator installing their own software - so a null

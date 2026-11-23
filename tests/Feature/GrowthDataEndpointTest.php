@@ -13,6 +13,7 @@ use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\RateLimiter;
 use Illuminate\Support\Facades\Route;
+use Illuminate\Support\Str;
 use Tests\Feature\Concerns\CreatesScheduleData;
 use Tests\TestCase;
 
@@ -132,9 +133,20 @@ class GrowthDataEndpointTest extends TestCase
     {
         Cache::flush();
 
-        // The site runs one headline since 2026-10-22 (a baseline, see HeroExperiment::VARIANTS),
-        // so the counts belong to it; per-variant splitting is HeroExperimentTest's.
-        $variant = HeroExperiment::DEFAULT;
+        // A page round (one headline on two homepages), so the per-page fields are read; the counts
+        // go to its control, today's page. Splitting between variants is HeroExperimentTest's.
+        HeroExperiment::useVariants(HeroExperiment::NEW_PAGE_ROUND);
+
+        try {
+            $this->assertPageRoundTravels();
+        } finally {
+            HeroExperiment::useVariants(null);
+        }
+    }
+
+    private function assertPageRoundTravels(): void
+    {
+        $variant = 'home_today';
         HeroExperiment::recordEvent($variant, 'view');
         HeroExperiment::recordEvent($variant, 'view');
         HeroExperiment::recordEvent($variant, 'click');
@@ -149,12 +161,17 @@ class GrowthDataEndpointTest extends TestCase
 
         $this->assertNotNull($payload['hero_test'], 'the pull has no headline test in it');
         $rows = collect($payload['hero_test']['rows'])->keyBy('key');
-        $this->assertEqualsCanonicalizing(array_keys(HeroExperiment::VARIANTS), $rows->keys()->all());
+        $this->assertEqualsCanonicalizing(['home_today', 'home_new'], $rows->keys()->all());
         $this->assertSame(2, $rows[$variant]['visitors']);
         $this->assertSame(1, $rows[$variant]['clicks']);
         $this->assertSame(1, $rows[$variant]['signups']);
         $this->assertTrue($rows[$variant]['is_default']);
-        $this->assertSame('baseline', $payload['hero_test']['phase']);
+        $this->assertSame('fixed', $payload['hero_test']['phase']);
+        $this->assertSame('even', $payload['hero_test']['split']);
+        // What the round is read on, per page (schema 29).
+        $this->assertSame(['full', 'new'], [$rows['home_today']['page'], $rows['home_new']['page']]);
+        $this->assertSame([0, 0], [$rows[$variant]['saved_schedule'], $rows[$variant]['saved_event']]);
+        $this->assertCount(3, $payload['hero_test']['looks']);
 
         // By day too (schema 21), and the days add up to the totals.
         $days = collect($payload['hero_test']['daily'])->where('variant', $variant);
@@ -278,7 +295,7 @@ class GrowthDataEndpointTest extends TestCase
 
         // Schema 9 reads more tables, each with people in it: none of them may surface.
         DB::table('federated_instances')->insert([
-            'instance_id' => (string) \Illuminate\Support\Str::uuid(), 'site_url' => 'https://events.hiddeninstall.org',
+            'instance_id' => (string) Str::uuid(), 'site_url' => 'https://events.hiddeninstall.org',
             'name' => 'Hidden Install Collective', 'contact_email' => 'admin@hiddeninstall.org', 'secret' => 'x',
             'app_version' => 'v1.0.130', 'status' => 'approved', 'last_seen_at' => now(), 'created_at' => now(), 'updated_at' => now(),
         ]);

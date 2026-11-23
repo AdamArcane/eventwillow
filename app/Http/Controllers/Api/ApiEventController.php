@@ -265,6 +265,8 @@ class ApiEventController extends Controller
         try {
             $request->validate([
                 'name' => 'required|string|max:255',
+                // A correction to the automatic translation, by field (EventTranslationEdits).
+                ...\App\Services\EventTranslationEdits::rules(),
                 'starts_at' => 'required|date_format:Y-m-d H:i:s',
                 'duration' => 'nullable|numeric|min:0|max:8760',
                 'ends_at' => 'nullable|date_format:Y-m-d H:i:s',
@@ -362,6 +364,7 @@ class ApiEventController extends Controller
             'venue_id', 'venue_name', 'venue_address1', 'venue_city', 'venue_state',
             'venue_postal_code', 'venue_country_code',
             'members', 'schedule', 'tickets', 'event_parts', 'addons', 'ticket_preset_id',
+            'translations', 'translations_keep',
         ]));
 
         // A ticket preset the caller names is applied, as pressing it on the Tickets tab does
@@ -573,6 +576,9 @@ class ApiEventController extends Controller
         try {
             $request->validate([
                 'name' => 'sometimes|required|string|max:255',
+                // A correction to the automatic translation, by field (EventTranslationEdits): text
+                // marks it a person's, null or '' gives it back to app:translate, absent keeps it.
+                ...\App\Services\EventTranslationEdits::rules(),
                 'starts_at' => 'sometimes|required|date_format:Y-m-d H:i:s',
                 'duration' => 'nullable|numeric|min:0|max:8760',
                 'ends_at' => 'nullable|date_format:Y-m-d H:i:s',
@@ -705,6 +711,7 @@ class ApiEventController extends Controller
             'venue_id', 'venue_name', 'venue_address1', 'venue_city', 'venue_state',
             'venue_postal_code', 'venue_country_code',
             'members', 'schedule', 'tickets', 'event_parts', 'addons', 'ticket_preset_id', 'ticket_preset_apply',
+            'translations', 'translations_keep',
         ]));
 
         // A ticket preset the caller names is applied, as pressing it on the Tickets tab does

@@ -2,6 +2,7 @@
 
 namespace Tests\Unit;
 
+use App\Models\Role;
 use App\Utils\ColorUtils;
 use App\Utils\GuestTheme;
 use PHPUnit\Framework\Attributes\DataProvider;
@@ -103,12 +104,37 @@ class GuestThemeTest extends TestCase
 
     public function test_a_colour_keeps_its_own_fill(): void
     {
-        foreach (['#4e81fa', '#ffd90f', '#dc2626', '#a3e635'] as $accent) {
+        foreach (['#ffd90f', '#dc2626', '#a3e635', '#9333ea'] as $accent) {
             $theme = GuestTheme::fromAccent($accent);
 
             $this->assertFalse($theme->neutral);
             $this->assertSame($accent, $theme->fill, 'an owner\'s colour is the button, as it has always been');
             $this->assertSame($accent, $theme->fillDark);
+        }
+    }
+
+    /**
+     * Unless its label could not be read on it: white on a mid blue such as the default #4e81fa
+     * was 3.6:1, so the fill is deepened along its own hue until white holds 4.5:1 (the portal's
+     * brand button is a deeper blue than its text blue for the same reason). Swept over the hue
+     * wheel at three lightnesses, every pair holds.
+     */
+    public function test_a_buttons_label_holds_four_and_a_half_to_one_on_any_fill(): void
+    {
+        $theme = GuestTheme::fromAccent('#4e81fa');
+        $this->assertNotSame('#4e81fa', $theme->fill);
+        $this->assertSame('#ffffff', $theme->onFill);
+        [$hue] = ColorUtils::toHsl($theme->fill);
+        [$sourceHue] = ColorUtils::toHsl('#4e81fa');
+        $this->assertEqualsWithDelta($sourceHue, $hue, 0.02, 'the same blue, deeper');
+
+        for ($h = 0; $h < 360; $h += 15) {
+            foreach ([0.35, 0.5, 0.62] as $l) {
+                $accent = ColorUtils::fromHsl($h / 360, 0.85, $l);
+                $t = GuestTheme::fromAccent($accent);
+                $this->assertGreaterThanOrEqual(4.5, ColorUtils::getContrastRatio($t->fill, $t->onFill), $accent);
+                $this->assertGreaterThanOrEqual(4.5, ColorUtils::getContrastRatio($t->fillDark, $t->onFillDark), $accent.' (dark)');
+            }
         }
     }
 
@@ -159,9 +185,10 @@ class GuestThemeTest extends TestCase
     {
         $css = GuestTheme::fromAccent($accent)->css();
 
-        // A hex, the word transparent, or three integers: nothing an owner typed is printed.
+        // A hex, the word transparent, or three integers: nothing an owner typed is printed. The
+        // stage's surfaces and inks (--gk-stage*) are made here too, from the accent.
         $this->assertMatchesRegularExpression(
-            '/^body \{ (--es-[a-z-]+: (#[0-9a-f]{6}|transparent|\d{1,3} \d{1,3} \d{1,3}); ?)+ \}\n:where\(\.dark\) body \{ (--es-[a-z-]+: (#[0-9a-f]{6}|transparent); ?)+ \}$/',
+            '/^body \{ (--(?:es-[a-z-]+|gk-stage[a-z0-9-]*): (#[0-9a-f]{6}|transparent|\d{1,3} \d{1,3} \d{1,3}); ?)+ \}\n:where\(\.dark\) body \{ (--(?:es-[a-z-]+|gk-stage[a-z0-9-]*): (#[0-9a-f]{6}|transparent); ?)+ \}$/',
             $css
         );
         $this->assertStringContainsString('--es-accent: ', $css);
@@ -176,5 +203,50 @@ class GuestThemeTest extends TestCase
             [$r, $g, $b] = array_map('intval', explode(' ', GuestTheme::fromAccent($accent)->glow));
             $this->assertGreaterThanOrEqual(3.0, ColorUtils::getContrastRatio(ColorUtils::fromRgb([$r, $g, $b]), '#0b0f19'), $accent.' as a light on a dark ticket');
         }
+    }
+
+    /**
+     * The stage (partials/guest-stage-styles): the sheet every guest page is laid on, a card
+     * raised on it and a sunken field, in the accent's hue. Every ink, and the accent as text,
+     * reads on all three in both modes, whatever the owner picked.
+     */
+    #[DataProvider('accents')]
+    public function test_every_ink_reads_on_the_stage_the_card_and_the_well(?string $accent): void
+    {
+        [$light, $dark] = GuestTheme::fromAccent($accent)->tokens();
+
+        foreach (['light' => $light, 'dark' => $dark] as $mode => $tokens) {
+            foreach (['--gk-stage', '--gk-stage-raised', '--gk-stage-well'] as $ground) {
+                foreach (['--gk-stage-ink', '--gk-stage-ink-2', '--gk-stage-ink-3', '--es-accent-readable'] as $ink) {
+                    $ratio = ColorUtils::getContrastRatio($tokens[$ink], $tokens[$ground]);
+                    $this->assertGreaterThanOrEqual(4.5, $ratio, "{$accent}, {$mode}: {$ink} on {$ground}");
+                }
+            }
+        }
+    }
+
+    /**
+     * The dark sheet is the owner's mock's one ink-blue (#0d1a22) for every schedule: the accent
+     * is the glow and the button, never the ground (a yellow made the ground an olive).
+     */
+    #[DataProvider('accents')]
+    public function test_the_dark_stage_is_one_ink_for_every_schedule(?string $accent): void
+    {
+        [, $dark] = GuestTheme::fromAccent($accent)->tokens();
+
+        $this->assertSame('#0d1a22', $dark['--gk-stage'], (string) $accent);
+    }
+
+    /** A light solid or gradient background gets the light version of the design; anything else is dark. */
+    public function test_the_page_mode_follows_the_brightness_of_the_background(): void
+    {
+        $role = fn (array $a) => (new Role)->forceFill($a);
+
+        $this->assertSame('light', GuestTheme::pageMode($role(['background' => 'gradient', 'background_colors' => '#fde68a, #fbcfe8'])));
+        $this->assertSame('light', GuestTheme::pageMode($role(['background' => 'solid', 'background_color' => '#f5f5f5'])));
+        $this->assertSame('dark', GuestTheme::pageMode($role(['background' => 'gradient', 'background_colors' => '#7B1FA2, #1e3a8a'])));
+        $this->assertSame('dark', GuestTheme::pageMode($role(['background' => 'solid', 'background_color' => '#111827'])));
+        $this->assertSame('dark', GuestTheme::pageMode($role(['background' => 'image', 'background_image' => 'Calm'])));
+        $this->assertSame('dark', GuestTheme::pageMode($role(['background' => 'aurora'])));
     }
 }

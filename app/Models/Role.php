@@ -585,6 +585,7 @@ class Role extends Model implements MustVerifyEmail
         'splash-alternative',
         'squarespace-alternative',
         'squarespace-replacement',
+        'stackapella',
         'store',
         'stripe',
         'sub-schedules',
@@ -3411,7 +3412,22 @@ class Role extends Model implements MustVerifyEmail
         $href = UrlUtils::safeHref($link->url ?? null);
         $slug = $this->shortLinkSlugs()[$index] ?? '';
 
-        return $href !== null && $slug !== '' ? $this->getGuestUrl().'/'.$slug : $href;
+        return $href !== null && $slug !== '' ? $this->guestPathBase().'/'.$slug : $href;
+    }
+
+    /**
+     * The address this schedule's sub-pages hang off: its short links (/{slug}) and sub-schedules
+     * (/{group}). The same as getGuestUrl() for every schedule but a selfhost install's home
+     * schedule, whose own page is at the site's root while everything under it stays under its
+     * path: site/facebook would be another schedule's address, or nobody's.
+     */
+    public function guestPathBase($useCustomDomain = false): string
+    {
+        if ($this->isClaimed() && \App\Support\HomeSchedule::is($this)) {
+            return route('role.view_guest', ['subdomain' => $this->subdomain]);
+        }
+
+        return (string) $this->getGuestUrl($useCustomDomain);
     }
 
     public function getFirstVideoUrl()
@@ -3528,6 +3544,12 @@ class Role extends Model implements MustVerifyEmail
 
         if ($useCustomDomain && ($domain = $this->handedOutCustomDomain())) {
             return $domain;
+        }
+
+        // A selfhost install's home schedule is served at the site's own address, and that is the
+        // address handed out. Its old path keeps answering.
+        if (\App\Support\HomeSchedule::is($this)) {
+            return url('/');
         }
 
         return route('role.view_guest', ['subdomain' => $this->subdomain]);
@@ -4562,6 +4584,51 @@ class Role extends Model implements MustVerifyEmail
     }
 
     /**
+     * When the schedule's ticket holders are reminded of their event (Tickets > Reminders). No row
+     * reads as the defaults: a day before, and on or off as optionalMailOnByDefault() says
+     * (app:send-ticket-reminders). Whether they are on is ticketRemindersOn(), never `enabled`.
+     */
+    public function ticketReminderSetting()
+    {
+        return $this->hasOne(TicketReminderSetting::class)->withDefault(TicketReminderSetting::DEFAULTS);
+    }
+
+    /**
+     * The schedule's translation glossary (Details > Translation glossary), in the order the owner
+     * wrote it. Read through App\Services\TranslationGlossary, which applies it.
+     */
+    public function translationGlossaryEntries()
+    {
+        return $this->hasMany(TranslationGlossaryEntry::class)->orderBy('position')->orderBy('id');
+    }
+
+    /** Whether this schedule's ticket holders are reminded: the owner's choice, or the default. */
+    public function ticketRemindersOn(): bool
+    {
+        return $this->ticketReminderSetting->enabled ?? $this->optionalMailOnByDefault();
+    }
+
+    /**
+     * Whether an OPTIONAL email this schedule sends (one its owner can switch off, such as ticket
+     * reminders) is on while the owner has not chosen. The one rule for every such email, today's and
+     * any added later (decided 2026-11-12).
+     *
+     * On the hosted install a schedule with no email settings of its own sends through the platform's
+     * mail server, on the platform's sending reputation and cost, so its optional mail is OFF until
+     * the owner switches it on, unless the schedule pays for a plan (a trial is not paying). Mail
+     * through the schedule's own server, and every selfhost install (the operator's own server), is
+     * on by default. Mail somebody asked for themselves (a confirmation, a ticket) is not optional.
+     */
+    public function optionalMailOnByDefault(): bool
+    {
+        if (! config('app.hosted') || $this->hasEmailSettings()) {
+            return true;
+        }
+
+        return $this->actualPlanTier() !== 'free' && ! $this->isOnTrial();
+    }
+
+    /**
      * The schedule's venue map settings (Page content > Venue map). Not columns here because this
      * table is at MySQL's row-size limit; a schedule with no row has its map off, which the
      * default model says. Read through App\Services\VenueMap, which also knows whether the
@@ -4905,6 +4972,9 @@ class Role extends Model implements MustVerifyEmail
     {
         // Selfhost runs the operator's own mail server, and the test env has no reputation to
         // protect. Matches the existing gates, which both short-circuit on the same two.
+        // A paused account (AudienceMailGuard) is NOT asked here: this gate also guards the
+        // notices people asked for about one event (EventChangeNotifier, SendEventInterestMail),
+        // which a pause must never stop. Newsletters and announcements ask mailPaused() themselves.
         if (! config('app.hosted') || config('app.is_testing')) {
             return true;
         }
@@ -4930,7 +5000,38 @@ class Role extends Model implements MustVerifyEmail
         return $recipients > 0 && $recipients <= $limit;
     }
 
+    /**
+     * May this schedule mail addresses nobody gave it themselves (an import, or typed into a
+     * segment by hand)? On the hosted install, through the platform's mail, only once the owner
+     * has paid. AudienceMailGuard holds the rule.
+     */
+    public function mayMailUnsolicitedAudience(): bool
+    {
+        return \App\Services\AudienceMailGuard::mayMailUnsolicited($this);
+    }
+
+    /** Newsletter emails a month on the hosted free plan, and while a paid plan is on a trial. */
+    public const FREE_NEWSLETTER_LIMIT = 10;
+
     public function newsletterLimit(): ?int
+    {
+        if (! config('app.hosted') || $this->hasEmailSettings()) {
+            return null;
+        }
+
+        // A trial gives the plan's features, not its mail: until the first payment the allowance
+        // is the free plan's (decided 2026-11-18, after a trial account mailed a phishing list
+        // through the platform's sender). Ending the trial early (SubscriptionController::
+        // endTrial()) lifts it.
+        if ($this->onSubscriptionTrial()) {
+            return self::FREE_NEWSLETTER_LIMIT;
+        }
+
+        return $this->planNewsletterLimit();
+    }
+
+    /** What the plan sends a month once it is paid for: the figure a trial is waiting for. */
+    public function planNewsletterLimit(): ?int
     {
         if (! config('app.hosted') || $this->hasEmailSettings()) {
             return null;
@@ -4946,7 +5047,35 @@ class Role extends Model implements MustVerifyEmail
             return 100;
         }
 
-        return 10;
+        return self::FREE_NEWSLETTER_LIMIT;
+    }
+
+    /**
+     * A Stripe subscription is still inside its trial window, so nothing has been paid for it yet.
+     * Cancelled or not: a cancelled trial runs to its end, and must not keep a plan's allowance
+     * meanwhile. endTrial() asks for an uncancelled one itself.
+     */
+    public function onSubscriptionTrial(): bool
+    {
+        if (! config('app.hosted')) {
+            return false;
+        }
+
+        $subscription = $this->subscription('default');
+
+        return $subscription && $subscription->onTrial();
+    }
+
+    /** A trial that can be ended early and paid for now: running and not cancelled. */
+    public function canEndTrial(): bool
+    {
+        if (! config('app.hosted')) {
+            return false;
+        }
+
+        $subscription = $this->subscription('default');
+
+        return $subscription && $subscription->onTrial() && ! $subscription->canceled();
     }
 
     public function newslettersSentThisMonth(): int
@@ -4957,15 +5086,16 @@ class Role extends Model implements MustVerifyEmail
             ->where('sent_at', '>=', now()->startOfMonth())
             ->sum('sent_count');
 
-        // Count emails from currently sending newsletters via recipient records
-        $sendingEmails = (int) NewsletterRecipient::whereIn('newsletter_id',
-            $this->newsletters()
-                ->where('status', 'sending')
-                ->where('updated_at', '>=', now()->startOfMonth())
-                ->select('id')
-        )->whereIn('status', ['pending', 'sent'])->count();
+        // Every other newsletter's recipients, by each row's own status (sent, pending or failed),
+        // whatever became of the newsletter: one deleted after it went out ('cancelled') still
+        // spent the allowance, or deleting and sending again would refill it.
+        $otherEmails = \App\Services\AudienceMailGuard::recipientRowsSince(
+            fn ($q) => $q->where('newsletters.role_id', $this->id),
+            now()->startOfMonth(),
+            exceptSentNewsletters: true,
+        )->count();
 
-        return $sentEmails + $sendingEmails;
+        return $sentEmails + $otherEmails;
     }
 
     public function canSendNewsletter(): bool

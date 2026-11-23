@@ -41,6 +41,10 @@
     // it has the chips above the list, the ticket line on a card and the month on a phone.
     // Not ?graphic=1: that renders a picture to share, and keeps both lists as they always were.
     $guestRows = ($route ?? '') === 'guest' && ! request()->graphic;
+    // How large each event's picture is in the guest list (Style > Events, GuestPageSetting).
+    $listImageClass = $guestRows && isset($role) && $role->exists
+        ? (['medium' => 'gk-img-m', 'large' => 'gk-img-l'][$role->guestPageSetting->list_image_size ?? 'small'] ?? '')
+        : '';
     $guestEmbed = (bool) (isset($embed) && $embed);
     // The path this schedule's own page lives at, with no trailing slash: '' when the schedule
     // owns the whole host (hosted subdomains, custom domains) and '/{subdomain}' under selfhost's
@@ -50,6 +54,12 @@
     $guestBasePath = $role && $role->subdomain
         ? rtrim(parse_url(route('role.view_guest', ['subdomain' => $role->subdomain]), PHP_URL_PATH) ?? '', '/')
         : '';
+    // Where the schedule's own page is, which is not always $guestBasePath: a selfhost install's
+    // home schedule (App\Support\HomeSchedule) is shown at the site's root, while its sub-schedules
+    // stay under its path. So a sub-schedule is $guestBasePath/{group} and "no sub-schedule" is this.
+    $guestOwnPath = $role && \App\Support\HomeSchedule::is($role)
+        ? rtrim(parse_url(url('/'), PHP_URL_PATH) ?? '', '/')
+        : $guestBasePath;
     $firstDay = $role?->first_day_of_week ?? 0;
     // The owner's event animation (resources/css/list-reveal.css), or ?list_animation= when an
     // owner is previewing an unsaved choice. Only on the schedule's own guest page: never in the
@@ -111,7 +121,14 @@
         $uniqueCategoryIds = array_unique($eventCategoryIds);
         $hasOnlineEvents = collect($events)->contains(fn($event) => !empty($event->event_url));
 
-        $displayLang = isset($role) ? $role->displayLanguageCode() : 'en';
+        // The language the names are shown in. On a guest page, the one the visitor is reading
+        // (displayLanguageCode(), which follows ?lang= and the session's translate flag). In the
+        // admin portal and on the dashboard, always the schedule's own: the translate flag is the
+        // session's, not the schedule's, so a member who once read another schedule in English saw
+        // their own Hebrew schedule's events under the English the AI import had stored (2026-11-18).
+        $displayLang = isset($role)
+            ? ($route === 'guest' ? $role->displayLanguageCode() : ($role->language_code ?: 'en'))
+            : 'en';
 
         $eventToVueArray = function($event) use ($role, $subdomain, $route, $displayLang) {
             $groupId = isset($role) ? $event->getGroupIdForSubdomain($role->subdomain) : null;
@@ -346,6 +363,9 @@
     $filterShareBaseUrl = ($isAdminRoute && $role && $role->subdomain)
         ? rtrim($role->getCanonicalUrl() ?: route('role.view_guest', ['subdomain' => $role->subdomain]), '/')
         : '';
+    $filterShareGroupBaseUrl = ($isAdminRoute && $role && $role->subdomain && \App\Support\HomeSchedule::is($role))
+        ? rtrim(route('role.view_guest', ['subdomain' => $role->subdomain]), '/')
+        : $filterShareBaseUrl;
 
     // Labels for the active-filter chips, resolved through customLabel() like the panel's own.
     $filterChipLabels = [
@@ -381,7 +401,7 @@
     @endif
 >
     {{-- Main container: Stacks content on mobile, aligns in a row on desktop. --}}
-    <div class="flex flex-col md:flex-row md:flex-wrap md:items-center md:justify-between gap-4">
+    <div class="flex flex-col md:flex-row md:flex-wrap {{ $guestRows && ! $guestEmbed ? 'md:items-start' : 'md:items-center' }} md:justify-between gap-4">
 
         {{-- Month and Year Title: Always visible and positioned first (hidden in list view).
 
@@ -395,7 +415,7 @@
              The #month-year-title id is unchanged; it is a documented custom-CSS hook
              (marketing/custom-css.blade.php) and show-guest.blade.php targets it by id. --}}
         @php $calendarHeadingTag = ($calendarHeadingTag ?? 'h2') === 'h1' ? 'h1' : 'h2'; @endphp
-        <{{ $calendarHeadingTag }} id="month-year-title" v-show="currentView === 'calendar'" class="text-2xl font-semibold leading-6 flex-shrink-0 {{ ($tab ?? '') == 'availability' ? '' : 'hidden md:block' }} text-gray-900 dark:text-gray-100" {!! ($eventLayout ?? 'calendar') === 'list' ? 'style="display:none"' : '' !!}>
+        <{{ $calendarHeadingTag }} id="month-year-title" v-show="currentView === 'calendar'" class="text-2xl font-semibold leading-6 flex-shrink-0 {{ $guestRows && ! $guestEmbed ? 'gk-month-name' : '' }} {{ ($tab ?? '') == 'availability' ? '' : 'hidden md:block' }} text-gray-900 dark:text-gray-100" {!! ($eventLayout ?? 'calendar') === 'list' ? 'style="display:none"' : '' !!}>
             @if ($route === 'guest' && !request()->graphic)
             <time :datetime="monthYearDatetime" v-text="monthYearLabel"></time>
             @else
@@ -403,6 +423,12 @@
             @endif
         </{{ $calendarHeadingTag }}>
 
+        @if ($guestRows && ! $guestEmbed)
+        {{-- The quick filters beside the month's name, from a tablet up and in the month only.
+             Above the active-filter row below the header, so what can be picked comes before
+             what is picked. --}}
+        @include('role.partials.quick-pills', ['pillsInHeader' => true])
+        @endif
 
         {{-- All Controls Wrapper: Groups all interactive elements. Stacks on mobile, row on desktop. --}}
         <div class="flex {{ ($tab ?? '') == 'availability' ? 'flex-row flex-wrap items-center' : 'flex-col' }} md:flex-row md:flex-nowrap md:items-center md:ms-auto gap-3">
@@ -596,6 +622,13 @@
 </header>
 @endif
 
+@if ($guestRows && ! $guestEmbed)
+{{-- The quick filters for a phone and for the list, above the active-filter row: what can be
+     picked comes before what is picked. The month on a wider screen has its own copy in the
+     header, beside the month's name (gk-pills-desk-off hides this one there). --}}
+@include('role.partials.quick-pills', ['pillsInHeader' => false])
+@endif
+
 @if (! request()->graphic && ! (isset($embed) && $embed))
 {{-- Active filters: what is narrowing the view, each with its own remove button. Without it a
      visitor who opens a shared "Room A" link (or scans one on a door) sees a partial schedule
@@ -640,18 +673,6 @@
         </button>
     </div>
 
-    @if ($guestRows && ! $guestEmbed)
-    {{-- The one filter most visitors want, one press away: the schedule's sub-schedules where
-         it has them, its categories otherwise. Everything else stays behind Filters. The names
-         are the owner's text, drawn by Vue from data (v-text), never compiled. --}}
-    <div v-if="quickChips.length > 1" v-cloak class="gk-pills {{ rtl_class($role ?? null, 'rtl', '', $ownPage) }}" role="group" aria-label="{{ $label('filters') }}">
-        <button type="button" class="gk-pill" :class="{ 'gk-pill-on': !quickChipValue }" :aria-pressed="!quickChipValue ? 'true' : 'false'" @click="pickQuickChip('', $event)">{{ $label('show_all') }}</button>
-        <button v-for="chip in quickChips" :key="chip.value" type="button" class="gk-pill" :class="{ 'gk-pill-on': quickChipValue === chip.value }"
-                :aria-pressed="quickChipValue === chip.value ? 'true' : 'false'" @click="pickQuickChip(chip.value, $event)">
-            <i v-if="chip.color" class="gk-row-dot" :style="{ backgroundColor: chip.color }"></i><span v-text="chip.name"></span>
-        </button>
-    </div>
-    @endif
 
     <div v-show="currentView === 'calendar'" class="{{ rtl_class($role ?? null, 'rtl', '', $ownPage) }}">
 
@@ -845,7 +866,7 @@
             </div>
             <button v-if="phoneHasEarlierDays && !phoneShowPast" type="button" class="gk-month-earlier" @click="phoneShowPast = true">{{ $label('show_past_events') }}</button>
             @endif
-            <div v-if="phoneGroups.length" class="gk-days" :data-list-anim="activeListAnimation !== 'none' ? activeListAnimation : null" :data-list-rtl="isRtl ? '' : null" style="--es-accent: {{ $accentColor }}">
+            <div v-if="phoneGroups.length" class="gk-days{{ $listImageClass ? ' '.$listImageClass : '' }}" :data-list-anim="activeListAnimation !== 'none' ? activeListAnimation : null" :data-list-rtl="isRtl ? '' : null" style="--es-accent: {{ $accentColor }}">
                 <section v-for="group in phoneGroups" :key="'pm-' + group.date" :id="'gk-day-' + group.date" class="gk-day" :class="{ 'gk-day-past': group.past }">
                     <div class="gk-panel gk-dayhead">
                         <span v-if="dayWord(group.date)" class="gk-dayhead-word" v-text="dayWord(group.date)"></span>
@@ -947,7 +968,7 @@
      as role/partials/card-ticket-badge.) The admin and the dashboard keep both lists and the
      CSS switch, as before. --}}
 {{-- List View Skeleton (Desktop) --}}
-        <div v-if="currentView === 'list' && isLoadingEvents" class="hidden md:block space-y-4 animate-pulse">
+        <div v-if="currentView === 'list' && isLoadingEvents && {{ $guestRows ? 'false' : 'true' }}" class="hidden md:block space-y-4 animate-pulse">
             {{-- Date Header Skeleton (matches the real header's centered translucent pill) --}}
             <div class="flex items-center gap-4">
                 <div class="flex-1 h-px bg-gray-200 dark:bg-gray-600"></div>
@@ -994,7 +1015,10 @@
             @endfor
         </div>
 
-{{-- List View (Desktop) --}}
+{{-- List View (Desktop). The admin's and the dashboard's: a guest page has one list at every
+     width, the rows below (role/partials/guest-row), which the stage lays out as the wide list
+     from a tablet up (partials/guest-stage-styles). --}}
+        @unless ($guestRows)
         <div {!! $guestRows ? 'v-if="currentView === \'list\' && !isLoadingEvents && !isNarrow"' : 'v-show="currentView === \'list\' && !isLoadingEvents"' !!} :data-list-anim="activeListAnimation !== 'none' ? activeListAnimation : null" :data-list-rtl="isRtl ? '' : null" style="--es-accent: {{ $accentColor }}" class="hidden md:block {{ rtl_class($role ?? null, 'rtl', '', $ownPage) }}">
             {{-- Upcoming Events --}}
             <div v-if="allListGroups.length" class="space-y-8">
@@ -1090,7 +1114,7 @@
                                         </div>
 
                                         {{-- Venue Badge --}}
-                                        <a v-if="event.venue_name && event.venue_guest_url && !event.is_password_protected" :href="event.venue_guest_url" class="w-fit flex items-center gap-4 min-w-0 hover:opacity-80 transition-opacity">
+                                        <a v-if="event.venue_name && event.venue_guest_url && !event.is_password_protected" :href="withLang(event.venue_guest_url)" class="w-fit flex items-center gap-4 min-w-0 hover:opacity-80 transition-opacity">
                                             <div data-reveal-tile class="flex-shrink-0 w-16 h-16 rounded-xl border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-900 flex items-center justify-center shadow-sm">
                                                 <img v-if="event.venue_profile_image" :src="event.venue_profile_image" class="w-11 h-11 rounded-lg object-cover" :alt="event.venue_name">
                                                 <svg v-else width="24" height="24" viewBox="0 0 24 24" fill="{{ $accentColor }}" aria-hidden="true">
@@ -1465,7 +1489,7 @@
                                     </div>
 
                                     {{-- Venue Badge --}}
-                                    <a v-if="event.venue_name && event.venue_guest_url && !event.is_password_protected" :href="event.venue_guest_url" class="w-fit flex items-center gap-4 hover:opacity-80 transition-opacity">
+                                    <a v-if="event.venue_name && event.venue_guest_url && !event.is_password_protected" :href="withLang(event.venue_guest_url)" class="w-fit flex items-center gap-4 hover:opacity-80 transition-opacity">
                                         <div data-reveal-tile class="flex-shrink-0 w-16 h-16 rounded-xl border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-900 flex items-center justify-center shadow-sm">
                                             <img v-if="event.venue_profile_image" :src="event.venue_profile_image" class="w-11 h-11 rounded-lg object-cover" :alt="event.venue_name">
                                             <svg v-else width="24" height="24" viewBox="0 0 24 24" fill="{{ $accentColor }}" aria-hidden="true">
@@ -1828,9 +1852,10 @@
                 </div>
             </div>
         </div>
+        @endunless
 
         {{-- List View Skeleton (Mobile) --}}
-        <div v-if="currentView === 'list' && isLoadingEvents" class="{{ $guestRows ? 'gk-list md:hidden' : 'md:hidden' }} animate-pulse">
+        <div v-if="currentView === 'list' && isLoadingEvents" class="{{ $guestRows ? 'gk-list' : 'md:hidden' }} animate-pulse">
             {{-- Date Header Skeleton --}}
             <div class="sticky top-0 z-10 {{ $stickyBleedClass }} bg-white dark:bg-gray-800">
                 <div class="px-4 pb-5 pt-3 flex items-center gap-4">
@@ -1871,7 +1896,7 @@
         {{-- List View (Mobile) --}}
         {{-- v-if on a guest page, and only on a phone: a list that is not the one on screen is
              not in the page at all (the cards above are the list from a tablet up). --}}
-        <div {!! $guestRows ? 'v-if="currentView === \'list\' && !isLoadingEvents && isNarrow"' : 'v-show="currentView === \'list\' && !isLoadingEvents"' !!} :data-list-anim="activeListAnimation !== 'none' ? activeListAnimation : null" :data-list-rtl="isRtl ? '' : null" style="--es-accent: {{ $accentColor }}" class="{{ $guestRows ? 'gk-list' : 'md:hidden' }} {{ rtl_class($role ?? null, 'rtl', '', $ownPage) }}">
+        <div {!! $guestRows ? 'v-if="currentView === \'list\' && !isLoadingEvents"' : 'v-show="currentView === \'list\' && !isLoadingEvents"' !!} :data-list-anim="activeListAnimation !== 'none' ? activeListAnimation : null" :data-list-rtl="isRtl ? '' : null" style="--es-accent: {{ $accentColor }}" class="{{ $guestRows ? 'gk-list' : 'md:hidden' }} {{ rtl_class($role ?? null, 'rtl', '', $ownPage) }}">
             @if ($guestRows)
             {{-- The guest list on a phone: each day under its date, a card for each event
                  (partials/guest-kit-styles: .gk-day, .gk-row).
@@ -1880,7 +1905,17 @@
                  second look: performers, the agenda, polls and the fan buttons are on the
                  cards a wider screen gets, and on the event's own page. data-reveal-* are the
                  hooks the schedule's list animation uses (resources/css/list-reveal.css). --}}
-            <div v-if="allListGroups.length > 0" class="gk-days">
+            {{-- One or two coming events: large cards, each saying its own day (there are no
+                 day headings to stand under), one across or two side by side. Three or more are
+                 the list (his call, 2026-11-22). --}}
+            <ul v-if="fewCount" class="gk-few" :class="'gk-few-' + fewCount" :style="{ '--gk-box': fewBox }">
+                <template v-for="group in allListGroups" :key="'few-' + group.date">
+                    <template v-for="event in group.events.filter(e => !(e._multiDayNum > 1))" :key="'few-' + event.uniqueKey">
+                        @include('role/partials/guest-row', ['rowFeature' => true])
+                    </template>
+                </template>
+            </ul>
+            <div v-else-if="allListGroups.length > 0" class="gk-days{{ $listImageClass ? ' '.$listImageClass : '' }}">
                 <template v-for="(group, groupIndex) in allListGroups" :key="'list-m-' + group.date">
                     {{-- The end of the upcoming rows, which is above the past ones. --}}
                     <template v-if="groupIndex === firstPastGroupIndex">
@@ -1898,6 +1933,11 @@
                             <span v-if="dayWord(group.date)" class="gk-dayhead-word" v-text="dayWord(group.date)"></span>
                             {{-- A heading, as the day is over the cards a wider screen gets. --}}
                             <h2 class="gk-dayhead-title" v-text="formatDateHeader(group.date)" {{ rtl_class($role ?? null, 'dir=rtl', '', $ownPage) }}></h2>
+                            {{-- The same day as the list's date column draws it from a tablet up
+                                 (partials/guest-stage-styles): the heading above is what is read. --}}
+                            <span class="gk-dayhead-big" aria-hidden="true"><span class="gk-dh-week" v-text="formatDayName(group.date)"></span><span class="gk-dh-num" v-text="getDayNum(group.date)"></span><span class="gk-dh-month" v-text="getMonthLong(group.date)"></span></span>
+                            {{-- How many that day, as the wide list's date line said. --}}
+                            <span class="gk-dh-count" v-text="dayEventCount(group.events.filter(e => isEventVisible(e)).length)"></span>
                         </div>
                         <ul class="gk-rows">
                             <template v-for="event in group.events" :key="'list-mob-' + event.uniqueKey">
@@ -1957,7 +1997,7 @@
             <div v-if="!hidePastEvents && hasMorePastEvents && activeFilterCount === 0" class="mt-6 text-center">
                 <button @click.stop="loadMorePastEvents()"
                         :disabled="loadingPastEvents"
-                        class="inline-flex items-center px-6 py-2.5 text-sm font-semibold rounded-xl border-2 shadow-sm transition-all duration-200 hover:scale-105 hover:shadow-lg"
+                        class="inline-flex items-center px-6 py-2.5 text-sm font-semibold rounded-xl border-2 shadow-sm {{ $guestRows ? 'gk-fill-btn' : 'transition-all duration-200 hover:scale-105 hover:shadow-lg' }}"
                         style="border-color: {{ $accentColor }}; background-color: {{ $accentColor }}; color: {{ $contrastColor }}">
                     <svg v-if="loadingPastEvents" class="animate-spin -ms-1 me-2 h-4 w-4" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
                         <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
@@ -2553,9 +2593,19 @@ const calendarApp = createApp({
             pastLoadFailed: false,
             subdomain: '{{ isset($subdomain) ? $subdomain : '' }}',
             guestBasePath: @json($guestBasePath),
+            guestOwnPath: @json($guestOwnPath),
+            filterShareGroupBaseUrl: @json($filterShareGroupBaseUrl),
             route: '{{ $route }}',
             tab: '{{ $tab ?? '' }}',
             embed: {{ isset($embed) && $embed ? 'true' : 'false' }},
+            {{-- The Embed dialog's "Show it on your website" (?events=onsite, App\Support\
+                 EmbedEventView): a plain click on an event shows it on the organizer's own page,
+                 in embed.js's overlay when the page has it and in this frame when it does not.
+                 Without it an embed opens the event's page in a new tab, as it always has. --}}
+            embedOnsite: {{ isset($embed) && $embed && request()->query('events') === \App\Support\EmbedEventView::ONSITE ? 'true' : 'false' }},
+            embedOpener: null,
+            embedLabels: { close: @json(__('messages.close')), dialog: @json(__('messages.event_details')) },
+            embedDark: @json(in_array(request()->query('dark'), ['true', 'false'], true) ? request()->query('dark') : null),
             // The layout ?layout= asked for, or null. Read from the helper rather than $role
             // because this partial also renders on the home route, which has none. It is the
             // requested value, not currentView, so a link from here to an event carries what
@@ -2574,11 +2624,18 @@ const calendarApp = createApp({
             {{-- Also the language forwarded to the guest calendar endpoints, so their payload can no
                  longer disagree with the server-rendered chrome around it. --}}
             languageCode: '{{ $ownPage && auth()->check() ? app()->getLocale() : (isset($role) ? $role->displayLanguageCode() : 'en') }}',
+            {{-- The language a link to an event (or a venue) carries as ?lang=, set while this page
+                 shows its translation. An embed opens events in a new tab, where no session from a
+                 cross-site iframe follows, so without it every event opened in the authored
+                 language. Empty on the authored language, whose links stay clean. --}}
+            carryLang: @json(! $ownPage && isset($role) && $role->langQuerySuffix($role->displayLanguageCode()) !== '' ? $role->displayLanguageCode() : ''),
             {{-- The zone the past-event filters resolve "today" in. Must be the same one $today
                  above uses: these compare against occurrenceDate, which is the SCHEDULE's calendar
                  date, so a viewer-anchored today hides an event that is still running. --}}
             userTimezone: '{{ $calendarTimezone }}',
             dayWords: { today: @json(__('messages.today')), tomorrow: @json(__('messages.tomorrow')) },
+            {{-- How many on a day, in each language's own plural (messages.day_event_count): "5 событий", never "5 События". --}}
+            dayEventCounts: @json(collect(range(1, 60))->mapWithKeys(fn ($n) => [$n => trans_choice('messages.day_event_count', $n, ['count' => $n])])),
             leadFilterKeyAtLoad: null,
             // The phone's month: the day that was picked (the month is folded to a line while
             // one is), and whether the days of this month that are over are shown.
@@ -3096,9 +3153,13 @@ const calendarApp = createApp({
         shareableFilterUrl() {
             const base = this.route === 'admin'
                 ? this.filterShareBaseUrl
-                : (window.location.origin + this.guestBasePath);
+                : window.location.origin;
             if (!base) return '';
-            const url = base + (this.selectedGroup ? '/' + encodeURIComponent(this.selectedGroup) : '');
+            // A sub-schedule always lives under the schedule's path, even when the schedule
+            // itself is shown at the site's root (a selfhost home schedule).
+            const url = this.route === 'admin'
+                ? (this.selectedGroup ? this.filterShareGroupBaseUrl + '/' + encodeURIComponent(this.selectedGroup) : base)
+                : base + (this.selectedGroup ? this.guestBasePath + '/' + encodeURIComponent(this.selectedGroup) : this.guestOwnPath);
             const params = new URLSearchParams();
             if (this.selectedCategory) params.set('category', this.selectedCategory);
             this.customFieldUrlParams().forEach(([name, value]) => params.set(name, value));
@@ -3286,6 +3347,34 @@ const calendarApp = createApp({
         // the end of the upcoming rows, which is above the past ones.
         firstPastGroupIndex() {
             return this.allListGroups.findIndex(group => group.events.every(e => e._isPast));
+        },
+        {{-- A guest list of one or two coming events, and nothing else (no past rows, no
+             "Show more", no rows cut by the server): drawn as large cards (.gk-few), so the flyers
+             fill the page instead of standing small in a list built for dozens. 0 otherwise. --}}
+        fewCount() {
+            if ({{ $guestRows && ! $guestEmbed ? 'false' : 'true' }} || this.hasMoreListRows || this.listTruncated) return 0;
+            let n = 0;
+            for (const group of this.allListGroups) {
+                for (const e of group.events) {
+                    if (e._isPast) return 0;
+                    {{-- An event over several days is one card, on its first day. --}}
+                    if (e._multiDayNum > 1) continue;
+                    if (this.isEventVisible(e) && ++n > 2) return 0;
+                }
+            }
+            return n;
+        },
+        {{-- Two large cards share one picture box, so their feet line up: the shape of
+             the tallest picture among them (a poster when any is a flyer, wider when all are photos). --}}
+        fewBox() {
+            if (!this.fewCount) return null;
+            let r = 4 / 3;
+            for (const group of this.allListGroups) {
+                for (const e of group.events) {
+                    if (!(e._multiDayNum > 1) && this.isEventVisible(e) && (e.image_url || e.flyer_url) && !e.is_password_protected) r = Math.min(r, Number(this.rowRatio(e)));
+                }
+            }
+            return Math.max(0.8, r).toFixed(3);
         },
         eventsGroupedByDate() {
             const grouped = {};
@@ -4189,6 +4278,9 @@ const calendarApp = createApp({
             there.setDate(there.getDate() + offset);
             return there.getFullYear() + '-' + String(there.getMonth() + 1).padStart(2, '0') + '-' + String(there.getDate()).padStart(2, '0');
         },
+        dayEventCount(n) {
+            return this.dayEventCounts[n] || this.dayEventCounts[60].replace('60', n);
+        },
         dayWord(dateStr) {
             if (dateStr === this.scheduleDay(0)) return this.dayWords.today;
             if (dateStr === this.scheduleDay(1)) return this.dayWords.tomorrow;
@@ -4312,11 +4404,94 @@ const calendarApp = createApp({
                 queryParams.push('layout=' + this.layoutFromUrl);
             }
 
+            if (this.carryLang) {
+                queryParams.push('lang=' + encodeURIComponent(this.carryLang));
+            }
+
+            // Showing events on the organizer's site: what the frame was set to and where it is,
+            // which the embed never writes to its own address, so the event shown in the frame
+            // keeps its theme and language and its Back returns to this month
+            // (App\Support\EmbedEventView::carried() reads the same keys).
+            if (this.embedOnsite) {
+                queryParams.push('events=onsite');
+                if (this.embedDark) {
+                    queryParams.push('dark=' + this.embedDark);
+                }
+                if (this.pageMonth && this.pageYear) {
+                    queryParams.push('month=' + encodeURIComponent(this.pageMonth));
+                    queryParams.push('year=' + encodeURIComponent(this.pageYear));
+                }
+            }
+
             if (queryParams.length > 0) {
                 url += '?' + queryParams.join('&');
             }
 
             return url;
+        },
+        // An event shown on the organizer's own site (embedOnsite): the event's page with
+        // embed=true&view=event, which RoleController renders as a framed event. Only a plain
+        // click: a modified or middle click, or a press with no event to read, is the browser's
+        // own, to the link's real address in a new tab. Returns whether it handled the click.
+        //
+        // With embed.js on the host page (it has greeted this frame), the host opens it in its
+        // overlay from a PATH this sends, resolved against this frame's own origin; an event whose
+        // page is on another of our hosts is shown in this frame instead, as is every event when
+        // the host page has no script or wraps the code in a frame of its own.
+        embedOpenEvent(url, name, e) {
+            if (!this.embedOnsite || !url) return false;
+            if (e && (e.defaultPrevented || (e.button !== undefined && e.button !== 0) || e.metaKey || e.ctrlKey || e.shiftKey || e.altKey)) return false;
+            let target;
+            try {
+                target = new URL(url, window.location.href);
+            } catch (err) {
+                return false;
+            }
+            if (!/^https?:$/.test(target.protocol)) return false;
+            if (e) e.preventDefault();
+            target.searchParams.set('embed', 'true');
+            target.searchParams.set('view', 'event');
+
+            const opener = e && e.target && e.target.closest ? (e.target.closest('a, button, [tabindex]') || e.currentTarget) : document.activeElement;
+            this.embedOpener = opener || null;
+
+            const frame = window.esEmbedFrame;
+            if (frame && frame.greeted && !frame.overlay && target.origin === window.location.origin
+                && frame.post('open', {
+                    path: target.pathname + target.search,
+                    name: String(name || '').slice(0, 200),
+                    lang: document.documentElement.lang || '',
+                    dir: this.isRtl ? 'rtl' : 'ltr',
+                    theme: document.documentElement.classList.contains('dark') ? 'dark' : 'light',
+                    // Plain strings: the data object is a reactive proxy, which postMessage cannot
+                    // clone, and a refused message would quietly open the event in the frame.
+                    labels: { close: String(this.embedLabels.close), dialog: String(this.embedLabels.dialog) },
+                })) {
+                return true;
+            }
+
+            // In this frame. The month on screen is written to this page's own address first, so
+            // the browser's Back (the event's Back) returns to it, and the list keeps its place.
+            try {
+                const here = new URL(window.location.href);
+                here.searchParams.set('month', this.pageMonth);
+                here.searchParams.set('year', this.pageYear);
+                window.history.replaceState(window.history.state, '', here.toString());
+            } catch (err) {}
+            this.rememberList();
+            window.location.href = target.toString();
+            return true;
+        },
+        // A link to another guest page (a venue's) in the language this page is shown in.
+        withLang(url) {
+            if (!url || !this.carryLang) return url;
+            try {
+                const u = new URL(url, window.location.href);
+                u.searchParams.set('lang', this.carryLang);
+                return u.toString();
+            } catch (e) {
+                return url;
+            }
         },
         openFanContentOnEventPage(event) {
             if (!this.fanContentGuestRedirect) return false;
@@ -4326,7 +4501,7 @@ const calendarApp = createApp({
             // do nothing than to bounce them off a form that always fails.
             if (!event.guest_url) return true;
 
-            const url = event.guest_url + '#gp-fan-content';
+            const url = this.withLang(event.guest_url) + '#gp-fan-content';
 
             // This partial is also rendered inside the embed widget. Navigating there would
             // replace the embed with a full event page inside someone else's site, so open a
@@ -4462,6 +4637,7 @@ const calendarApp = createApp({
             }
 
             this.countListTap();
+            this.embedOpenEvent(this.getEventUrl(event), event.name, e);
         },
         // One of the guest pages' daily counts (App\Utils\GuestFunnel): a visitor went from a
         // schedule's list or month grid into an event. Only on the schedule's own page, and only
@@ -4485,6 +4661,10 @@ const calendarApp = createApp({
             const openInNewTab = this.embed || this.route === 'admin';
 
             this.countListTap();
+
+            if (this.embedOpenEvent(url, event.name, e)) {
+                return;
+            }
 
             if (openInNewTab) {
                 window.open(url, '_blank');
@@ -4662,6 +4842,18 @@ const calendarApp = createApp({
             const [year, month, day] = dateStr.split('-').map(Number);
             const eventDate = new Date(year, month - 1, day);
             return eventDate.toLocaleDateString(this.languageCode, { month: 'short' }).toUpperCase();
+        },
+        getMonthLong(dateStr) {
+            if (!dateStr) return '';
+            const [year, month, day] = dateStr.split('-').map(Number);
+            return new Date(year, month - 1, day).toLocaleDateString(this.languageCode, { month: 'long' });
+        },
+        {{-- The shape of a large card's picture box: the flyer's own, held between a tall poster
+             (0.7) and a square, so a landscape flyer is not a strip and a tall one not a column. --}}
+        rowRatio(event) {
+            const w = Number(event.flyer_url && event.flyer_width), h = Number(event.flyer_url && event.flyer_height);
+            const r = w > 0 && h > 0 ? w / h : 0.8;
+            return Math.min(4 / 3, Math.max(0.7, r)).toFixed(3);
         },
         getDayNum(dateStr) {
             if (!dateStr) return '';
@@ -4955,7 +5147,7 @@ const calendarApp = createApp({
             // (or by clearFilters, which reaches here through it) because the new sub-schedule
             // does not offer that category.
             const currentUrl = new URL(window.location);
-            currentUrl.pathname = (this.guestBasePath + (newGroupSlug ? '/' + newGroupSlug : '')) || '/';
+            currentUrl.pathname = (newGroupSlug ? this.guestBasePath + '/' + newGroupSlug : this.guestOwnPath) || '/';
             currentUrl.searchParams.delete('schedule');
             currentUrl.searchParams.delete('category');
 
@@ -4969,6 +5161,17 @@ const calendarApp = createApp({
         if (this.route === 'guest') {
             this.recallList();
             window.addEventListener('pagehide', () => this.rememberList());
+        }
+        // The overlay embed.js opened for an event from here was closed: the focus comes back to
+        // what was pressed (partials/embed-frame raises this on the host's word).
+        if (this.embedOnsite) {
+            document.addEventListener('es-embed:closed', () => {
+                const el = this.embedOpener;
+                this.embedOpener = null;
+                if (el && el.isConnected && el.focus) {
+                    try { el.focus({ preventScroll: true }); } catch (e) {}
+                }
+            });
         }
         // Check localStorage for saved view preference. Skipped when ?layout= asked for a
         // specific view, and inside an embed: the embedding site chooses the layout, there
@@ -5129,7 +5332,7 @@ calendarAppInstance.$watch('activeFilterCount', updateHeroFiltersButton);
         {{-- Undated: a series is one page (its canonical), and getGuestUrl() would link it at its
              first date, which may no longer be an occurrence and then only redirects here. --}}
         <li style="margin-bottom: 1rem;">
-            <a href="{{ $noscriptEvent->getUndatedGuestUrl($role?->subdomain ?? $noscriptEvent->roles->first()?->subdomain) }}">
+            <a href="{{ $noscriptEvent->getUndatedGuestUrl($role?->subdomain ?? $noscriptEvent->roles->first()?->subdomain) }}{{ isset($role) ? $role->langQuerySuffix($noscriptLang) : '' }}">
                 <strong dir="{{ content_dir_for_language($noscriptName, $noscriptDirLang) }}">{{ $noscriptName }}</strong>
             </a>
             <br>

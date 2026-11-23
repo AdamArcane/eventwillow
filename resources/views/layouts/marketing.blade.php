@@ -103,7 +103,7 @@
     @php
         $ogLocaleMap = [
             'en' => 'en_US', 'es' => 'es_ES', 'de' => 'de_DE',
-            'fr' => 'fr_FR', 'it' => 'it_IT', 'pt' => 'pt_PT',
+            'fr' => 'fr_FR', 'it' => 'it_IT', 'pt' => 'pt_BR', 'pt-PT' => 'pt_PT',
             'he' => 'he_IL', 'nl' => 'nl_NL', 'ar' => 'ar_SA', 'et' => 'et_EE', 'ru' => 'ru_RU', 'ro' => 'ro_RO',
         ];
         $currentOgLocale = $ogLocaleMap[app()->getLocale()] ?? 'en_US';
@@ -401,6 +401,10 @@
             </script>
         @endif
 
+        @unless ($errorPage ?? false)
+            @include('partials.marketing-page-stats', ['statsPage' => \Illuminate\Support\Facades\Route::currentRouteName()])
+        @endunless
+
         {{-- First-touch attribution: the landing page, off-site referrer, ?utm_* and ?ref= for
              the marketing-to-signup hop, which the server session used to hold before this HTML
              became edge-cacheable. Attribution is not strictly necessary for anything the visitor
@@ -413,8 +417,8 @@
              a page uncacheable. Session-scoped (no expiry) and first-touch (never overwritten
              while it exists). Read back at sign-up by CaptureUtmParameters::clientAttribution().
 
-             The one exception to first-touch is `hero`, the homepage headline variant
-             (App\Utils\HeroExperiment), which the homepage's hero script leaves in window.esHero.
+             The one exception to first-touch is `hero`, the homepage test's variant (a headline,
+             or one of two pages: App\Utils\HeroExperiment), which the homepage's hero script leaves in window.esHero.
              A visitor who landed on another page first already has the cookie, so the variant is
              merged into it rather than skipped; every other field is left as it was. --}}
         <script {!! nonce_attr() !!}>

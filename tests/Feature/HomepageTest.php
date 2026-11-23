@@ -30,6 +30,17 @@ class HomepageTest extends TestCase
 {
     use CreatesScheduleData, RefreshDatabase;
 
+    /**
+     * With an Azure app set (outlook_sync_enabled()), so every Outlook surface is on the page:
+     * without one the install shows none, which OutlookPanelsHiddenTest and the
+     * UnconfiguredFeatureClaims tests hold.
+     */
+    protected function setUp(): void
+    {
+        parent::setUp();
+        config(['services.microsoft.client_id' => 'test-client', 'services.microsoft.client_secret' => 'test-secret']);
+    }
+
     private function html(): string
     {
         return $this->get('/')->assertOk()->getContent();
@@ -82,7 +93,9 @@ class HomepageTest extends TestCase
         $x = $this->xpath($this->html());
         $boxes = $x->query('//div['.$this->has('es-claim').']');
 
-        $this->assertSame(2, $boxes->length, 'the page has a claim box beside the headline and one in the finale');
+        // Two on each homepage while the page round runs (HeroExperiment): beside the headline and
+        // in the closing panel. Each has to hold on both pages.
+        $this->assertSame(4, $boxes->length, 'each homepage has a claim box beside the headline and one in the finale');
 
         foreach ($boxes as $box) {
             $input = $x->query('.//input[@type="text"]', $box)->item(0);
@@ -124,7 +137,9 @@ class HomepageTest extends TestCase
         $x = $this->xpath($this->html());
         $posters = $x->query('//*[@data-claim-poster]');
 
-        $this->assertSame(3, $posters->length, 'a poster on the wall, one for phones and one in the finale');
+        // Today's page: one on the wall, one for phones and one in the finale. The new page: one at
+        // the head of its wall (twice, for the loop) and one in its closing panel.
+        $this->assertSame(6, $posters->length, 'a homepage lost or gained a poster that takes the typed name');
 
         foreach ($posters as $poster) {
             $this->assertGreaterThan(0, $x->query('ancestor-or-self::*[@aria-hidden="true"]', $poster)->length,
@@ -818,7 +833,8 @@ class HomepageTest extends TestCase
                 $this->createEvent($role, ['name' => 'Wall Session '.$made, 'flyer_image_url' => 'flyer_wall'.$made.'.png']);
             }
 
-            $this->assertSame($labelled ? 2 : 0, substr_count($this->html(), 'Coming up on Event Schedule'),
+            // Two on today's page, one on the new page's wall (HeroExperiment's page round).
+            $this->assertSame($labelled ? 3 : 0, substr_count($this->html(), 'Coming up on Event Schedule'),
                 "with {$wanted} real events the wall label is ".($labelled ? 'missing' : 'claiming stock flyers'));
         }
     }

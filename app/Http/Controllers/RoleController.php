@@ -2,7 +2,9 @@
 
 namespace App\Http\Controllers;
 
+use App\Console\Commands\SendTicketReminders;
 use App\Exceptions\BillingCancellationException;
+use App\Exceptions\ContentModerationException;
 use App\Http\Requests\MemberAddRequest;
 use App\Http\Requests\RoleCreateRequest;
 use App\Http\Requests\RoleEmailVerificationRequest;
@@ -11,46 +13,74 @@ use App\Http\Requests\RoleVideoRemoveRequest;
 use App\Http\Requests\RoleVideoSaveRequest;
 use App\Http\Requests\RoleVideosSaveRequest;
 use App\Http\Requests\ScheduleTransferRequest;
+use App\Jobs\PlaceScheduleVenues;
+use App\Jobs\RetranslateGlossaryTerms;
 use App\Jobs\SendQueuedSms;
 use App\Mail\FeedbackRequest;
+use App\Mail\TicketReminder;
 use App\Models\AnalyticsAppearancesDaily;
 use App\Models\AnalyticsDaily;
 use App\Models\AnalyticsReferrersDaily;
 use App\Models\AnalyticsSocialClicksDaily;
 use App\Models\AnalyticsUtmDaily;
+use App\Models\AppointmentType;
 use App\Models\AuditLog;
+use App\Models\AuroraSetting;
 use App\Models\BoostCampaign;
+use App\Models\CalendarSync;
+use App\Models\CustomDomainSetting;
 use App\Models\DismissedTimezoneWarning;
 use App\Models\DismissedVenueMergeSuggestion;
 use App\Models\Event;
+use App\Models\EventComment;
+use App\Models\EventFeed;
+use App\Models\EventPhoto;
 use App\Models\EventPoll;
+use App\Models\EventVideo;
 use App\Models\Group;
+use App\Models\GuestPageSetting;
+use App\Models\NewsletterUnsubscribe;
 use App\Models\PageView;
+use App\Models\PromoterLink;
 use App\Models\Role;
+use App\Models\RoleSubscriber;
 use App\Models\RoleTransfer;
 use App\Models\RoleUser;
 use App\Models\Sale;
+use App\Models\SeatingPlan;
+use App\Models\TicketReminderSetting;
 use App\Models\User;
 use App\Notifications\AddedMemberNotification;
 use App\Notifications\DeletedRoleNotification;
 use App\Repos\EventRepo;
 use App\Services\AnalyticsService;
+use App\Services\AppointmentHostService;
 use App\Services\AuditService;
 use App\Services\BoostBillingService;
+use App\Services\BoostPartnerService;
 use App\Services\CalendarArrival;
 use App\Services\CuratorSourceService;
 use App\Services\DemoService;
 use App\Services\DigitalOceanService;
 use App\Services\EmailService;
+use App\Services\FederationService;
 use App\Services\GeocodingService;
+use App\Services\GoogleCalendarService;
+use App\Services\InstallmentService;
 use App\Services\MetaAdsService;
+use App\Services\MicrosoftCalendarService;
 use App\Services\NotificationEmailService;
 use App\Services\OneSignalService;
+use App\Services\PromoterLinks;
 use App\Services\ScheduleDeletionService;
 use App\Services\ScheduleTransferService;
 use App\Services\SmsService;
+use App\Services\Stay22Service;
 use App\Services\TicketPresets;
+use App\Services\TranslationGlossary;
 use App\Services\UsageTrackingService;
+use App\Services\VenueMap;
+use App\Support\EmbedEventView;
 use App\Utils\AiImageIssuance;
 use App\Utils\Aurora;
 use App\Utils\ColorUtils;
@@ -61,6 +91,7 @@ use App\Utils\GeminiUtils;
 use App\Utils\GuestFunnel;
 use App\Utils\HoneypotUtils;
 use App\Utils\ImageUtils;
+use App\Utils\ImportOptions;
 use App\Utils\ListWording;
 use App\Utils\OpenAIUtils;
 use App\Utils\PhoneUtils;
@@ -73,9 +104,11 @@ use App\Utils\VenueUtils;
 use App\Utils\VideoUtils;
 use Carbon\Carbon;
 use Illuminate\Auth\Events\Verified;
+use Illuminate\Database\QueryException;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
+use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\Config;
 use Illuminate\Support\Facades\DB;
@@ -85,6 +118,8 @@ use Illuminate\Support\Facades\RateLimiter;
 use Illuminate\Support\Facades\Storage;
 use Illuminate\Support\Str;
 use Illuminate\Validation\ValidationException;
+use Symfony\Component\Console\Output\BufferedOutput;
+use Symfony\Component\Mailer\Exception\ExceptionInterface;
 
 class RoleController extends Controller
 {
@@ -245,7 +280,7 @@ class RoleController extends Controller
                         ]);
                     }
 
-                    \Illuminate\Support\Facades\Cache::forget("custom_domain:{$role->custom_domain_host}");
+                    Cache::forget("custom_domain:{$role->custom_domain_host}");
                 }
             } catch (\Exception $e) {
                 \Log::warning('Failed to clean up custom domain during role deletion', [
@@ -261,7 +296,7 @@ class RoleController extends Controller
             try {
                 $googleUser = $role->users()->first();
                 if ($googleUser && $googleUser->google_token) {
-                    $googleCalendarService = app(\App\Services\GoogleCalendarService::class);
+                    $googleCalendarService = app(GoogleCalendarService::class);
 
                     // Ensure user has valid token before deleting webhook
                     if ($googleCalendarService->ensureValidToken($googleUser)) {
@@ -282,7 +317,7 @@ class RoleController extends Controller
             try {
                 $microsoftUser = $role->user;
                 if ($microsoftUser && $microsoftUser->microsoft_token) {
-                    app(\App\Services\MicrosoftCalendarService::class)
+                    app(MicrosoftCalendarService::class)
                         ->deleteSubscription($microsoftUser, $role->microsoft_webhook_id);
                 }
             } catch (\Exception $e) {
@@ -320,7 +355,7 @@ class RoleController extends Controller
             // A partner boost is stopped, never deleted at Meta and never refunded: the platform
             // holds none of its money, and its spend must stay readable for the statement.
             if ($campaign->isPartner()) {
-                \App\Services\BoostPartnerService::stopInCascade($campaign);
+                BoostPartnerService::stopInCascade($campaign);
 
                 continue;
             }
@@ -381,7 +416,7 @@ class RoleController extends Controller
                 ->where('is_deleted', false)
                 ->pluck('id');
 
-            $cancelledPlans = app(\App\Services\InstallmentService::class)
+            $cancelledPlans = app(InstallmentService::class)
                 ->cancelPlansForSales($saleIds, 'schedule_deleted');
 
             if ($cancelledPlans) {
@@ -785,7 +820,7 @@ class RoleController extends Controller
         // while its events lived on with nothing keeping them up to date. A feed of an address
         // the target already reads is dropped (one address is one feed per schedule), and its
         // items go with it: the target's own feed finds the same events by its own ledger.
-        if (\App\Models\EventFeed::tablesReady()) {
+        if (EventFeed::tablesReady()) {
             $read = DB::table('event_feeds')->where('role_id', $target->id)->pluck('url_hash');
             DB::table('event_feeds')->where('role_id', $source->id)->whereIn('url_hash', $read)->delete();
             DB::table('event_feeds')->where('role_id', $source->id)->update(['role_id' => $target->id, 'group_id' => null]);
@@ -1199,7 +1234,7 @@ class RoleController extends Controller
      * empty collection when the warning has been dismissed for the current off-timezone set
      * (passing $userId), or pass no $userId to get the raw set regardless of dismissal.
      */
-    private function offTimezoneEvents(Role $schedule, ?int $userId = null): \Illuminate\Support\Collection
+    private function offTimezoneEvents(Role $schedule, ?int $userId = null): Collection
     {
         if (! $schedule->timezone) {
             return collect();
@@ -1353,6 +1388,22 @@ class RoleController extends Controller
      * crafted requests from mixing venues that happen to each be in some
      * duplicate group but not the same one.
      */
+    /**
+     * The account-wide group (mergeableGroups()) whose WHOLE set holds every one of $ids, or null.
+     *
+     * @return array<int, Role>|null
+     */
+    private function fullGroupOf(array $groups, array $ids): ?array
+    {
+        foreach ($groups as $group) {
+            if (! array_diff($ids, $group[0]->full_ids ?? [])) {
+                return $group;
+            }
+        }
+
+        return null;
+    }
+
     private function idsBelongToSingleGroup(array $groups, array $ids): bool
     {
         foreach ($groups as $group) {
@@ -1635,14 +1686,38 @@ class RoleController extends Controller
      * Each venue is decorated with $venue->future_event_count (its TOTAL event count here) and
      * $venue->ids_hash, which the shared merge view and the dismissal check both read.
      *
+     * $type 'talent' gives the same page for participant schedules: a curator who types a team
+     * under "Someone new" for every game ends up with one stub per game, all followed by them.
+     * Those are grouped on their WHOLE name and country (sameNameGroups()), never on the leading
+     * comma segment the venue key uses, because an act is routinely called "Earth, Wind & Fire".
+     *
      * @return array<int, array<int, Role>>
      */
-    private function userVenueDuplicateGroups(User $user): array
+    private function userVenueDuplicateGroups(User $user, string $type = 'venue'): array
     {
-        $roleIds = DB::table('role_user')->where('user_id', $user->id)->pluck('role_id');
+        return $this->userDuplicateGroupsByType($user, [$type])[$type];
+    }
 
-        if ($roleIds->isEmpty()) {
-            return [];
+    /**
+     * userVenueDuplicateGroups() for several types in one pass, keyed by type: /following
+     * counts venues and participants on every load, and two scans were four more queries there.
+     *
+     * @param  array<int, string>  $types
+     * @return array<string, array<int, array<int, Role>>>
+     */
+    private function userDuplicateGroupsByType(User $user, array $types): array
+    {
+        $result = array_fill_keys($types, []);
+
+        // The two facts canMergeRoles() would re-query per venue, fetched once. This method runs
+        // on every /following load, so a per-member isEditor()/isFollowing() pair would be N+1
+        // against exactly the users who have the most duplicates.
+        $levelsByRoleId = DB::table('role_user')
+            ->where('user_id', $user->id)
+            ->pluck('level', 'role_id');
+
+        if ($levelsByRoleId->isEmpty()) {
+            return $result;
         }
 
         // Not $user->roles(): that filters is_deleted, and soft-deleted duplicates are half the
@@ -1652,94 +1727,218 @@ class RoleController extends Controller
         // COUNT(DISTINCT event_id), not withCount's count(*): event_role holds one row per
         // (event, role, sub-schedule), so a plain count double-counts an event filed under two
         // sub-schedules. Matches what venueDuplicateGroups() does on the curator page.
-        $venues = Role::whereIn('id', $roleIds)
-            ->where('type', 'venue')
+        $allRoles = Role::whereIn('id', $levelsByRoleId->keys())
+            ->whereIn('type', $types)
             ->withCount(['events' => fn ($q) => $q->select(DB::raw('count(distinct events.id)'))])
             ->get();
 
-        foreach ($venues as $venue) {
+        foreach ($allRoles as $venue) {
             $venue->future_event_count = (int) $venue->events_count;
         }
 
+        // Dismissals share the venue table: a hash is of role ids, which are unique across types.
         $dismissedHashes = DismissedVenueMergeSuggestion::where('user_id', $user->id)
             ->whereNull('role_id')
             ->pluck('venue_ids_hash')
             ->all();
 
-        // The two facts canMergeRoles() would re-query per venue, fetched once. This method runs
-        // on every /following load, so a per-member isEditor()/isFollowing() pair would be N+1
-        // against exactly the users who have the most duplicates.
-        $levelsByRoleId = DB::table('role_user')
-            ->where('user_id', $user->id)
-            ->pluck('level', 'role_id');
+        $runIds = VenueUtils::runIds($allRoles->pluck('id')->all());
+
+        foreach ($types as $type) {
+            $venues = $allRoles->where('type', $type)->values();
+            $result[$type] = $this->mergeableGroups(
+                $type === 'venue' ? VenueUtils::duplicateGroups($venues) : self::sameNameGroups($venues),
+                $dismissedHashes,
+                $levelsByRoleId,
+                $runIds
+            );
+        }
+
+        return $result;
+    }
+
+    /**
+     * The candidate groups that are worth offering: not dismissed, and with a legal target.
+     *
+     * @param  array<int, array<int, Role>>  $candidateGroups
+     * @param  array<int, string>  $dismissedHashes
+     * @return array<int, array<int, Role>>
+     */
+    /**
+     * @param  array<int, int>  $runIds  the candidates somebody runs (VenueUtils::runIds()):
+     *                                   "nobody runs it" is that, never ! isClaimed() alone, which
+     *                                   reads an owned schedule whose address is unverified as a
+     *                                   placeholder (canMergeRoles() would then refuse every merge
+     *                                   the page offered, and the notice would never clear).
+     */
+    private function mergeableGroups(array $candidateGroups, array $dismissedHashes, Collection $levelsByRoleId, array $runIds): array
+    {
+        // Mirrors isEditableBy() in memory: owner or admin always, a follower only where nobody
+        // runs it. Deciding what to DISPLAY is all this does - mergeMyDuplicatesGroup() still
+        // runs the real canMergeRoles() per pair on re-fetched rows.
+        $editable = fn (Role $role) => in_array($levelsByRoleId[$role->id] ?? null, ['owner', 'admin'], true)
+            || (($levelsByRoleId[$role->id] ?? null) === 'follower' && ! $role->isClaimed() && ! in_array($role->id, $runIds));
 
         $groups = [];
-        foreach (VenueUtils::duplicateGroups($venues) as $group) {
-            $ids = array_map(fn ($v) => $v->id, $group);
-            $hash = DismissedVenueMergeSuggestion::hashForVenueIds($ids);
 
-            if (in_array($hash, $dismissedHashes, true)) {
+        foreach ($candidateGroups as $group) {
+            // A dismissal is stored against the WHOLE group, as it always was, so one made before
+            // the page narrowed its groups still holds, and a save can find it from the name
+            // alone (EventRepo::existingParticipantNamed()).
+            $fullHash = DismissedVenueMergeSuggestion::hashForVenueIds(array_map(fn ($v) => $v->id, $group));
+
+            if (in_array($fullHash, $dismissedHashes, true)) {
                 continue;
             }
 
-            // A group needs a legal target: isEditableBy only grants a follower rights on an
-            // UNCLAIMED venue, so a group whose only viable survivor is someone else's claimed
-            // venue can never be merged. Showing it would just be a button that always fails.
-            //
-            // Mirrors canMergeRoles + isEditableBy in memory. Deciding what to DISPLAY is all
-            // this does - mergeMyVenuesGroup() still runs the real canMergeRoles() per pair on
-            // re-fetched rows, so that stays the authority at the mutation point.
-            $target = VenueUtils::pickBest($group);
-            $editable = fn (Role $venue) => in_array($levelsByRoleId[$venue->id] ?? null, ['owner', 'admin'], true)
-                || (! $venue->isClaimed() && ($levelsByRoleId[$venue->id] ?? null) === 'follower');
+            // Only what can be merged is offered: the target among the schedules this person may
+            // edit, and every one of those nobody has claimed. Someone else's real page that they
+            // follow stays off the group rather than taking the group down with it - picked as
+            // the target (it wins pickBest()), it used to hide the copies the page is for.
+            $offerable = array_values(array_filter($group, $editable));
 
-            $mergeable = $editable($target)
-                ? collect($group)->filter(fn (Role $source) => $source->id !== $target->id
-                    && ! $source->isClaimed()
-                    && $editable($source))->values()
-                : collect();
-
-            if ($mergeable->isEmpty()) {
+            if (count($offerable) < 2) {
                 continue;
             }
 
-            foreach ($group as $venue) {
-                $venue->ids_hash = $hash;
+            $target = VenueUtils::pickBest($offerable);
+            $shown = array_values(array_filter($offerable, fn (Role $role) => $role->id === $target->id || ! $role->isClaimed()));
+
+            if (count($shown) < 2) {
+                continue;
             }
 
-            $groups[] = $group;
+            $shownHash = DismissedVenueMergeSuggestion::hashForVenueIds(array_map(fn ($v) => $v->id, $shown));
+
+            if (in_array($shownHash, $dismissedHashes, true)) {
+                continue;
+            }
+
+            // The whole group rides along: a merge or a dismissal is checked against it, not
+            // against what was shown, so a source claimed between render and submit is skipped
+            // by canMergeRoles() (the partial-result message) rather than refusing the batch.
+            $fullIds = array_map(fn ($v) => $v->id, $group);
+            foreach ($shown as $role) {
+                $role->ids_hash = $shownHash;
+                $role->dismiss_hash = $fullHash;
+                $role->full_ids = $fullIds;
+            }
+
+            $groups[] = $shown;
         }
 
         return $groups;
     }
 
+    /**
+     * Schedules of one type that share a name and a country, in groups of two or more. The
+     * account-wide participant merge page and EventRepo::existingParticipantNamed() use the same
+     * key (roles.name_normalized and the country), so what a save reuses and what this page
+     * offers to merge never disagree.
+     *
+     * @return array<int, array<int, Role>>
+     */
+    private static function sameNameGroups(iterable $roles): array
+    {
+        $grouped = [];
+
+        foreach ($roles as $role) {
+            $name = GeminiUtils::normalizeForMatch($role->name);
+
+            if ($name === '') {
+                continue;
+            }
+
+            $grouped[$name.'|'.strtolower((string) $role->country_code)][] = $role;
+        }
+
+        return array_values(array_filter($grouped, fn ($group) => count($group) > 1));
+    }
+
     public function mergeMyVenues()
+    {
+        return $this->mergeMyDuplicates('venue');
+    }
+
+    public function mergeMyParticipants()
+    {
+        return $this->mergeMyDuplicates('talent');
+    }
+
+    public function mergeMyVenuesPreview(Request $request)
+    {
+        return $this->mergeMyDuplicatesPreview($request, 'venue');
+    }
+
+    public function mergeMyParticipantsPreview(Request $request)
+    {
+        return $this->mergeMyDuplicatesPreview($request, 'talent');
+    }
+
+    public function mergeMyVenuesGroup(Request $request)
+    {
+        return $this->mergeMyDuplicatesGroup($request, 'venue');
+    }
+
+    public function mergeMyParticipantsGroup(Request $request)
+    {
+        return $this->mergeMyDuplicatesGroup($request, 'talent');
+    }
+
+    public function dismissMyVenueMergeSuggestion(Request $request)
+    {
+        return $this->dismissMyMergeSuggestion($request, 'venue');
+    }
+
+    public function dismissMyParticipantMergeSuggestion(Request $request)
+    {
+        return $this->dismissMyMergeSuggestion($request, 'talent');
+    }
+
+    /** The route names of the account-wide merge page for one type of schedule. */
+    private static function myMergeRoute(string $type, string $action = ''): string
+    {
+        return ($type === 'venue' ? 'following.merge_venues' : 'following.merge_participants').$action;
+    }
+
+    private function mergeMyDuplicates(string $type)
     {
         if (is_demo_mode()) {
             return redirect()->route('home')->with('error', __('messages.demo_mode_restriction'));
         }
 
         return view('role/merge_venues', $this->myVenueMergeViewData(
-            $this->userVenueDuplicateGroups(auth()->user())
+            $this->userVenueDuplicateGroups(auth()->user(), $type),
+            $type
         ));
     }
 
     /** Shared view payload so one merge view serves both the curator page and this one. */
-    private function myVenueMergeViewData(array $groups): array
+    private function myVenueMergeViewData(array $groups, string $type = 'venue'): array
     {
-        return [
+        $data = [
             'groups' => $groups,
             'backUrl' => route('following'),
-            'mergeUrl' => route('following.merge_venues_group'),
-            'previewUrl' => route('following.merge_venues_preview'),
-            'dismissUrl' => route('following.merge_venues_dismiss'),
+            'mergeUrl' => route(self::myMergeRoute($type, '_group')),
+            'previewUrl' => route(self::myMergeRoute($type, '_preview')),
+            'dismissUrl' => route(self::myMergeRoute($type, '_dismiss')),
             'introKey' => 'merge_venues_intro_all',
             'emptyStateKey' => 'merge_venues_empty_state_all',
             'eventCountKey' => 'merge_venues_events_count',
         ];
+
+        if ($type === 'talent') {
+            $data['titleKey'] = 'merge_participants_title';
+            $data['introKey'] = 'merge_participants_intro_all';
+            $data['emptyStateKey'] = 'merge_participants_empty_state_all';
+            $data['summaryKey'] = 'merge_participants_summary_counts';
+            $data['previewSummaryKey'] = 'merge_participants_preview_summary';
+        }
+
+        return $data;
     }
 
-    public function mergeMyVenuesPreview(Request $request)
+    private function mergeMyDuplicatesPreview(Request $request, string $type)
     {
         if (is_demo_mode()) {
             return response()->json(['error' => __('messages.demo_mode_restriction')], 403);
@@ -1752,12 +1951,12 @@ class RoleController extends Controller
             return response()->json(['error' => __('messages.not_authorized')], 422);
         }
 
-        $groups = $this->userVenueDuplicateGroups(auth()->user());
-        if (! $this->idsBelongToSingleGroup($groups, array_merge([$targetId], $sourceIds))) {
+        $groups = $this->userVenueDuplicateGroups(auth()->user(), $type);
+        if (! $this->fullGroupOf($groups, array_merge([$targetId], $sourceIds))) {
             return response()->json(['error' => __('messages.not_authorized')], 403);
         }
 
-        $target = Role::where('id', $targetId)->where('type', 'venue')->firstOrFail();
+        $target = Role::where('id', $targetId)->where('type', $type)->firstOrFail();
 
         // Every event, not just the upcoming ones: this page is not scoped to a schedule, so
         // there is no "on this schedule" window to match.
@@ -1780,10 +1979,10 @@ class RoleController extends Controller
         ]);
     }
 
-    public function mergeMyVenuesGroup(Request $request)
+    private function mergeMyDuplicatesGroup(Request $request, string $type)
     {
         if (is_demo_mode()) {
-            return redirect()->route('following.merge_venues')
+            return redirect()->route(self::myMergeRoute($type))
                 ->with('error', __('messages.demo_mode_restriction'));
         }
 
@@ -1795,14 +1994,14 @@ class RoleController extends Controller
             return redirect()->back()->with('error', __('messages.not_authorized'));
         }
 
-        $groups = $this->userVenueDuplicateGroups($user);
-        if (! $this->idsBelongToSingleGroup($groups, array_merge([$targetId], $sourceIds))) {
-            return redirect()->route('following.merge_venues')
+        $groups = $this->userVenueDuplicateGroups($user, $type);
+        if (! $this->fullGroupOf($groups, array_merge([$targetId], $sourceIds))) {
+            return redirect()->route(self::myMergeRoute($type))
                 ->with('error', __('messages.not_authorized'));
         }
 
-        $target = Role::where('id', $targetId)->where('type', 'venue')->firstOrFail();
-        $sources = Role::whereIn('id', $sourceIds)->where('type', 'venue')->get();
+        $target = Role::where('id', $targetId)->where('type', $type)->firstOrFail();
+        $sources = Role::whereIn('id', $sourceIds)->where('type', $type)->get();
 
         // Partition rather than reject the batch, matching the curator flow: one venue someone
         // claimed between render and submit should not cost the user the other four merges.
@@ -1833,7 +2032,7 @@ class RoleController extends Controller
             $message = str_replace(
                 [':done', ':total', ':skipped', ':target'],
                 [$validated->count(), $sources->count(), $skipped->count(), $target->getDisplayName(false)],
-                __('messages.merge_venues_partial_result')
+                __($type === 'venue' ? 'messages.merge_venues_partial_result' : 'messages.merge_participants_partial_result')
             );
         } else {
             $message = str_replace(
@@ -1843,17 +2042,17 @@ class RoleController extends Controller
             );
         }
 
-        $next = count($this->userVenueDuplicateGroups($user)) > 0
-            ? route('following.merge_venues')
+        $next = count($this->userVenueDuplicateGroups($user, $type)) > 0
+            ? route(self::myMergeRoute($type))
             : route('following');
 
         return redirect($next)->with('message', $message);
     }
 
-    public function dismissMyVenueMergeSuggestion(Request $request)
+    private function dismissMyMergeSuggestion(Request $request, string $type)
     {
         if (is_demo_mode()) {
-            return redirect()->route('following.merge_venues')
+            return redirect()->route(self::myMergeRoute($type))
                 ->with('error', __('messages.demo_mode_restriction'));
         }
 
@@ -1862,19 +2061,22 @@ class RoleController extends Controller
             return redirect()->back();
         }
 
-        $groups = $this->userVenueDuplicateGroups(auth()->user());
-        if (! $this->idsBelongToSingleGroup($groups, $venueIds)) {
-            return redirect()->route('following.merge_venues')
+        $groups = $this->userVenueDuplicateGroups(auth()->user(), $type);
+        $group = $this->fullGroupOf($groups, $venueIds);
+        if (! $group) {
+            return redirect()->route(self::myMergeRoute($type))
                 ->with('error', __('messages.not_authorized'));
         }
 
+        // The whole group's hash (mergeableGroups()), not the posted ids': the page shows only
+        // what can be merged, and "Not duplicates" is about every schedule of that name.
         DismissedVenueMergeSuggestion::firstOrCreate([
             'user_id' => auth()->user()->id,
             'role_id' => null,
-            'venue_ids_hash' => DismissedVenueMergeSuggestion::hashForVenueIds($venueIds),
+            'venue_ids_hash' => $group[0]->dismiss_hash,
         ]);
 
-        return redirect()->route('following.merge_venues');
+        return redirect()->route(self::myMergeRoute($type));
     }
 
     /**
@@ -2152,6 +2354,20 @@ class RoleController extends Controller
         $user = auth()->user();
         $curatorRoles = $user ? $user->curators() : collect();
 
+        // An event opened inside an embedded calendar (EmbedEventView: ?embed=true&view=event).
+        // It is drawn for a signed-out visitor whoever is signed in: a cross-site frame has no
+        // session anyway, and a page that may now be framed by any site must not carry anybody's
+        // member tools or ticket links, or it is a clickjacking surface. So from here the event is
+        // looked up as nobody would, which also keeps a draft and a booking out of the frame.
+        // $viewer stays the real visitor, for the one thing that asks who it is: whether the
+        // visit is counted.
+        $viewer = $user;
+        $embedEventView = EmbedEventView::requested($request) && ($slug || $id || $request->id);
+        if ($embedEventView) {
+            $user = null;
+            $curatorRoles = collect();
+        }
+
         $role = Role::subdomain($subdomain)->with('groups')->first();
 
         // is_deleted too, not just isClaimed(). An admin releasing a squatted subdomain renames
@@ -2229,6 +2445,9 @@ class RoleController extends Controller
         if ($role->isClaimable()) {
             return $this->viewGuestUnclaimed($request, $role, $slug, $id, $date);
         }
+
+        // ?via=CODE: the promoter whose link brought this visitor (the schedule's Promoters tab).
+        PromoterLinks::capture($request, $role);
 
         // The embeddable signup form (issue #125). Answered here, before any event, calendar or
         // analytics work: it renders nothing but the subscribe panel, and like every embed it is
@@ -2708,8 +2927,17 @@ class RoleController extends Controller
                 ->get();
         }
 
-        // Track view for analytics (non-member visits only, skip embeds)
-        if (! request()->embed && (! $user || (! $user->isMember($subdomain) && ! $user->isAdmin()))) {
+        // Track view for analytics (non-member visits only, skip embeds). An event opened inside an
+        // embedded calendar IS counted, as a view of that event that came from the organizer's
+        // website: it used to be a click from the frame to the event's page in a new tab, which
+        // counted, and leaving it out would make their event views fall the day they switch to
+        // showing events on their site. The calendar's own loads stay uncounted. Behind the
+        // password gate nothing is shown, so nothing is counted.
+        if ($embedEventView) {
+            if ($event && ! $event->isPasswordProtected() && (! $viewer || (! $viewer->isMember($subdomain) && ! $viewer->isAdmin()))) {
+                app(AnalyticsService::class)->recordView($role, $event, $request, 'embed');
+            }
+        } elseif (! request()->embed && (! $user || (! $user->isMember($subdomain) && ! $user->isAdmin()))) {
             app(AnalyticsService::class)->recordView($role, $event, $request);
         }
 
@@ -2749,6 +2977,27 @@ class RoleController extends Controller
 
             $view = 'event/show-guest-ticket-embed';
             $event->loadMissing(['tickets']);
+        } elseif ($embedEventView && $event) {
+            // A password event's form posts to us and would come back to a frame with no session,
+            // so the frame says the event has a password and links to its page, where it is asked.
+            if ($event->isPasswordProtected()) {
+                return $this->renderSignedOut(fn () => response()->view('event/embed-unavailable', [
+                    'role' => $role,
+                    'event' => $event,
+                    'reason' => 'password',
+                    'pageUrl' => EmbedEventView::pageUrl($event, $subdomain, $requestedOccurrence, null, $request),
+                    'backUrl' => EmbedEventView::calendarUrl($role, $request),
+                ]));
+            }
+
+            $view = 'event/show-guest';
+
+            // The guest funnel's first stage, as the event's own page counts it: a click in the
+            // frame used to open that page, so this keeps the funnel measuring the same thing.
+            GuestFunnel::count('event_view', $request, $role, embeddedEvent: true);
+
+            $event->loadMissing(['approvedVideos.user', 'approvedComments.user', 'approvedPhotos.user', 'polls' => fn ($q) => $q->withCount('votes')]);
+            $photoLimitReached = ! $role->canUploadPhoto();
         } elseif ($embed) {
             $view = 'role/show-guest-embed';
         } elseif ($event) {
@@ -2810,23 +3059,23 @@ class RoleController extends Controller
             $photoLimitReached = ! $role->canUploadPhoto();
 
             if (auth()->check()) {
-                $myPendingVideos = \App\Models\EventVideo::where('event_id', $event->id)
+                $myPendingVideos = EventVideo::where('event_id', $event->id)
                     ->where('user_id', auth()->id())
                     ->where('is_approved', false)
                     ->get();
-                $myPendingComments = \App\Models\EventComment::where('event_id', $event->id)
+                $myPendingComments = EventComment::where('event_id', $event->id)
                     ->where('user_id', auth()->id())
                     ->where('is_approved', false)
                     ->with('user')
                     ->get();
-                $myPendingPhotos = \App\Models\EventPhoto::where('event_id', $event->id)
+                $myPendingPhotos = EventPhoto::where('event_id', $event->id)
                     ->where('user_id', auth()->id())
                     ->where('is_approved', false)
                     ->get();
 
                 // Every one of them, newest first: somebody who bought two tickets and then one
                 // more has two ticket pages, and the page used to know about one of them.
-                $userSales = \App\Models\Sale::with('saleTickets.ticket')
+                $userSales = Sale::with('saleTickets.ticket')
                     ->where('event_id', $event->id)
                     ->where('status', 'paid')
                     ->where('is_deleted', false)
@@ -2902,41 +3151,47 @@ class RoleController extends Controller
             $upcoming = $this->eventRepo->upcomingForGuest($role, $selectedGroup, 50);
         }
 
-        $response = response()
-            ->view($view, compact(
-                'subdomain',
-                'events',
-                'upcoming',
-                'moreEvents',
-                'carouselEvents',
-                'hasActivePolls',
-                'role',
-                'otherRole',
-                'month',
-                'year',
-                'startOfMonth',
-                'user',
-                'event',
-                'embed',
-                'date',
-                'requestedOccurrence',
-                'curatorRoles',
-                'fonts',
-                'selectedGroup',
-                'pastEvents',
-                'hasMorePastEvents',
-                'myPendingVideos',
-                'myPendingComments',
-                'myPendingPhotos',
-                'photoLimitReached',
-                'userSale',
-                'userSales',
-                'publicFeedbacks',
-                'feedbackCount',
-                'avgRating',
-            ));
+        $embedEvent = $embedEventView && $event && $view === 'event/show-guest';
 
-        return $response;
+        // compact() before the closure: an arrow function captures the variables it names, and a
+        // name inside compact() is a string, not a variable it can see.
+        $viewData = compact(
+            'subdomain',
+            'events',
+            'upcoming',
+            'moreEvents',
+            'carouselEvents',
+            'hasActivePolls',
+            'role',
+            'otherRole',
+            'month',
+            'year',
+            'startOfMonth',
+            'user',
+            'event',
+            'embed',
+            'date',
+            'requestedOccurrence',
+            'curatorRoles',
+            'fonts',
+            'selectedGroup',
+            'pastEvents',
+            'hasMorePastEvents',
+            'myPendingVideos',
+            'myPendingComments',
+            'myPendingPhotos',
+            'photoLimitReached',
+            'userSale',
+            'userSales',
+            'publicFeedbacks',
+            'feedbackCount',
+            'avgRating',
+            'embedEvent',
+        );
+
+        $render = fn () => response()->view($view, $viewData);
+
+        return $embedEvent ? $this->renderSignedOut($render) : $render();
     }
 
     public function checkEventPassword(Request $request, $subdomain)
@@ -3015,8 +3270,10 @@ class RoleController extends Controller
 
         $displayLang = $this->resolveGuestDisplayLanguage($request, $role);
 
+        // A query string can carry an array (?before[]=x), which Carbon::parse() refuses with a
+        // TypeError that the catch below, written for \Exception, does not see.
         $before = $request->input('before');
-        if (! $before) {
+        if (! is_string($before) || $before === '') {
             return response()->json(['events' => [], 'has_more' => false]);
         }
 
@@ -3660,7 +3917,7 @@ class RoleController extends Controller
         // otherwise hosted-only, which stranded selfhost - the subscribe panel has no hosted gate,
         // so a selfhoster could collect an audience into a tab they could only reach by hand-typing
         // ?tab=followers. The tab CONTENT was never gated; only the way in was.
-        $subscribersCount = \App\Models\RoleSubscriber::where('role_id', $role->id)->count();
+        $subscribersCount = RoleSubscriber::where('role_id', $role->id)->count();
 
         // The pending-handover panel replaces the Transfer button on the Team tab. Owner
         // only: an admin can manage members but cannot give the schedule away.
@@ -3817,7 +4074,7 @@ class RoleController extends Controller
             // The status column is left-joined from newsletter_unsubscribes, which is the single
             // suppression list - role_subscribers deliberately has no unsubscribed_at of its own,
             // because a mirrored flag is a second source of truth that will drift.
-            $subscribers = \App\Models\RoleSubscriber::query()
+            $subscribers = RoleSubscriber::query()
                 ->where('role_subscribers.role_id', $role->id)
                 ->leftJoin('newsletter_unsubscribes', function ($join) use ($role) {
                     $join->on('newsletter_unsubscribes.email', '=', 'role_subscribers.email')
@@ -3826,7 +4083,7 @@ class RoleController extends Controller
                 ->orderByDesc('role_subscribers.created_at')
                 ->select([
                     'role_subscribers.*',
-                    \Illuminate\Support\Facades\DB::raw('newsletter_unsubscribes.id is not null as has_unsubscribed'),
+                    DB::raw('newsletter_unsubscribes.id is not null as has_unsubscribed'),
                 ])
                 ->paginate(10, ['*'], 'subscribers_page')
                 ->withQueryString();
@@ -3835,27 +4092,27 @@ class RoleController extends Controller
             // people can I actually email?" - the table paginates at 10 and the three states are
             // only legible as badges. Pending rows are never resolved as recipients, so this
             // count and the newsletter's recipient count legitimately differ; the panel says so.
-            $suppressed = \App\Models\NewsletterUnsubscribe::where('role_id', $role->id)
+            $suppressed = NewsletterUnsubscribe::where('role_id', $role->id)
                 ->pluck('email')
                 ->map(fn ($email) => strtolower($email))
                 ->all();
             // Which of the rows on THIS page have an account, for the badge. One query over ten
             // emails rather than a join, because the two tables have no key in common.
-            $subscriberAccountEmails = \App\Models\User::whereIn(
+            $subscriberAccountEmails = User::whereIn(
                 'email',
                 collect($subscribers->items())->pluck('email')->all()
             )->pluck('email')->map(fn ($email) => strtolower($email))->all();
 
             $subscriberStats = [
-                'confirmed' => \App\Models\RoleSubscriber::where('role_id', $role->id)
+                'confirmed' => RoleSubscriber::where('role_id', $role->id)
                     ->whereNotNull('confirmed_at')
                     ->when($suppressed, fn ($q) => $q->whereNotIn('email', $suppressed))
                     ->count(),
-                'pending' => \App\Models\RoleSubscriber::where('role_id', $role->id)
+                'pending' => RoleSubscriber::where('role_id', $role->id)
                     ->whereNull('confirmed_at')
                     ->count(),
                 'unsubscribed' => $suppressed
-                    ? \App\Models\RoleSubscriber::where('role_id', $role->id)
+                    ? RoleSubscriber::where('role_id', $role->id)
                         ->whereIn('email', $suppressed)
                         ->count()
                     : 0,
@@ -3865,7 +4122,7 @@ class RoleController extends Controller
         } elseif ($tab == 'seating') {
             // A schedule has a handful of plans at most, so seatCount() per row in the view is
             // cheaper to read than a withCount() carrying the live-section subquery.
-            $seatingPlans = \App\Models\SeatingPlan::where('role_id', $role->id)
+            $seatingPlans = SeatingPlan::where('role_id', $role->id)
                 ->where('is_deleted', false)
                 ->orderBy('name')
                 ->get();
@@ -3899,15 +4156,16 @@ class RoleController extends Controller
         }
 
         // Federation nudge, on the schedule tab only - this is the page you land on
-        // after creating an event, which is where the prompt is meant to appear.
+        // after creating an event, which is where the prompt is meant to appear. On the
+        // invitation's clock (shouldInvite()): its Not now counts as one of the three asks.
         $showFederationPrompt = $tab === 'schedule'
-            && app(\App\Services\FederationService::class)->shouldPromptAdoption(auth()->user());
+            && app(FederationService::class)->shouldInvite(auth()->user());
 
         // And once the install has joined, the same moment is when to ask about THIS schedule.
         // Defined on every tab: compact() below throws on a name that was never set.
         $federationListingSchedules = collect();
         if ($tab === 'schedule' && ! $showFederationPrompt) {
-            $federationListingSchedules = app(\App\Services\FederationService::class)
+            $federationListingSchedules = app(FederationService::class)
                 ->listingPromptSchedules(auth()->user(), $role);
         }
 
@@ -3929,13 +4187,13 @@ class RoleController extends Controller
         $feedsWaiting = 0;
         try {
             if ($tab === 'feeds') {
-                $feeds = \App\Models\EventFeed::where('role_id', $role->id)
+                $feeds = EventFeed::where('role_id', $role->id)
                     ->withCount(['items as events_count' => fn ($query) => $query->whereNotNull('event_id')])
                     ->orderBy('id')
                     ->get()
                     // Counted now, on the one tab that lists them: a draft published from the
                     // event's own form leaves the stored number behind until the next read.
-                    ->each(fn (\App\Models\EventFeed $feed) => $feed->recount());
+                    ->each(fn (EventFeed $feed) => $feed->recount());
                 $feedsCount = $feeds->count();
                 $feedsWaiting = (int) ($feeds->sum('waiting_count') + $feeds->sum('decide_count'));
             } else {
@@ -3945,7 +4203,7 @@ class RoleController extends Controller
                 $feedsCount = (int) $summary->feeds;
                 $feedsWaiting = (int) $summary->waiting;
             }
-        } catch (\Illuminate\Database\QueryException $e) {
+        } catch (QueryException $e) {
             // No table yet.
         }
 
@@ -3960,9 +4218,33 @@ class RoleController extends Controller
             && ! session('import_undone')
             && $role->isClaimed()
             && auth()->user()->isEditor($subdomain)
-            && \App\Utils\ImportOptions::scheduleIsEmpty($role);
+            && ImportOptions::scheduleIsEmpty($role);
+
+        // The Promoters tab: the schedule's links, what each brought in, and the events a link may
+        // point at (its own coming events with tickets or registration: a link to an event it only lists would earn
+        // nothing, Event::ticketingRole()). Built on that tab alone.
+        $promoters = null;
+        if ($tab === 'promoters') {
+            $promoterLinks = PromoterLink::where('role_id', $role->id)
+                ->orderByRaw('archived_at IS NOT NULL')->orderBy('name')->get();
+            $promoters = [
+                'links' => $promoterLinks,
+                'stats' => PromoterLinks::stats($role, $promoterLinks),
+                'events' => $role->ownEvents()
+                    ->with(['roles', 'creatorRole'])
+                    ->where(fn ($query) => $query->where('events.tickets_enabled', true)->orWhere('events.rsvp_enabled', true))
+                    // A link a visitor can open: never a draft, nor a cancelled event.
+                    ->where('events.is_draft', false)
+                    ->where('events.is_cancelled', false)
+                    ->where(fn ($query) => $query->where('events.starts_at', '>=', now()->subDay())->orWhereNotNull('events.days_of_week'))
+                    ->orderBy('events.starts_at')
+                    ->limit(50)
+                    ->get(),
+            ];
+        }
 
         return view('role/show-admin', compact(
+            'promoters',
             'subdomain',
             'role',
             'tab',
@@ -4008,7 +4290,7 @@ class RoleController extends Controller
      * Data for the Appointments tab. Lifted out of show-admin-appointments.blade.php, which was
      * building a paginated query inside a @php block.
      *
-     * @return array{0: \Illuminate\Support\Collection, 1: ?\App\Models\AppointmentType, 2: mixed, 3: array<int,int>, 4: array, 5: array{offered: bool, candidates: \Illuminate\Support\Collection, names: array<int,string>, filter: ?int}}
+     * @return array{0: Collection, 1: ?AppointmentType, 2: mixed, 3: array<int,int>, 4: array, 5: array{offered: bool, candidates: Collection, names: array<int,string>, filter: ?int}}
      */
     protected function appointmentsTabData(Role $role): array
     {
@@ -4135,8 +4417,8 @@ class RoleController extends Controller
             ->unique()
             ->values();
         $hosts = [
-            'offered' => \App\Services\AppointmentHostService::offered($role),
-            'candidates' => app(\App\Services\AppointmentHostService::class)->candidates($role),
+            'offered' => AppointmentHostService::offered($role),
+            'candidates' => app(AppointmentHostService::class)->candidates($role),
             'names' => $hostIds->isEmpty() ? [] : User::whereIn('id', $hostIds)->pluck('name', 'id')->all(),
             'filter' => $hostFilter,
         ];
@@ -4208,7 +4490,7 @@ class RoleController extends Controller
                 try {
                     $user->email = strtolower($data['email']);
                     $user->saveQuietly();
-                } catch (\Illuminate\Database\QueryException $e) {
+                } catch (QueryException $e) {
                     report($e);
                     $user->refresh();
                     $emailUpdateFailed = true;
@@ -4242,13 +4524,13 @@ class RoleController extends Controller
 
             try {
                 $user->save();
-            } catch (\Illuminate\Database\QueryException $e) {
+            } catch (QueryException $e) {
                 if (! empty($data['phone'])) {
                     report($e);
                     $user->phone = null;
                     try {
                         $user->save();
-                    } catch (\Illuminate\Database\QueryException $e2) {
+                    } catch (QueryException $e2) {
                         throw $e;
                     }
                     $phoneAssignFailed = true;
@@ -4261,7 +4543,7 @@ class RoleController extends Controller
                 try {
                     $user->phone = $data['phone'];
                     $user->save();
-                } catch (\Illuminate\Database\QueryException $e) {
+                } catch (QueryException $e) {
                     report($e);
                     $user->refresh();
                     $phoneAssignFailed = true;
@@ -4353,23 +4635,23 @@ class RoleController extends Controller
         }
 
         // Clean up member calendar sync records
-        \App\Models\CalendarSync::where('user_id', $userId)
+        CalendarSync::where('user_id', $userId)
             ->where('role_id', $role->id)
             ->delete();
 
         $roleUser->delete();
 
         // The events they made here pass to the owner (not one that has taken money).
-        app(\App\Services\ScheduleTransferService::class)->handOverEventsOf((int) $userId, $role);
+        app(ScheduleTransferService::class)->handOverEventsOf((int) $userId, $role);
 
         // Appointment types they hosted here are switched off and the owner is told.
-        app(\App\Services\AppointmentHostService::class)->releaseHost($role, (int) $userId);
+        app(AppointmentHostService::class)->releaseHost($role, (int) $userId);
 
         // A feed this member added goes on reading an address only they chose. It waits until
         // somebody still on the team looks at it.
-        \App\Models\EventFeed::pauseWhere(
+        EventFeed::pauseWhere(
             fn ($query) => $query->where('role_id', $role->id)->where('added_by', $userId),
-            \App\Models\EventFeed::PAUSED_MEMBER_LEFT
+            EventFeed::PAUSED_MEMBER_LEFT
         );
 
         AuditService::log(AuditService::SCHEDULE_MEMBER_REMOVE, auth()->id(), 'Role', $role->id, null, null, 'user_id:'.$userId);
@@ -4412,11 +4694,11 @@ class RoleController extends Controller
 
         // A viewer runs nothing here any more: as for somebody who leaves.
         if ($roleUser->level === 'viewer') {
-            app(\App\Services\ScheduleTransferService::class)->handOverEventsOf((int) $userId, $role);
+            app(ScheduleTransferService::class)->handOverEventsOf((int) $userId, $role);
 
             // Nor hosts appointments, whose bookings a viewer could not see. Its own call, not
             // part of handOverEventsOf(), which other paths run for other reasons.
-            app(\App\Services\AppointmentHostService::class)->releaseHost($role, (int) $userId);
+            app(AppointmentHostService::class)->releaseHost($role, (int) $userId);
         }
 
         return redirect(route('role.view_admin', ['subdomain' => $role->subdomain, 'tab' => 'team']))
@@ -4601,7 +4883,7 @@ class RoleController extends Controller
 
         try {
             $accepted = app(ScheduleTransferService::class)->accept($transfer, $request->user());
-        } catch (\Illuminate\Database\QueryException $e) {
+        } catch (QueryException $e) {
             // A deadlock (or any DB failure) on a money-adjacent write must not reach the
             // user as a 500 with no idea whether ownership moved. The transaction rolled
             // back, so the offer is still open and retrying is safe.
@@ -4677,7 +4959,7 @@ class RoleController extends Controller
             ->filter(fn ($role) => $user->planAllowsTeamAccess($role))
             ->pluck('id')->all();
 
-        $memberSyncCalendarIds = \App\Models\RoleUser::where('user_id', $user->id)
+        $memberSyncCalendarIds = RoleUser::where('user_id', $user->id)
             ->whereIn('role_id', $roleIds)
             ->whereNotNull('google_calendar_id')
             ->pluck('google_calendar_id', 'role_id');
@@ -4691,9 +4973,14 @@ class RoleController extends Controller
         // the ajax branch returns the table partial, which has no banner. The filter box types
         // straight into that ajax branch, so without this the scan ran on every keystroke.
         $duplicateVenueCount = 0;
+        $duplicateParticipantCount = 0;
         if (! request()->ajax() && ! $filter) {
-            foreach ($this->userVenueDuplicateGroups($user) as $group) {
+            $duplicates = $this->userDuplicateGroupsByType($user, ['venue', 'talent']);
+            foreach ($duplicates['venue'] as $group) {
                 $duplicateVenueCount += count($group);
+            }
+            foreach ($duplicates['talent'] as $group) {
+                $duplicateParticipantCount += count($group);
             }
         }
 
@@ -4704,6 +4991,7 @@ class RoleController extends Controller
             'memberSyncCalendarIds' => $memberSyncCalendarIds,
             'editableRoleIds' => $editableRoleIds,
             'duplicateVenueCount' => $duplicateVenueCount,
+            'duplicateParticipantCount' => $duplicateParticipantCount,
         ];
 
         if (request()->ajax()) {
@@ -4784,7 +5072,7 @@ class RoleController extends Controller
         $auroraStart = Aurora::randomStart();
         $role->accent_color = $auroraStart['accent'];
         $role->background = 'aurora';
-        $role->setRelation('auroraSetting', new \App\Models\AuroraSetting(['palette' => $auroraStart['palette'], 'colors' => null, 'seed' => $auroraStart['seed'], 'motion' => true]));
+        $role->setRelation('auroraSetting', new AuroraSetting(['palette' => $auroraStart['palette'], 'colors' => null, 'seed' => $auroraStart['seed'], 'motion' => true]));
         $role->background_color = '#888888';
         $role->background_colors = ColorUtils::randomGradient();
         $role->background_image = ColorUtils::randomBackgroundImage();
@@ -5202,7 +5490,11 @@ class RoleController extends Controller
         $isFirstSchedule = $user->owner()->count() === 1;
 
         if (session('pending_request') || $isFirstSchedule) {
-            $redirect = redirect(route('event.create', ['subdomain' => $role->subdomain]))
+            // Somebody who came to sell lands on the form's Tickets tab, where create() has
+            // already chosen Sell tickets for a first event (the seller fast lane). The fragment
+            // is the form's own way of opening a tab (resolveEventSectionHash()).
+            $sellerLane = $isFirstSchedule && ! session('pending_request') && $user->arrivedToSell();
+            $redirect = redirect(route('event.create', ['subdomain' => $role->subdomain]).($sellerLane ? '#section-tickets' : ''))
                 ->with('message', $message);
 
             // The flash tells EventController::create() not to stamp event_form_viewed_at for a
@@ -5350,11 +5642,26 @@ class RoleController extends Controller
                 ->merge($role->connectedRoleIds('talent'))
                 ->reject(fn ($id) => in_array($id, $alreadySourced));
 
+            // The twelve it shares the most events with, and never one with no name: ordered by
+            // name, the nameless placeholders a calendar import leaves (a random subdomain and a
+            // null name) sorted first and filled every slot with an empty "+" (a curator with 410
+            // connected schedules, 19 of them nameless, 2026-11-22).
             if ($connectedIds->isNotEmpty()) {
+                $shared = DB::table('event_role as mine')
+                    ->join('event_role as theirs', 'theirs.event_id', '=', 'mine.event_id')
+                    ->where('mine.role_id', $role->id)
+                    ->whereIn('theirs.role_id', $connectedIds)
+                    ->groupBy('theirs.role_id')
+                    ->selectRaw('theirs.role_id, COUNT(DISTINCT mine.event_id) AS n')
+                    ->pluck('n', 'theirs.role_id');
+
                 $suggestedSources = Role::whereIn('id', $connectedIds)
-                    ->orderBy('name')
-                    ->limit(12)
-                    ->get(['id', 'subdomain', 'name']);
+                    ->whereNotNull('name')
+                    ->where('name', '!=', '')
+                    ->get(['id', 'subdomain', 'name'])
+                    ->sortBy([fn ($a, $b) => ($shared[$b->id] ?? 0) <=> ($shared[$a->id] ?? 0), fn ($a, $b) => strcmp($a->name, $b->name)])
+                    ->take(12)
+                    ->values();
             }
         }
 
@@ -5389,16 +5696,16 @@ class RoleController extends Controller
                 ->orderBy('name')
                 ->get(['id', 'subdomain', 'name', 'city', 'country_code']);
 
-            $normName = \App\Utils\GeminiUtils::normalizeForMatch($role->name);
-            $normCity = \App\Utils\GeminiUtils::normalizeForMatch($role->city);
+            $normName = GeminiUtils::normalizeForMatch($role->name);
+            $normCity = GeminiUtils::normalizeForMatch($role->city);
             $roleCountry = $role->country_code ? strtolower($role->country_code) : null;
 
             if ($normName !== '') {
                 $mergeSuggestion = $mergeCandidates->first(function ($candidate) use ($normName, $normCity, $roleCountry) {
-                    if (\App\Utils\GeminiUtils::normalizeForMatch($candidate->name) !== $normName) {
+                    if (GeminiUtils::normalizeForMatch($candidate->name) !== $normName) {
                         return false;
                     }
-                    if ($normCity !== '' && \App\Utils\GeminiUtils::normalizeForMatch($candidate->city) !== $normCity) {
+                    if ($normCity !== '' && GeminiUtils::normalizeForMatch($candidate->city) !== $normCity) {
                         return false;
                     }
                     if ($roleCountry && $candidate->country_code && strtolower($candidate->country_code) !== $roleCountry) {
@@ -5601,7 +5908,7 @@ class RoleController extends Controller
         // could store them on an install that never opted in. Restoring the stored values
         // (rather than nulling them) means an owner's choice survives an operator toggling
         // the integration off and back on.
-        if (! \App\Services\Stay22Service::isEnabled()) {
+        if (! Stay22Service::isEnabled()) {
             $request->merge([
                 'stay22_enabled' => $role->stay22_enabled,
                 'stay22_aid' => $role->stay22_aid,
@@ -5994,7 +6301,8 @@ class RoleController extends Controller
                     $translations = GeminiUtils::translateCustomFieldNames(
                         array_values($fieldsNeedingTranslation),
                         $role->language_code,
-                        $role->translation_language_code
+                        $role->translation_language_code,
+                        TranslationGlossary::relevant(TranslationGlossary::forRole($role), array_values($fieldsNeedingTranslation))
                     );
 
                     foreach ($fieldsNeedingTranslation as $fieldKey => $fieldName) {
@@ -6145,7 +6453,7 @@ class RoleController extends Controller
             // Blade `data-next-id` is set from `nextCustomCategoryId()` which already considers
             // history, but a stale client tab or hand-crafted POST could still send a colliding id.
             $previousJsonIds = collect($oldEventCategories ?? [])->pluck('id')->filter()->all();
-            $historicalCustomIds = \App\Models\Event::where('creator_role_id', $role->id)
+            $historicalCustomIds = Event::where('creator_role_id', $role->id)
                 ->where('category_id', '>=', 100)
                 ->distinct()
                 ->pluck('category_id')
@@ -6248,6 +6556,30 @@ class RoleController extends Controller
 
         $role->save();
 
+        // Details > Translation glossary, a table of its own (roles is at its row limit). Only on a
+        // save whose form drew the list: absent is not empty. After the schedule's own save, so a
+        // save refused above (a taken subdomain) changes no glossary either, and ahead of the
+        // sub-schedule names translated below, which then use it. What a change touches is handed
+        // back to the translator (TranslationGlossary::requeue()), on the queue.
+        // Only the rows the page showed are its to remove (glossary_seen[]), as with ticket presets:
+        // a term added from another tab since stays. A failure here must not stop the rest of
+        // this save, which has already begun (the schedule is saved above).
+        if (! is_demo_mode() && $request->boolean('glossary_submitted')) {
+            try {
+                $glossaryChanges = TranslationGlossary::save(
+                    $role,
+                    (array) $request->input('glossary', []),
+                    $request->boolean('glossary_seen_submitted') ? (array) $request->input('glossary_seen', []) : null
+                );
+                if ($glossaryChanges) {
+                    RetranslateGlossaryTerms::dispatch($role, $glossaryChanges);
+                }
+            } catch (\Throwable $e) {
+                report($e);
+                session()->flash('error', __('messages.an_error_occurred'));
+            }
+        }
+
         // ResolveCustomDomain keeps a custom host's row for ten minutes, subdomain included, and
         // the custom domain block below forgets it only when the host or the mode changes. After a
         // rename (the field is shown in Direct mode when the subdomain is the main address), the
@@ -6255,7 +6587,7 @@ class RoleController extends Controller
         // After the save, so a request in between cannot cache the old row again.
         if ($role->subdomain !== $storedSubdomain) {
             foreach (array_unique(array_filter([$oldCustomDomainHost, $role->custom_domain_host])) as $host) {
-                \Illuminate\Support\Facades\Cache::forget("custom_domain:{$host}");
+                Cache::forget("custom_domain:{$host}");
             }
         }
 
@@ -6311,17 +6643,17 @@ class RoleController extends Controller
                 $old = $oldMap[$id] ?? null;
                 $name = $entry['name'] ?? null;
                 if (! $old) {
-                    \App\Services\AuditService::log('category.added', auth()->id(), 'Role', $role->id, null, ['id' => $id, 'name' => $name]);
+                    AuditService::log('category.added', auth()->id(), 'Role', $role->id, null, ['id' => $id, 'name' => $name]);
                 } elseif (($old['name'] ?? null) !== $name) {
-                    $renamedEventCount += \App\Models\Event::where('creator_role_id', $role->id)
+                    $renamedEventCount += Event::where('creator_role_id', $role->id)
                         ->where('category_id', $id)
                         ->update(['category_name' => $name]);
-                    \App\Services\AuditService::log('category.renamed', auth()->id(), 'Role', $role->id, ['name' => $old['name'] ?? null], ['name' => $name]);
+                    AuditService::log('category.renamed', auth()->id(), 'Role', $role->id, ['name' => $old['name'] ?? null], ['name' => $name]);
                 }
             }
             foreach ($oldMap as $id => $entry) {
                 if (! isset($newMap[$id])) {
-                    \App\Services\AuditService::log('category.removed', auth()->id(), 'Role', $role->id, ['id' => $id, 'name' => $entry['name'] ?? null], null);
+                    AuditService::log('category.removed', auth()->id(), 'Role', $role->id, ['id' => $id, 'name' => $entry['name'] ?? null], null);
                 }
             }
 
@@ -6376,7 +6708,7 @@ class RoleController extends Controller
                 if ($removeHost || $addHost) {
                     // Clear any stale cache for the new domain (e.g., previously assigned to a different schedule)
                     foreach (array_filter([$removeHost, $addHost]) as $host) {
-                        \Illuminate\Support\Facades\Cache::forget("custom_domain:{$host}");
+                        Cache::forget("custom_domain:{$host}");
                     }
 
                     $success = $doService->syncDomains(
@@ -6401,7 +6733,7 @@ class RoleController extends Controller
                     }
 
                     foreach (array_filter([$removeHost, $addHost]) as $host) {
-                        \Illuminate\Support\Facades\Cache::forget("custom_domain:{$host}");
+                        Cache::forget("custom_domain:{$host}");
                     }
                 }
 
@@ -6409,7 +6741,7 @@ class RoleController extends Controller
                 if ($newCustomDomainMode !== 'direct' && $oldCustomDomainMode === 'direct') {
                     $role->update(['custom_domain_status' => null, 'custom_domain_error' => null]);
                     if ($oldCustomDomainHost) {
-                        \Illuminate\Support\Facades\Cache::forget("custom_domain:{$oldCustomDomainHost}");
+                        Cache::forget("custom_domain:{$oldCustomDomainHost}");
                     }
                 }
             } catch (\Exception $e) {
@@ -6420,10 +6752,10 @@ class RoleController extends Controller
                 report($e);
                 $role->update([
                     'custom_domain_status' => 'failed',
-                    'custom_domain_error' => \Illuminate\Support\Str::limit($e->getMessage(), 240),
+                    'custom_domain_error' => Str::limit($e->getMessage(), 240),
                 ]);
                 if ($newCustomDomainHost) {
-                    \Illuminate\Support\Facades\Cache::forget("custom_domain:{$newCustomDomainHost}");
+                    Cache::forget("custom_domain:{$newCustomDomainHost}");
                 }
             }
         }
@@ -6445,7 +6777,7 @@ class RoleController extends Controller
         $translations = [];
         if (! empty($newGroupNames) && $role->language_code !== $role->translation_language_code) {
             try {
-                $translations = GeminiUtils::translateGroupNames($newGroupNames, $role->language_code, $role->translation_language_code);
+                $translations = GeminiUtils::translateGroupNames($newGroupNames, $role->language_code, $role->translation_language_code, TranslationGlossary::relevant(TranslationGlossary::forRole($role), $newGroupNames));
             } catch (\Exception $e) {
                 \Log::error('Failed to translate group names: '.$e->getMessage());
                 // Continue without translations if API fails
@@ -6775,8 +7107,28 @@ class RoleController extends Controller
         // What the guest page shows (guest_page_settings), beside the schedule for the reason
         // Aurora's settings are. Only on a save that carries the switch: absent is not off.
         if ($request->has('show_next_event')) {
-            \App\Models\GuestPageSetting::store($role, ['show_next_event' => $request->boolean('show_next_event')]);
+            GuestPageSetting::store($role, ['show_next_event' => $request->boolean('show_next_event')]);
         }
+
+        // When ticket holders are reminded (ticket_reminder_settings), beside the schedule for the
+        // same reason. Only fields the save carried: absent is not off. A switch left as the page
+        // showed it, on a schedule whose owner has never chosen, is not stored: the schedule keeps
+        // following Role::optionalMailOnByDefault(), which moves with its plan. Compared with what
+        // the page SHOWED (ticket_reminders_shown), not with the default now, because this same save
+        // may have added the schedule's own email settings and moved the default under it.
+        $reminders = [];
+        if ($request->has('ticket_reminders_enabled')) {
+            $on = $request->boolean('ticket_reminders_enabled');
+            $untouched = $request->has('ticket_reminders_shown') && $on === $request->boolean('ticket_reminders_shown');
+
+            if (! $untouched || ! is_null($role->ticketReminderSetting->enabled)) {
+                $reminders['enabled'] = $on;
+            }
+        }
+        if ($request->filled('ticket_reminders_hours')) {
+            $reminders['hours_before'] = (int) $request->input('ticket_reminders_hours');
+        }
+        TicketReminderSetting::store($role, $reminders);
 
         // The main address of a schedule served directly on its own domain, which lives beside
         // the schedule (custom_domain_settings) as Aurora's settings do. Only on a save that drew
@@ -6785,8 +7137,8 @@ class RoleController extends Controller
         if ($request->boolean('custom_domain_main_address_submitted')
             && $role->isEnterprise()
             && $role->custom_domain_mode === 'direct'
-            && in_array($request->input('custom_domain_main_address'), \App\Models\CustomDomainSetting::VALUES, true)) {
-            \App\Models\CustomDomainSetting::store($role, $request->input('custom_domain_main_address'));
+            && in_array($request->input('custom_domain_main_address'), CustomDomainSetting::VALUES, true)) {
+            CustomDomainSetting::store($role, $request->input('custom_domain_main_address'));
         }
 
         // A venue map that has not had its first pass: note its venues' addresses now, and give
@@ -6795,27 +7147,36 @@ class RoleController extends Controller
         // Never inside this request: on the sync driver the job would run right here, and the
         // every-minute app:place-venues does the same work four addresses at a time.
         //
+        // The page style (Style > Background), in a table of its own as the map's switches are:
+        // only on a save that carries it.
+        if (in_array($request->input('page_mode'), GuestPageSetting::MODES, true)) {
+            GuestPageSetting::store($role, ['page_mode' => $request->input('page_mode')]);
+        }
+        if (in_array($request->input('list_image_size'), GuestPageSetting::LIST_IMAGE_SIZES, true)) {
+            GuestPageSetting::store($role, ['list_image_size' => $request->input('list_image_size')]);
+        }
+
         // The two switches are stored here and not by the fill above: the map's settings have a
         // table of their own, because `roles` cannot take another column. Only on a save that
         // carries the switch, so a save from anywhere else leaves the map as it was.
-        $venueMapWasOn = \App\Services\VenueMap::enabledFor($role);
+        $venueMapWasOn = VenueMap::enabledFor($role);
 
-        if ($request->has('show_venues_map') && \App\Services\VenueMap::offeredTo($role)) {
+        if ($request->has('show_venues_map') && VenueMap::offeredTo($role)) {
             // "Open on arrival" only when its switch was on the form: it is not drawn on an
             // install where nobody can allow cookies, and absent is not off.
-            \App\Services\VenueMap::saveSettings(
+            VenueMap::saveSettings(
                 $role,
                 $request->boolean('show_venues_map'),
-                $request->has('venues_map_open') ? $request->boolean('venues_map_open') : \App\Services\VenueMap::startsOpen($role)
+                $request->has('venues_map_open') ? $request->boolean('venues_map_open') : VenueMap::startsOpen($role)
             );
         }
 
         // Nothing is looked up here: the addresses are noted, and asked about by the queued job
         // (one a second) or, where the queue runs inline, by app:place-venues on the timer. A map
         // whose addresses are all known already is ready on the spot.
-        if (\App\Services\VenueMap::enabledFor($role) && ! \App\Services\VenueMap::refreshReady($role)) {
+        if (VenueMap::enabledFor($role) && ! VenueMap::refreshReady($role)) {
             if (config('queue.default') !== 'sync') {
-                \App\Jobs\PlaceScheduleVenues::dispatch($role->id);
+                PlaceScheduleVenues::dispatch($role->id);
             }
         }
 
@@ -6825,7 +7186,7 @@ class RoleController extends Controller
 
         // The owner lands on the schedule's admin page, so that is where a map just switched on,
         // or still being prepared, says how far it is (role/show-admin-schedule).
-        if (\App\Services\VenueMap::enabledFor($role) && (! $venueMapWasOn || ! \App\Services\VenueMap::ready($role))) {
+        if (VenueMap::enabledFor($role) && (! $venueMapWasOn || ! VenueMap::ready($role))) {
             $redirect->with('venue_map_saved', true);
         }
 
@@ -6962,7 +7323,7 @@ class RoleController extends Controller
             }
 
             return response()->json($response);
-        } catch (\Illuminate\Database\QueryException $e) {
+        } catch (QueryException $e) {
             report($e);
 
             return response()->json(['error' => __('messages.ai_style_generation_failed')], 500);
@@ -7216,7 +7577,7 @@ class RoleController extends Controller
                 UsageTrackingService::track(UsageTrackingService::GEMINI_GENERATE_STYLE_IMAGE, $roleId);
 
                 Cache::put("ai_style_image_{$requestId}", $result, 300);
-            } catch (\App\Exceptions\ContentModerationException $e) {
+            } catch (ContentModerationException $e) {
                 Cache::put("ai_style_image_{$requestId}", ['status' => 'failed', 'error' => __('messages.ai_content_moderation_blocked')], 300);
             } catch (\Exception $e) {
                 \Log::error('AI style image generation failed: '.$e->getMessage(), ['role_id' => $roleId]);
@@ -7314,7 +7675,7 @@ class RoleController extends Controller
                 $result[$imageType.'_filename'] = $filename;
 
                 Cache::put("ai_style_image_{$requestId}", $result, 300);
-            } catch (\App\Exceptions\ContentModerationException $e) {
+            } catch (ContentModerationException $e) {
                 Cache::put("ai_style_image_{$requestId}", ['status' => 'failed', 'error' => __('messages.ai_content_moderation_blocked')], 300);
             } catch (\Exception $e) {
                 \Log::error('AI style image generation failed: '.$e->getMessage());
@@ -7392,7 +7753,7 @@ class RoleController extends Controller
             }
 
             return response()->json(array_merge(['success' => true], $results));
-        } catch (\Illuminate\Database\QueryException $e) {
+        } catch (QueryException $e) {
             report($e);
 
             return response()->json(['error' => __('messages.ai_details_generation_failed')], 500);
@@ -7483,7 +7844,7 @@ class RoleController extends Controller
             }
 
             return response()->json($response);
-        } catch (\Illuminate\Database\QueryException $e) {
+        } catch (QueryException $e) {
             report($e);
 
             return response()->json(['error' => __('messages.ai_style_generation_failed')], 500);
@@ -7528,7 +7889,7 @@ class RoleController extends Controller
             }
 
             return response()->json(array_merge(['success' => true], $results));
-        } catch (\Illuminate\Database\QueryException $e) {
+        } catch (QueryException $e) {
             report($e);
 
             return response()->json(['error' => __('messages.ai_details_generation_failed')], 500);
@@ -8509,7 +8870,7 @@ class RoleController extends Controller
                 'local_starts_at' => $event->localStartsAt(),
                 'image_url' => $event->getImageUrl(),
                 'guest_url' => $event->getGuestUrl($subdomain, ''),
-                'group_id' => $groupId ? \App\Utils\UrlUtils::encodeId($groupId) : null,
+                'group_id' => $groupId ? UrlUtils::encodeId($groupId) : null,
                 'category_id' => $event->category_id,
                 'category_name' => $event->resolveCategoryName(),
                 'category_color' => $event->resolveCategoryColor(),
@@ -8652,7 +9013,7 @@ class RoleController extends Controller
 
         // Ensure roleId is properly formatted
         if (! is_numeric($roleId)) {
-            $roleId = \App\Utils\UrlUtils::decodeId($roleId);
+            $roleId = UrlUtils::decodeId($roleId);
         }
 
         try {
@@ -8666,7 +9027,7 @@ class RoleController extends Controller
 
             // Validate URLs against SSRF
             foreach ($urls as $url) {
-                if (! \App\Utils\UrlUtils::isUrlSafe($url)) {
+                if (! UrlUtils::isUrlSafe($url)) {
                     return response()->json([
                         'success' => false,
                         'message' => __('messages.invalid_url'),
@@ -8682,7 +9043,7 @@ class RoleController extends Controller
             }
 
             // Capture output using BufferedOutput
-            $output = new \Symfony\Component\Console\Output\BufferedOutput;
+            $output = new BufferedOutput;
 
             $artisanParams = [
                 '--role_id' => (string) $roleId,
@@ -8802,11 +9163,10 @@ class RoleController extends Controller
             return response()->json(['success' => false, 'message' => __('messages.not_authorized')], 403);
         }
 
-        $role = Role::subdomain($subdomain)->firstOrFail();
-
-        if (! $role->isCurator()) {
-            return response()->json(['success' => false, 'message' => __('messages.not_authorized')], 403);
-        }
+        // Any schedule type: the import page offers a video for each performer it reads on a
+        // venue's or a talent's import too, and a curator-only guard answered those with a 403
+        // that the page showed as "Error searching for videos." (the guest endpoint never had it).
+        Role::subdomain($subdomain)->firstOrFail();
 
         $query = $request->get('q');
 
@@ -8815,7 +9175,7 @@ class RoleController extends Controller
         }
 
         try {
-            $videos = \App\Utils\GeminiUtils::searchYouTube($query);
+            $videos = GeminiUtils::searchYouTube($query);
 
             return response()->json([
                 'success' => true,
@@ -8851,7 +9211,7 @@ class RoleController extends Controller
         }
 
         try {
-            $videos = \App\Utils\GeminiUtils::searchYouTube($query);
+            $videos = GeminiUtils::searchYouTube($query);
 
             if (empty($videos)) {
                 return response()->json([
@@ -9103,7 +9463,7 @@ class RoleController extends Controller
         }
 
         try {
-            $googleCalendarService = app(\App\Services\GoogleCalendarService::class);
+            $googleCalendarService = app(GoogleCalendarService::class);
 
             // Check if we need to remove old webhook (calendar changed or sync direction changed)
             $shouldRemoveOldWebhook = ($oldCalendarId !== $newCalendarId) ||
@@ -9157,7 +9517,7 @@ class RoleController extends Controller
                     $role->update([
                         'google_webhook_id' => $webhook['id'],
                         'google_webhook_resource_id' => $webhook['resourceId'],
-                        'google_webhook_expires_at' => \Carbon\Carbon::createFromTimestamp($webhook['expiration'] / 1000),
+                        'google_webhook_expires_at' => Carbon::createFromTimestamp($webhook['expiration'] / 1000),
                     ]);
                 }
             }
@@ -9187,7 +9547,7 @@ class RoleController extends Controller
         }
 
         try {
-            $microsoftCalendarService = app(\App\Services\MicrosoftCalendarService::class);
+            $microsoftCalendarService = app(MicrosoftCalendarService::class);
 
             // A deltaLink is scoped to a calendar, so a calendar switch invalidates the stored token.
             // forceFill: system-managed columns kept out of $fillable.
@@ -9229,7 +9589,7 @@ class RoleController extends Controller
 
                     $role->forceFill([
                         'microsoft_webhook_id' => $webhook['id'],
-                        'microsoft_webhook_expires_at' => $webhook['expiration'] ? \Carbon\Carbon::parse($webhook['expiration']) : null,
+                        'microsoft_webhook_expires_at' => $webhook['expiration'] ? Carbon::parse($webhook['expiration']) : null,
                     ])->save();
                 }
             }
@@ -9257,7 +9617,7 @@ class RoleController extends Controller
         }
 
         if (is_string($expiresAt)) {
-            $expiresAt = \Carbon\Carbon::parse($expiresAt);
+            $expiresAt = Carbon::parse($expiresAt);
         }
 
         return now()->diffInSeconds($expiresAt);
@@ -9291,6 +9651,56 @@ class RoleController extends Controller
         }
 
         return false;
+    }
+
+    /**
+     * The ticket reminder as this schedule's guests will get it (Tickets > Reminders), drawn for its
+     * next event with the editor's own name in it. Nothing is sent and nothing is stored: the sale is
+     * a model that is never saved.
+     */
+    public function ticketReminderPreview(Request $request, $subdomain)
+    {
+        if (! auth()->user()->isEditor($subdomain)) {
+            abort(403);
+        }
+
+        $role = Role::subdomain($subdomain)->firstOrFail();
+
+        $upcoming = fn ($query) => $query->where('events.is_cancelled', false)->whereNull('events.appointment_type_id')->whereNotNull('events.starts_at');
+        $event = $upcoming($role->ownEvents())->where('events.starts_at', '>=', now())->orderBy('events.starts_at')->first()
+            ?? $upcoming($role->ownEvents())->whereNotNull('events.days_of_week')->where('events.days_of_week', '!=', '')->orderByDesc('events.starts_at')->first();
+
+        if (! $event) {
+            return response(__('messages.ticket_reminders_preview_none'), 200)->header('Content-Type', 'text/plain; charset=UTF-8');
+        }
+
+        $user = auth()->user();
+        $sale = new Sale([
+            'name' => $user->name ?: __('messages.attendee'),
+            'email' => $user->email,
+            // The series' next real date, or the one-off's own day in the schedule's zone.
+            'event_date' => $event->days_of_week
+                ? ($event->nextOccurrenceFrom(now($event->scheduleTimezone())->format('Y-m-d')) ?? now($event->scheduleTimezone())->format('Y-m-d'))
+                : $event->getStartDateTime(null, true)->format('Y-m-d'),
+            'status' => 'paid',
+            'payment_method' => $event->rsvp_enabled ? 'rsvp' : 'stripe',
+        ]);
+
+        // The sender the real reminder would have (SendTicketReminders::remindOccurrence()).
+        $mailRole = $event->getRoleWithEmailSettings();
+        if (! $mailRole || $mailRole->is_deleted) {
+            $mailRole = SendTicketReminders::owningSchedule($event) ?? $role;
+        }
+        $previous = app()->getLocale();
+        app()->setLocale($mailRole->language_code ?: config('app.locale'));
+
+        try {
+            $html = (new TicketReminder($sale, $event, $mailRole, preview: true))->render();
+        } finally {
+            app()->setLocale($previous);
+        }
+
+        return response($html)->header('X-Robots-Tag', 'noindex');
     }
 
     public function testEmail(Request $request, $subdomain): JsonResponse
@@ -9359,7 +9769,7 @@ class RoleController extends Controller
             $emailService->sendTestEmail($role, $email);
 
             return response()->json(['success' => true, 'message' => __('messages.test_email_sent')]);
-        } catch (\Symfony\Component\Mailer\Exception\ExceptionInterface $e) {
+        } catch (ExceptionInterface $e) {
             // The SMTP provider rejected the connection, credentials, or sender. Its message is the
             // actionable content (e.g. "Permission denied", authentication failed, unverified
             // sender), and we already surface this same message in the AP failure banner and the
@@ -9451,7 +9861,7 @@ class RoleController extends Controller
             RateLimiter::hit($rateLimitKey, 60);
 
             return response()->json(['success' => true, 'message' => __('messages.test_email_sent_to', ['email' => $user->email])]);
-        } catch (\Symfony\Component\Mailer\Exception\ExceptionInterface $e) {
+        } catch (ExceptionInterface $e) {
             // The SMTP provider rejected the message; surface its actionable message just like the
             // Email Settings test button. Expected user-config failure, so we log at warning level
             // for visibility but do not report() it to Sentry.
@@ -9492,7 +9902,7 @@ class RoleController extends Controller
 
         // Rate limiting: max 5 codes per hour per phone
         $attemptsKey = 'phone_verify_attempts_'.$phone;
-        $attempts = \Illuminate\Support\Facades\Cache::get($attemptsKey, 0);
+        $attempts = Cache::get($attemptsKey, 0);
 
         if ($attempts >= 5) {
             return response()->json(['success' => false, 'message' => __('messages.code_rate_limit')], 429);
@@ -9506,9 +9916,9 @@ class RoleController extends Controller
             return response()->json(['success' => false, 'message' => __('messages.failed_to_send_sms')], 500);
         }
 
-        \Illuminate\Support\Facades\Cache::put('role_phone_verify_code_'.$role->id, $code, now()->addMinutes(10));
+        Cache::put('role_phone_verify_code_'.$role->id, $code, now()->addMinutes(10));
 
-        \Illuminate\Support\Facades\Cache::put($attemptsKey, $attempts + 1, now()->addHour());
+        Cache::put($attemptsKey, $attempts + 1, now()->addHour());
 
         return response()->json(['success' => true, 'message' => __('messages.verification_code_sent_to_phone')]);
     }
@@ -9531,22 +9941,22 @@ class RoleController extends Controller
         $cacheKey = 'role_phone_verify_code_'.$role->id;
         $failedKey = 'role_phone_verify_failed_'.$role->id;
 
-        $storedCode = \Illuminate\Support\Facades\Cache::get($cacheKey);
+        $storedCode = Cache::get($cacheKey);
 
         if (! $storedCode || ! hash_equals($storedCode, $request->code)) {
-            $failed = \Illuminate\Support\Facades\Cache::get($failedKey, 0) + 1;
-            \Illuminate\Support\Facades\Cache::put($failedKey, $failed, now()->addMinutes(10));
+            $failed = Cache::get($failedKey, 0) + 1;
+            Cache::put($failedKey, $failed, now()->addMinutes(10));
 
             if ($failed >= 5) {
-                \Illuminate\Support\Facades\Cache::forget($cacheKey);
-                \Illuminate\Support\Facades\Cache::forget($failedKey);
+                Cache::forget($cacheKey);
+                Cache::forget($failedKey);
             }
 
             return response()->json(['success' => false, 'message' => __('messages.phone_verification_code_invalid')], 422);
         }
 
-        \Illuminate\Support\Facades\Cache::forget($cacheKey);
-        \Illuminate\Support\Facades\Cache::forget($failedKey);
+        Cache::forget($cacheKey);
+        Cache::forget($failedKey);
 
         $role->phone_verified_at = now();
         $role->save();

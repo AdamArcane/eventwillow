@@ -23,6 +23,13 @@ pre-flight, P9 to P11 are v1.0.132's, and steps 1 to 9 are v1.0.130's runbook.
 
 | Version | Tagged | What it needs from you |
 |---|---|---|
+| [Unreleased](#unreleased-guest-portal-redesign-2026-11-22) | not yet | One migration (in the start command); after: look at a schedule page, an event page and a checkout on a phone and a laptop |
+| [Unreleased](#unreleased-other-sites-on-browse-the-homepage-test-against-a-new-page-no-jquery-2026-11-18) | not yet | One migration (in the start command); before: check the site's custom header and footer code for jQuery; after: purge `/` at the edge, look at `/?home=new`, `/browse` and `/admin` |
+| [Unreleased](#unreleased-federation-address-moves-network-search-and-the-home-schedule-2026-11-18) | not yet | Nothing; after: watch `/admin/federation` and the first `federation:maintain` run |
+| [Unreleased](#unreleased-promoter-links-2026-11-11) | not yet | One migration (in the start command); nothing after |
+| [Unreleased](#unreleased-donations-at-checkout-2026-11-11) | not yet | One migration (in the start command); nothing after |
+| [Unreleased](#unreleased-apple-wallet-passes-2026-11-11) | not yet | Nothing until you choose to switch it on (env vars in the app spec) |
+| [Unreleased](#unreleased-ticket-reminders-2026-11-10) | not yet | Two migrations (in the start command); after: watch the first hourly run's mail volume and bounces |
 | [Unreleased](#unreleased-a-custom-domains-main-address-2026-10-22) | not yet | One migration (in the start command); after: one Direct domain set to its subdomain |
 | [Unreleased](#unreleased-backgrounds-on-a-window-sized-layer-and-aurora-2026-10-22) | not yet | Two migrations (in the start command); after: optionally the background backfill in batches, then look at three schedule pages |
 | [Unreleased](#unreleased-the-admin-dashboard-is-the-live-view-2026-10-22) | not yet | Nothing; open `/admin` and scroll |
@@ -97,6 +104,169 @@ included.
 
 A new secret goes in the console as an **encrypted, app-level** variable, never in a stored spec
 file.
+
+## Unreleased: guest portal redesign (2026-11-22)
+
+**What ships:**
+- **Every public page on one stage** (`partials/guest-stage-styles`): the schedule, event, ticket,
+  form, booking, gift card, carpool and embed pages. Dark ink by default with a light version,
+  Rubik, big type, the schedule's own background as a glow across the top.
+- **Page style** (Style > Background): Automatic or one of the six palettes, stored in
+  `guest_page_settings.page_mode`. The first guest page a visitor opens sets light or dark for the
+  visit (`es_gp_mode`, a session cookie on the base domain; `#es_mode=` on links to a schedule's
+  own domain). Neither is read by the server, so the edge cache is unaffected.
+- **One or two coming events** are drawn as large cards with the whole flyer; three or more stay
+  the list.
+- **A filled button's label holds 4.5:1:** a mid accent such as the default `#4e81fa` is deepened
+  a little along its own hue so white text reads on it (`GuestTheme::labelledFill()`).
+- **Image variants:** a PNG is budgeted at 8 bytes a pixel while it decodes (Sentry
+  EVENTSCHEDULE-PHP-51: a 6250px PNG killed the scheduler container on every retry). The stuck job
+  was already cleared by hand on 2026-11-22 (schedule 23616 recorded as `too_large`).
+
+**Migration:** `2026_11_22_000001_add_page_mode_to_guest_page_settings`, one `varchar(8)` with a
+default on `guest_page_settings` (a small table). Runs in the start command.
+
+**After:** look at a schedule page, an event page and a checkout on a phone and on a laptop, in the
+visitor's light and dark.
+
+## Unreleased: other sites on /browse, the homepage test against a new page, no jQuery (2026-11-18)
+
+**What ships:**
+- **Events from other sites stand on the `/browse` wall** among this site's own, marked with a globe
+  and the site's name, at most four at a time and one per schedule, with "More from other sites"
+  after the wall. A switch heads the wall (All events / From other sites); that view
+  (`?show=network`, noindex) lists every listing, 24 at a time up to 192. `?lang=` no longer
+  filters it alone (`language` does). Their pictures get light copies, queued a few at a time by
+  `federation:maintain` (`GenerateFederatedImageVariants`).
+- **The homepage test is a page round:** today's page (`home_today`) against a new homepage,
+  "Keep the money" (`home_new`, `marketing/partials/home-new`), half of visitors each, in one
+  stored copy of `/`. `promote_sell` is retired. Nothing ends it by itself: the "Homepage test" card
+  on `/admin/growth` gives its look dates (4, 7 and 10 weeks) and its End buttons.
+- **Admin dashboard:** four panels at the top (Visitors, Revenue, Sign-ups, Active users), MRR over
+  the last 12 months under the revenue figures (the months before this one rebuilt from
+  subscription dates at today's prices), and the trials' ARR beside their MRR.
+- **jQuery is no longer loaded** on any page. The app's own scripts are covered; code pasted into
+  a custom header or footer that calls `$(` or `jQuery` would now throw.
+- "Federation" reads "the Event Schedule network" on the docs and `/selfhost`, `/saas` and
+  `/open-source`.
+
+**Migration:** `2026_11_18_000000_add_image_variants_to_federated_events_table`, one nullable JSON
+column on `federated_events` (a small table). Runs in the start command.
+
+**Before the deploy:** check `/admin/settings` for custom header or footer code that uses jQuery
+(`$(`, `jQuery`); if there is any, it has to load jQuery itself.
+
+**After the deploy:**
+1. Purge `/` in Cloudflare (or wait ten minutes), so the stored copy holds both pages.
+2. Look at `/?home=new` and `/?home=full` (a preview: nothing is counted), then `/` in a private
+   window a few times: either page, never one flashing into the other.
+3. `/browse`: posters from other sites carry the globe; the switch opens `?show=network`.
+4. `/admin`: the four panels and the MRR line.
+5. Week 2: a guardrail look at the Homepage test card; stop on today's page if signups per visitor
+   are clearly down on the new one.
+
+*Undo:* console rollback. A rollback puts `promote_sell` back as the one headline; the round's
+counts stay under its keys.
+
+## Unreleased: federation address moves, network search and the home schedule (2026-11-18)
+
+**What ships:**
+- **An approved install that changes its address stays listed.** A push or a registration from
+  another address no longer sends an approved install back to pending (which took its listings off
+  `/browse`): only the scheme or a `www.` changing is taken on the spot; anything else is a claim
+  on `/admin/federation`, adopted by Accept or, hourly, by `federation:maintain` when the OLD address
+  redirects to the claimed host (`FederationAddressService`). An adopted address mails the operator
+  (`FederationAddressConfirmed`). Every API answer now says which address the network has, so an
+  install on this release holds its events while they differ and sends everything again once they
+  agree; reconcile reports a listing whose link is off the install's address as missing, which
+  installs of every release already re-send.
+- **`/search` lists network events** (name, blurb, schedule, venue, city), as `/browse` does.
+- **Selfhost only: a home schedule** (Admin > Settings > Home schedule) shown at the site's root,
+  with a dashboard banner for an install with one schedule. Nothing on the nexus.
+
+**No migration, no build, no env var.**
+
+**After the deploy:**
+- `federation:maintain` now makes up to ten outbound requests an hour, one to each claiming
+  install's OLD address (through the SSRF guard). It may adopt claims already standing and mail
+  each of those operators once.
+- An install that an earlier host change sent back to pending stays pending: review it on
+  `/admin/federation`.
+
+*Undo:* console rollback. Addresses adopted meanwhile stay adopted; that is the record being right.
+
+## Unreleased: promoter links (2026-11-11)
+
+**What ships:** a Promoters tab on each schedule (Pro; owners and admins): a link per promoter,
+`?via=CODE` on any of the schedule's guest pages, with clicks, tickets, revenue and an optional
+commission per link. A sale is credited only for the schedule's own events, while it is Pro.
+Nothing is credited until an owner adds a link, so nothing changes for anyone at deploy. The
+privacy policy (clause 06 and the cookie table) names the new `es_via` cookie, set only with
+marketing consent.
+
+**Migration** (the start command runs it):
+- `2026_11_11_000002_create_promoter_links`: a new `promoter_links` table and a nullable,
+  indexed `sales.promoter_link_id` (no foreign key). Adding the index builds it online on
+  MySQL 8 (in place, concurrent reads and writes), so `sales` is not copied or locked.
+
+## Unreleased: donations at checkout (2026-11-11)
+
+**What ships:** Tickets > Checkout gains "Ask for a donation at checkout" (Pro): up to three
+suggested amounts, an optional own amount and a line above them; buyers add a donation under
+their tickets, and a free ticket with donations on is pay what you want. Paid through Stripe,
+PayPal, Payfast or Razorpay only; refused in a cart. Off on every event until its owner turns it
+on, so nothing changes for anyone at deploy.
+
+**Migration** (the start command runs it):
+- `2026_11_11_000001_add_donations`: four columns on `events` (a switch, the amounts as JSON, a
+  switch, a 120-character line) and a nullable `sales.donation_amount`. Both are columns added at
+  the end with defaults or NULL, which MySQL 8 does in place without copying the tables.
+
+## Unreleased: Apple Wallet passes (2026-11-11)
+
+**What ships:** "Add to Apple Wallet" beside Google's button (ticket page under the QR code, order
+page, confirmation and reminder emails), a signed `.pkpass` built on tap. **Off until configured**:
+with the variables unset nothing shows and `/ticket/wallet/apple/...` answers 404. The ticket
+page's wallet row moved from the bottom of the ticket to under the QR code (Google's too).
+
+**To switch it on (your decision, no deadline):** in the app spec, as app-level variables,
+`APPLE_WALLET_PASS_TYPE_ID`, `APPLE_WALLET_TEAM_ID`, `APPLE_WALLET_CERTIFICATE` (the `.p12`
+base64-encoded, encrypted) and `APPLE_WALLET_CERTIFICATE_PASSWORD` (encrypted); see
+`docs/APPLE_WALLET_SETUP.md`. On the hosted install the button is plain text: Apple's badge files
+are licensed per developer account and must never be committed to this public repository (the
+folder is in `.gitignore`), and the app platform builds from git. Then add a pass from a real
+ticket on an iPhone and scan it at `/scan`.
+
+## Unreleased: ticket reminders (2026-11-10)
+
+**What ships:**
+- `app:send-ticket-reminders`, hourly on both rails: one email to every paid sale (tickets, free
+  tickets, registrations) before its date, a day before unless the owner changes it at Schedule
+  settings > Tickets > Reminders (3 hours, 1, 2 or 3 days, or off). **On by default only for a
+  schedule that pays (Pro or Enterprise, not a trial) or has its own email settings**; a free
+  schedule's reminders would go through our mail server, so they are off until its owner switches
+  them on (`Role::optionalMailOnByDefault()`, decided 2026-11-12).
+- The interest list's reminder stands down for an address the ticket reminder will reach.
+
+**Migration** (the start command runs it):
+- `2026_11_11_000000_create_ticket_reminder_settings_table`: a new table with a foreign key to
+  `roles` (a ten-second lock wait).
+- `2026_11_12_000000_ticket_reminders_follow_the_default`: `enabled` becomes nullable, NULL meaning
+  the owner has not chosen. The table is empty on the hosted install at this deploy.
+
+**The first run after the deploy** reminds every eligible sale of a paying schedule (or one with
+its own email settings) whose date starts within about the next 24 to 36 hours (36 because a
+reminder that would land at night goes at 20:00 the evening before): roughly a day's worth of
+those schedules' sales at once, through the shared platform mailer for a paying schedule without
+its own email settings. It is capped at 2,000 a run (`TICKET_REMINDER_RECIPIENT_BATCH`)
+and staggered 50 every 15 seconds; the rest follow on the next hourly runs.
+
+**After the deploy:**
+- The Scheduler card on `/admin/queue` lists `send-ticket-reminders`.
+- Watch the mail provider's volume and bounces, and the failed-jobs count on `/admin/queue`,
+  over the first two hours.
+- To stop every reminder at once without a rollback, set `TICKET_REMINDERS=false` in the app spec
+  (app-level, both components) and redeploy.
 
 ## Unreleased: a custom domain's main address (2026-10-22)
 
@@ -194,6 +364,15 @@ on an older install (the enum value is missing). Update first.
 2. In the network panel, the three `panels/*` requests and `revenue` each carry `Server-Timing`.
 
 No migration, no env var.
+
+## Unreleased: whole-page rounds for the homepage test (2026-11-16, 2026-11-18)
+
+**What ships:** the machinery for testing two whole homepages (`App\Utils\HeroExperiment`: both
+pages in one document, the browser showing one, an even split that nothing ends by itself, and a
+"Homepage test" card on `/admin/growth` with each page's visitors, clicks, signups and how many
+saved a schedule and an event). It was built for a light copy of today's page, which never went
+live and is gone; the round it runs is the one in the entry above. Needs `npm run build` (one line
+in `marketing-home.js` keeps a hidden film from downloading). No migration, no env var.
 
 ## Unreleased: homepage pass, one headline (2026-10-22)
 

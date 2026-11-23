@@ -82,6 +82,33 @@ class FederateEvents extends Command
 
         $this->info("Reconciled: {$reconcile['removed']} removed, {$reconcile['requeued']} re-queued.");
 
+        // The first run that comes back approved with events on the network: the dashboard's
+        // one-time "You're on the Event Schedule network" card.
+        // A nicety: never the reason a sync fails or skips the held push below.
+        try {
+            $federation->noteLive();
+        } catch (\Throwable $e) {
+            report($e);
+        }
+
+        // The push waited because the network had an older address for this install. The
+        // reconcile just told it the current one, and a move within the same site is taken on
+        // the spot: in that case send now rather than an hour from now.
+        if ($push['held']) {
+            if ($federation->addressPending()) {
+                $this->info('Held back: the network is confirming this install\'s new address ('.$federation->ownUrl().').');
+            } else {
+                $push = $federation->push();
+                $this->info("Address confirmed. Pushed {$push['pushed']} event(s).");
+
+                if ($push['failed']) {
+                    $this->error('Push failed; the remainder stays queued for the next run.');
+
+                    return self::FAILURE;
+                }
+            }
+        }
+
         return self::SUCCESS;
     }
 }

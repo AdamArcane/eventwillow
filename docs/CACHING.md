@@ -380,6 +380,14 @@ the `/admin/users` onboarding funnel reads.
   UA blocklist, the `Accept-Language` check and the per-IP+UA daily dedup all apply
   unchanged.
 - Known limit: a visitor with JavaScript disabled is not counted.
+- Beside it, `partials/marketing-page-stats` (marketing pages and the blog's public pages) posts
+  `{"page": "<route name>", "kind": "view" | "reached_end" | "signup_click", "w": <viewport
+  width>}` to `POST /api/marketing-page` (`MarketingPageStatController`, limiter
+  `marketing_page`) for the per-page counters in `marketing_page_daily`: a view, the page's last
+  section (`#claim` or the footer) coming into view, a click on a sign-up link. In `routes/api.php`
+  for the Realtime beacon's reasons: no session, cookie or CSRF, and it answers same-origin on
+  every host, the blog's included, so nothing here needs a place in `STATELESS_ROUTES`. Same
+  filters as this beacon, one visitor per page per kind per day. Counts only.
 
 ### 2. First-touch attribution
 
@@ -462,6 +470,33 @@ has to stay that way:
   first click on any sign-up link, filtered exactly like the page-view beacon.
 - The weights baked into a cached page are up to ~20 minutes old (the app caches the
   evaluation for 10 minutes, the edge the page for 10 more). That is fine: they move slowly.
+
+**A page round** (from 2026-11-16) tests two homepages the same way, and for the same reason
+nothing about it is decided by the server:
+
+- A variant may name a `page`. While such a round runs the homepage prints BOTH pages in one
+  document, inside `#hp`: today's sections, and the new page in `.hn`
+  (`marketing/partials/home-new`, its own hero to its own closing panel). The picker is the first
+  thing inside `#hp` and sets `data-home="new"` on it for a visitor given the new page, before
+  either page is parsed; the rules that read the attribute are in the page's head stylesheet
+  (`marketing/partials/home-new-styles`), so neither page is drawn and then taken away. Today's
+  hero keeps the one `<h1>`; the new page's headline is a heading by role until it is printed
+  alone. Its wall shows the same poster images as today's, so the eager ones are asked for once
+  whichever page is on show.
+  Never move those rules into the body, and never let the server print the attribute while a
+  round runs: the stored copy would show one page to everyone.
+- There is one URL, one title and one description, and today's whole text is in the HTML for
+  both. A second address, a redirect or a swap after load would each cost a flash, a second URL
+  to keep out of the index, or a request the edge cannot store.
+- `/?home=new` and `/?home=full` show a page to whoever asks. A query string is never stored
+  at the edge, and the picker leaves `window.esHero` unset for them, so nothing is beaconed,
+  stored or put on a sign-up link.
+- A person ends the round (`HeroExperiment::end()`, the card on `/admin/growth`). From the next
+  request the server prints the page it was ended on alone, which reaches visitors as the stored
+  copy of `/` turns over; purge `/` to make it immediate.
+- A script that works on today's middle must stand down when that middle is not drawn:
+  `initShowreel()` measures the film's frame before fetching, and a frame that is not drawn
+  measures as a box at the top of the window.
 
 ## The CSP nonce
 

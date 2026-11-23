@@ -16,6 +16,7 @@
         <x-doc-nav-link href="#event-layout">Default Layout</x-doc-nav-link>
         <x-doc-nav-link href="#hide-past-events">Hide Past Events</x-doc-nav-link>
         <x-doc-nav-link href="#next-event">Show Next Event</x-doc-nav-link>
+        <x-doc-nav-link href="#list-pictures">Event Pictures in the List</x-doc-nav-link>
         <x-doc-nav-link href="#list-animation">Event Animation</x-doc-nav-link>
         <x-doc-nav-link href="#list-wording">Event List Wording</x-doc-nav-link>
         <x-doc-nav-link href="#custom-css">Custom CSS</x-doc-nav-link>
@@ -69,7 +70,7 @@
                     </tr>
                     <tr>
                         <td><span class="font-semibold text-gray-900 dark:text-white">Events</span></td>
-                        <td><a href="#event-layout" class="doc-link">Default Layout</a>, <a href="#hide-past-events" class="doc-link">Hide Past Events</a>, <a href="#next-event" class="doc-link">Show Next Event</a>, <a href="#list-animation" class="doc-link">how event cards arrive</a> as visitors scroll your schedule, and <a href="#list-wording" class="doc-link">how each event is worded</a> on your list</td>
+                        <td><a href="#event-layout" class="doc-link">Default Layout</a>, <a href="#hide-past-events" class="doc-link">Hide Past Events</a>, <a href="#next-event" class="doc-link">Show Next Event</a>, <a href="#list-pictures" class="doc-link">Event Pictures in the List</a>, <a href="#list-animation" class="doc-link">how event cards arrive</a> as visitors scroll your schedule, and <a href="#list-wording" class="doc-link">how each event is worded</a> on your list</td>
                     </tr>
                     <tr>
                         <td><span class="font-semibold text-gray-900 dark:text-white">Custom CSS</span></td>
@@ -240,10 +241,11 @@
             Background
         </h2>
         <p class="text-gray-600 dark:text-gray-300 mb-4">The <strong class="text-gray-900 dark:text-white">Background</strong> row starts with a <strong class="text-gray-900 dark:text-white">Background Type</strong> choice of Aurora, Gradient, Solid or Image. Picking one shows its own controls and puts the others away. The row's line names your choice beside a small swatch of it, so you can see it with the row closed.</p>
-        <p class="text-gray-600 dark:text-gray-300 mb-4">Whichever you pick, the background fills the visitor's window and stays in place while your events scroll over it, in the calendar as well as the list, so a picture is never stretched to the length of the page. One exception: with an Image background, a phone shows the picture behind your header only.</p>
+        <p class="text-gray-600 dark:text-gray-300 mb-4"><strong class="text-gray-900 dark:text-white">Page style</strong>, at the top of the Background row, sets whether your public pages are light or dark. <strong class="text-gray-900 dark:text-white">Automatic</strong> picks for you: the light style when your background is a light color or gradient, and the dark style for a dark one, an image or Aurora. Or pick a palette yourself, for example when your background image is bright: <strong class="text-gray-900 dark:text-white">Sand</strong>, <strong class="text-gray-900 dark:text-white">Mist</strong> or <strong class="text-gray-900 dark:text-white">Paper</strong> for a light page, <strong class="text-gray-900 dark:text-white">Espresso</strong>, <strong class="text-gray-900 dark:text-white">Midnight</strong> or <strong class="text-gray-900 dark:text-white">Carbon</strong> for a dark one. A palette also sets the page's own ground and text colors. A palette you pick is always how your pages look. With Automatic, a visitor keeps the light or dark of the first page they open for the rest of their visit, so moving between schedules never flips the page. An embedded calendar keeps following its own light or dark setting.</p>
+        <p class="text-gray-600 dark:text-gray-300 mb-4">Whichever you pick, your background is drawn across the top of each page and fades into the page's own ground below, on phones as well as larger screens, so a picture is never stretched to the length of the page.</p>
 
         <h3 id="aurora" class="doc-subheading">Aurora</h3>
-        <p class="text-gray-600 dark:text-gray-300 mb-4">Soft lights in your schedule's colors that drift slowly behind your page, with a fine grain. Aurora is drawn by the visitor's browser rather than being a picture, so it is sharp on any screen, from a phone to a large monitor, and adds almost nothing to the page's weight. It follows each visitor's light or dark mode: pale lights on a bright page in light mode, glowing color on a deep one in dark mode. Schedules you create start on Aurora, with a palette picked at random and an accent color to match it.</p>
+        <p class="text-gray-600 dark:text-gray-300 mb-4">Soft lights in your schedule's colors that drift slowly across the top of your page, with a fine grain. Aurora is drawn by the visitor's browser rather than being a picture, so it is sharp on any screen, from a phone to a large monitor, and adds almost nothing to the page's weight. It follows your page's light or dark style: pale lights on a bright page, glowing color on a deep one. Schedules you create start on Aurora, with a palette picked at random and an accent color to match it.</p>
         <div class="doc-fields">
             <div class="doc-field">
                 <h4 class="font-semibold text-gray-900 dark:text-white mb-2">Palette</h4>
@@ -291,7 +293,7 @@
             </div>
             <div class="doc-field">
                 <h4 class="font-semibold text-gray-900 dark:text-white mb-2">Custom upload</h4>
-                <p class="text-sm text-gray-500 dark:text-gray-400">Click <strong class="text-gray-900 dark:text-white">Upload Image</strong>, above the thumbnails, to use your own. Once a picture is there the tile shows it, with <strong class="text-gray-900 dark:text-white">Change</strong> and <strong class="text-gray-900 dark:text-white">Remove</strong> under it. PNG, JPG, WebP or GIF, under 2.5 MB. For a sharp background on a large screen, use a picture at least 1920 pixels wide, and wider than it is tall; the form tells you when yours is smaller. Your page sends a phone a smaller copy, and a high-resolution screen a larger one when your picture is wider than 1920 pixels. Dark, low-contrast images work best, because your event cards and text sit on top of them.</p>
+                <p class="text-sm text-gray-500 dark:text-gray-400">Click <strong class="text-gray-900 dark:text-white">Upload Image</strong>, above the thumbnails, to use your own. Once a picture is there the tile shows it, with <strong class="text-gray-900 dark:text-white">Change</strong> and <strong class="text-gray-900 dark:text-white">Remove</strong> under it. PNG, JPG, WebP or GIF, under 2.5 MB. For a sharp background on a large screen, use a picture at least 1920 pixels wide, and wider than it is tall; the form tells you when yours is smaller. Your page sends a phone a smaller copy, and a high-resolution screen a larger one when your picture is wider than 1920 pixels.</p>
             </div>
         </div>
     </section>
@@ -315,7 +317,7 @@
                 <p class="text-sm text-gray-500 dark:text-gray-400">Events in date order as full-width cards, loaded well beyond the current month. Best when each event deserves its own space, or when they are spread thinly across the year.</p>
             </div>
         </div>
-        <p class="text-gray-600 dark:text-gray-300 mb-4">A new schedule starts on <strong class="text-gray-900 dark:text-white">List</strong>. Either way this is only the default: visitors can switch between the two with the layout toggle in the header, and their choice is remembered in their own browser for that schedule. It never changes what anyone else sees, and it does not change your setting. On a phone, events are always shown as a list.</p>
+        <p class="text-gray-600 dark:text-gray-300 mb-4">A new schedule starts on <strong class="text-gray-900 dark:text-white">List</strong>. Either way this is only the default: visitors can switch between the two with the layout toggle in the header, and their choice is remembered in their own browser for that schedule. It never changes what anyone else sees, and it does not change your setting. On a phone, the calendar becomes a compact month with that month's events listed under it.</p>
         <div class="doc-callout doc-callout-tip">
             <div class="doc-callout-title">Per-embed override</div>
             <p>Embeds ignore the visitor's saved preference, so the site doing the embedding stays in control. An embed can also override your default with <code class="doc-inline-code">?layout=calendar</code> or <code class="doc-inline-code">?layout=list</code>, so one page can carry the same schedule twice in both layouts. See <a href="{{ route('marketing.docs.sharing') }}#embed-parameters" class="doc-link">Embed URL Parameters</a>.</p>
@@ -341,7 +343,18 @@
             </svg>
             Show Next Event
         </h2>
-        <p class="text-gray-600 dark:text-gray-300">In the calendar layout, a card above the month names your next event: its picture, its name, when and where, and its tickets, with <strong class="text-gray-900 dark:text-white">Today</strong> or <strong class="text-gray-900 dark:text-white">Tomorrow</strong> beside the date when it is that close. It is always the next event to start, inside the sub-schedule or category the visitor is looking at, and it changes by itself as your events go by; to change what it says, edit that event. The list layout never shows it, because the list opens on your next event itself. To take the card off your page, turn off <strong class="text-gray-900 dark:text-white">Show Next Event</strong> under Hide Past Events in the same <strong class="text-gray-900 dark:text-white">Events</strong> row. It is on until you turn it off, it is free on every plan, and while it is off the closed row says so.</p>
+        <p class="text-gray-600 dark:text-gray-300">In the calendar layout, cards above the month name your next three events, the first one large and the next two beside it (under it on a phone): each with its picture, its name, when and where, and its tickets, with <strong class="text-gray-900 dark:text-white">Today</strong> or <strong class="text-gray-900 dark:text-white">Tomorrow</strong> beside the date when it is that close. They are always the next events to start, each event once (a weekly class is not two of the three), inside the sub-schedule or category the visitor is looking at, and they change by themselves as your events go by; to change what one says, edit that event. The list layout never shows them, because the list opens on your next event itself. To take the cards off your page, turn off <strong class="text-gray-900 dark:text-white">Show Next Event</strong> under Hide Past Events in the same <strong class="text-gray-900 dark:text-white">Events</strong> row. It is on until you turn it off, it is free on every plan, and while it is off the closed row says so.</p>
+    </section>
+
+    <!-- Event Pictures in the List -->
+    <section id="list-pictures" class="doc-section">
+        <h2 class="doc-heading">
+            <svg aria-hidden="true" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" class="w-5 h-5 text-gray-500 dark:text-gray-400 flex-shrink-0">
+                <path stroke-linecap="round" stroke-linejoin="round" d="M2.25 15.75l5.159-5.159a2.25 2.25 0 013.182 0l5.159 5.159m-1.5-1.5l1.409-1.409a2.25 2.25 0 013.182 0l2.909 2.909M3.75 21h16.5a1.5 1.5 0 001.5-1.5V6a1.5 1.5 0 00-1.5-1.5H3.75A1.5 1.5 0 002.25 6v13.5a1.5 1.5 0 001.5 1.5z" />
+            </svg>
+            Event Pictures in the List
+        </h2>
+        <p class="text-gray-600 dark:text-gray-300">How large each event's flyer is drawn in the list: <strong class="text-gray-900 dark:text-white">Small</strong> (the default), <strong class="text-gray-900 dark:text-white">Medium</strong> or <strong class="text-gray-900 dark:text-white">Large</strong>. A flyer keeps its own shape at every size, so nothing on it is cut off. When your schedule has only one or two coming events, the list shows them as large cards whatever you pick, so the page never looks empty.</p>
     </section>
 
     <!-- Event Animation -->
@@ -447,7 +460,7 @@
         <p class="text-gray-600 dark:text-gray-300 mb-6">To change the page's background with CSS, aim at <code class="doc-inline-code">.gp-bg</code>, the layer the background is drawn on, and at <code class="doc-inline-code">.gp-aurora</code> inside it for Aurora. For example, <code class="doc-inline-code">.gp-bg { background-position: top; }</code> moves a picture up. If your CSS already styles the background on <code class="doc-inline-code">body</code> or <code class="doc-inline-code">html</code>, a gradient or picture background is still drawn on <code class="doc-inline-code">body</code> for you, so those rules keep working; Aurora is drawn over them.</p>
         <div class="doc-callout doc-callout-warning">
             <div class="doc-callout-title">What the sanitizer strips</div>
-            <p>Saved CSS is cleaned before it is stored, so a few constructs are silently removed rather than rejected with an error. Do not rely on <code class="doc-inline-code">@import</code>, <code class="doc-inline-code">@font-face</code>, <code class="doc-inline-code">@charset</code>, <code class="doc-inline-code">expression()</code>, <code class="doc-inline-code">javascript:</code> URLs, <code class="doc-inline-code">behavior</code> or <code class="doc-inline-code">binding</code>, or any <code class="doc-inline-code">url()</code> pointing at an <code class="doc-inline-code">http:</code>, <code class="doc-inline-code">https:</code> or <code class="doc-inline-code">data:</code> address. Everything else, including modern layout and animation properties, is kept as written. If a rule seems to vanish after saving, check it against that list first.</p>
+            <p>Saved CSS is cleaned before it is stored, so a few constructs are silently removed rather than rejected with an error. Do not rely on <code class="doc-inline-code">@import</code>, <code class="doc-inline-code">@font-face</code>, <code class="doc-inline-code">@charset</code>, <code class="doc-inline-code">expression()</code>, <code class="doc-inline-code">javascript:</code> URLs, <code class="doc-inline-code">behavior</code> or <code class="doc-inline-code">binding</code>, <code class="doc-inline-code">image-set()</code> or <code class="doc-inline-code">image()</code>, or any <code class="doc-inline-code">url()</code> pointing at an <code class="doc-inline-code">http:</code>, <code class="doc-inline-code">https:</code>, <code class="doc-inline-code">//</code> or <code class="doc-inline-code">data:</code> address. Everything else, including modern layout and animation properties, is kept as written. If a rule seems to vanish after saving, check it against that list first.</p>
         </div>
     </section>
 
@@ -498,7 +511,7 @@
 
         <div class="doc-callout doc-callout-info">
             <div class="doc-callout-title">Hiding a panel is not the same as turning a feature off</div>
-            <p>A <code class="doc-inline-code">display: none</code> rule removes a panel from the page. It does not disable what sits behind it. People who already signed up to be notified are still notified, a hidden subscribe panel still accepts a submission posted to its address, and a hidden reviews panel does not delete the reviews. Where a real on/off setting exists, use that instead: videos, fan photos, fan comments, feedback, carpooling, accommodation and the &ldquo;Notify me&rdquo; card each have their own switch on the schedule edit page, and so does the sponsor grid (<strong>Show sponsors</strong>), which hides it without deleting a sponsor. The <strong>Show Sign-Up Panel</strong> switch is the exception: like this rule, it only hides the panel, and sign-ups through your follow link, and on eventschedule.com the Follow button, still arrive.</p>
+            <p>A <code class="doc-inline-code">display: none</code> rule removes a panel from the page. It does not disable what sits behind it. People who already signed up to be notified are still notified, a hidden subscribe panel still accepts a submission posted to its address, and a hidden reviews panel does not delete the reviews. Where a real on/off setting exists, use that instead: videos, fan photos, fan comments, feedback, carpooling{{ \App\Services\Stay22Service::isEnabled() || ! config('app.hosted') ? ', accommodation' : '' }} and the &ldquo;Notify me&rdquo; card each have their own switch on the schedule edit page, and so does the sponsor grid (<strong>Show sponsors</strong>), which hides it without deleting a sponsor. The <strong>Show Sign-Up Panel</strong> switch is the exception: like this rule, it only hides the panel, and sign-ups through your follow link, and on eventschedule.com the Follow button, still arrive.</p>
         </div>
 
         <h3 class="doc-subheading">Schedule page sections</h3>
@@ -525,7 +538,7 @@
                     <tr><td><code class="doc-inline-code">#gp-map</code></td><td>The venue map: its band and the map it opens</td></tr>
                     <tr><td><code class="doc-inline-code">#gp-map-sheet</code></td><td>The full-window venue map, on a phone and when a visitor enlarges it</td></tr>
                     <tr><td><code class="doc-inline-code">#gp-events</code></td><td>Everything from the events heading down, including the calendar</td></tr>
-                    <tr><td><code class="doc-inline-code">#gp-next-event</code></td><td>The card above the month calendar that shows your next event (<a href="#next-event" class="doc-link">Show Next Event</a> turns it off on any plan)</td></tr>
+                    <tr><td><code class="doc-inline-code">#gp-next-event</code></td><td>The cards above the month calendar that show your next three events (<a href="#next-event" class="doc-link">Show Next Event</a> turns it off on any plan)</td></tr>
                     <tr><td><code class="doc-inline-code">#gp-calendar</code></td><td>The calendar or event list panel on its own</td></tr>
                     <tr><td><code class="doc-inline-code">#gp-subscribe</code></td><td>The follow and subscribe panel (also on event pages)</td></tr>
                     <tr><td><code class="doc-inline-code">#gp-gallery</code></td><td>Your photo gallery (also on event pages, for an event's own gallery)</td></tr>
@@ -551,7 +564,9 @@
                     <tr><td><code class="doc-inline-code">#gp-venue</code></td><td>The venue card</td></tr>
                     <tr><td><code class="doc-inline-code">#gp-venue-socials</code></td><td>The venue's social links</td></tr>
                     <tr><td><code class="doc-inline-code">#gp-venue-map</code></td><td>The map at the foot of the venue card</td></tr>
+                    @if (\App\Services\Stay22Service::isEnabled() || ! config('app.hosted'))
                     <tr><td><code class="doc-inline-code">#gp-accommodation</code></td><td>The places-to-stay map</td></tr>
+                    @endif
                     <tr><td><code class="doc-inline-code">#gp-create-your-own</code></td><td>The &ldquo;create your own schedule&rdquo; card</td></tr>
                     <tr><td><code class="doc-inline-code">#gp-upcoming-events</code></td><td>The schedule's other upcoming events, down the left column</td></tr>
                     <tr><td><code class="doc-inline-code">#gp-event-details</code></td><td>The main card: title, date, venue, price and buttons</td></tr>
@@ -660,7 +675,7 @@
         <div class="doc-fields">
             <div class="doc-field">
                 <h3 class="font-semibold text-gray-900 dark:text-white mb-2">What a paid plan removes</h3>
-                <p class="text-sm text-gray-500 dark:text-gray-400">Five surfaces at once: the corner chip, the "create your own" card on your event pages, the credit line printed under your embed snippets, the same line inside a ticket or RSVP embed, and the footer of your newsletter emails. Ads, where a platform runs them on free schedules, follow the same tier. Embeds of your calendar never carry any of it, on any plan.</p>
+                <p class="text-sm text-gray-500 dark:text-gray-400">Five surfaces at once: the corner chip, the "create your own" card on your event pages, the credit line printed under your embed snippets, the same line inside a ticket or RSVP embed, and the footer of your newsletter emails.{{ config('ads.enabled') || ! config('app.hosted') ? ' Ads, where a platform runs them on free schedules, follow the same tier.' : '' }} Embeds of your calendar never carry any of it, on any plan.</p>
             </div>
             <div class="doc-field">
                 <h4 class="font-semibold text-gray-900 dark:text-white mb-2">White-label your schedule</h4>

@@ -9,7 +9,7 @@ return [
     'features_title' => 'Sündmuste haldamise tarkvara: kõik funktsioonid, ilma platvormitasudeta',
     'features_description' => 'Kõik funktsioonid viies peatükis: piletid Stripe\'i või PayPali kaudu ilma platvormitasuta, kahesuunaline kalendri sünkroonimine, uudiskirjad, tehisintellektiga import ja analüütika.',
 
-    'about_title' => 'Event Schedule\'ist | Avatud lähtekoodiga sündmuste haldamise platvorm',
+    'about_title' => 'Avatud lähtekoodiga sündmuste haldamise platvorm | Event Schedule\'ist',
     'about_description' => 'Kes Event Schedule\'it arendab, millise litsentsi all see ilmub, kus asub lähtekood ja loetelu sellest, mida see ei tee. Avatud lähtekood ja platvormitasudeta.',
 
     'selfhost_title' => 'Isemajutatav sündmuste kalender | Kõik funktsioonid tasuta sinu serveris',
@@ -19,7 +19,7 @@ return [
     'ticketing_description' => 'Müü pileteid oma sündmuse lehelt ilma platvormitasudeta. Maksed Stripe\'i või PayPaliga, täielik või osaline tagasimakse ja registreerimine QR-koodiga.',
 
     'ai_title' => 'AI sündmuste import: plakatist saab sündmus | Event Schedule',
-    'ai_description' => 'Kleebi tekst või lohista plakat ja AI täidab sündmuse andmed: kuupäev, koht, esinejad, hind. Tasuta igas paketis, koos tõlkega 12 keelde.',
+    'ai_description' => 'Kleebi tekst või lohista plakat ja AI täidab sündmuse andmed: kuupäev, koht, esinejad, hind. Tasuta igas paketis, koos tõlkega 13 keelde.',
 
     'calendar_sync_title' => 'Kahesuunaline kalendri sünkroonimine Google\'i, Outlooki ja CalDAV-iga',
     'calendar_sync_description' => 'Kahesuunaline sünkroonimine Google Calendari, Outlooki ja mis tahes CalDAV-serveriga, tasuta igas paketis. Osalejad lisavad ühe sündmuse või tellivad sinu kalendri elava voo.',

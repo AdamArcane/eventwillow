@@ -34,6 +34,10 @@
             .sys-panel p {
               margin: 0.5rem 0 0;
             }
+            /* The network card, arrived at from the dashboard's invitation. */
+            .page-card.sys-invited {
+              box-shadow: 0 0 0 2px var(--brand-blue), var(--ap-shadow-card);
+            }
             .sys-sub {
               margin: 0 0 0.5rem;
               font-size: 0.875rem;
@@ -134,6 +138,47 @@
              flashes a toast instead, because its save lands on the card, not the top. --}}
         <x-page-flash :keys="['success' => 'success']" />
 
+        {{-- Selfhost only: which schedule the site's own address shows (App\Support\HomeSchedule).
+             Its own form and route, like the cards below. --}}
+        @if ($homeScheduleAvailable && $homeScheduleChoices->isNotEmpty())
+        @php
+            $homeRoot = rtrim(url('/'), '/');
+            $homeSelected = old('home_schedule', $homeScheduleId ? \App\Utils\UrlUtils::encodeId($homeScheduleId) : '');
+        @endphp
+        <x-page-card beside id="home-schedule" class="scroll-mt-24" :title="__('messages.home_schedule_title')" :lead="__('messages.home_schedule_description', ['url' => $homeRoot])">
+            <form method="POST" action="{{ route('admin.settings.update_home_schedule') }}" class="{{ $formClass }}">
+                @csrf
+
+                <div class="page-form-fields">
+                    <div>
+                        <x-input-label for="home_schedule" :value="__('messages.home_schedule_label', ['url' => $homeRoot])" />
+                        {{-- v-pre: schedule names are somebody's text, and this page sits in a Vue mount. --}}
+                        <select id="home_schedule" name="home_schedule" v-pre {{ $demo ? 'disabled' : '' }}
+                            class="mt-1 block w-full sm:max-w-sm border-gray-300 dark:border-gray-700 dark:bg-gray-900 dark:text-gray-300 focus:border-[var(--brand-blue)] focus:ring-[var(--brand-blue)] rounded-lg shadow-sm">
+                            <option value="">{{ __('messages.home_schedule_none') }}</option>
+                            @foreach ($homeScheduleChoices as $homeChoice)
+                                @php $homeHash = \App\Utils\UrlUtils::encodeId($homeChoice->id); @endphp
+                                <option value="{{ $homeHash }}" @selected($homeSelected === $homeHash)>{{ $homeChoice->name }} ({{ $homeChoice->subdomain }})</option>
+                            @endforeach
+                        </select>
+                        <p class="sys-help">{{ __('messages.home_schedule_help') }}</p>
+                        {{-- What the option takes away, said where it is switched on. --}}
+                        <p class="sys-help">{{ __('messages.home_schedule_login_note', ['url' => route('login')]) }}</p>
+                        <x-input-error class="mt-2" :messages="$errors->get('home_schedule')" />
+                    </div>
+
+                    @if ($demo)
+                    <x-page-notice tone="warn">{{ __('messages.demo_mode_settings_disabled') }}</x-page-notice>
+                    @endif
+                </div>
+
+                <div class="page-form-actions">
+                    <x-brand-button type="submit">{{ __('messages.save') }}</x-brand-button>
+                </div>
+            </form>
+        </x-page-card>
+        @endif
+
         <x-page-card beside :title="__('messages.header_footer_code')" :lead="__('messages.header_footer_code_intro')">
             <form method="POST" action="{{ route('admin.settings.update') }}" class="{{ $formClass }}">
                 @csrf
@@ -170,9 +215,14 @@
         </x-page-card>
 
         @if ($federationAvailable)
-        {{-- Anchor target for the dashboard adoption prompt's "Open settings" link. --}}
-        <x-page-card beside id="federation" class="scroll-mt-24" :title="__('messages.federation_settings_title')" :lead="__('messages.federation_settings_description')">
+        {{-- Anchor target for the dashboard adoption prompt's "Open settings" link. Arriving from
+             the dashboard's invitation, it is marked and says what happens next (once: a flash). --}}
+        <x-page-card beside id="federation" class="scroll-mt-24 {{ $federationFromInvite ? 'sys-invited' : '' }}" :title="__('messages.federation_settings_title')" :lead="__('messages.federation_settings_description')">
             <div class="page-form-fields">
+                @if ($federationFromInvite && ! $federationEnabled)
+                    <x-page-notice tone="info">{{ __('messages.federation_invite_next_steps', ['site' => parse_url((string) config('app.nexus_url'), PHP_URL_HOST) ?: 'eventschedule.com']) }}</x-page-notice>
+                @endif
+
                 {{-- A failed sync is otherwise completely silent, and a silent sync failure
                      is the most likely long-run failure mode. Mapped to a small set of
                      states rather than echoing the raw response back to the screen.
@@ -182,6 +232,13 @@
                         $federationErrorKey = $federationLastError === 'rejected' ? 'rejected_reconnecting' : $federationLastError;
                     @endphp
                     <x-page-notice tone="warn">{{ __('messages.federation_error_'.$federationErrorKey) }}</x-page-notice>
+                @endif
+
+                {{-- APP_URL changed and the network still checks links against the old address.
+                     Nothing for the operator to do, but without this the preview would only say
+                     events are waiting, with no reason. Both addresses are this install's own. --}}
+                @if ($federationEnabled && $federationAddressPending)
+                    <div v-pre><x-page-notice tone="warn">{{ __('messages.federation_address_pending', ['new' => $federationOwnUrl, 'old' => $federationNetworkUrl]) }}</x-page-notice></div>
                 @endif
 
                 {{-- Where the install stands, first, once there is anything to say - before the
@@ -230,16 +287,27 @@
                         {{-- Only the network can build this link (the id in it is encoded with its
                              key), so it arrives with every sync; FederationService only keeps one
                              that points at the configured network. --}}
-                        @if ($federationStateKey === 'approved' && $federationListingsUrl && $federationSentTotal > 0)
-                            <p>
-                                <x-link href="{{ $federationListingsUrl }}" target="_blank">{{ __('messages.federation_see_listings') }}</x-link>
+                        {{-- Beside it, what sharing has brought: the visits the network sent here in
+                             the last 30 days, as its last answer counted them. --}}
+                        @php
+                            $federationShowListings = $federationStateKey === 'approved' && $federationListingsUrl && $federationSentTotal > 0;
+                            $federationShowVisits = $federationStateKey === 'approved' && $federationVisits !== null;
+                        @endphp
+                        @if ($federationShowListings || $federationShowVisits)
+                            <p class="flex flex-wrap items-baseline gap-x-3 gap-y-1">
+                                @if ($federationShowListings)
+                                    <x-link href="{{ $federationListingsUrl }}" target="_blank">{{ __('messages.federation_see_listings') }}</x-link>
+                                @endif
+                                @if ($federationShowVisits)
+                                    <span id="federation-visits">{{ trans_choice('messages.federation_visits_30d', $federationVisits, ['count' => number_format($federationVisits)]) }}</span>
+                                @endif
                             </p>
                         @endif
                     </div>
                 @endif
             </div>
 
-            <form method="POST" action="{{ route('admin.settings.update') }}" class="{{ $formClass }} {{ $federationLastError || $federationConnected ? 'mt-5' : '' }}">
+            <form method="POST" action="{{ route('admin.settings.update') }}" class="{{ $formClass }} {{ $federationLastError || $federationConnected || ($federationFromInvite && ! $federationEnabled) ? 'mt-5' : '' }}">
                 @csrf
 
                 {{-- Both cards post to the same endpoint, so each has to be explicit

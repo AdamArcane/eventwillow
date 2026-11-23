@@ -253,6 +253,12 @@ class Sale extends Model
         return $this->belongsTo(Event::class);
     }
 
+    /** The promoter link the buyer arrived through (the schedule's Promoters tab), if any. */
+    public function promoterLink()
+    {
+        return $this->belongsTo(PromoterLink::class);
+    }
+
     public function refunds()
     {
         return $this->hasMany(SaleRefund::class);
@@ -296,6 +302,93 @@ class Sale extends Model
     public function guestTimezone(): ?string
     {
         return \App\Utils\AppointmentTimeUtils::resolveTimezone($this->guest_timezone);
+    }
+
+    /**
+     * The language the guest read the event in when they bought or registered (the schedule's own
+     * or its translation, languageFromRequest()), or null when nobody recorded one: a sale from
+     * before the column, an import, the box office. Null means "as it always was": the mail goes
+     * out in the language the caller would have used, with the event's stored name.
+     *
+     * Validated on read as well as on write, as guestTimezone() is: a backup restores the column
+     * as it finds it.
+     */
+    public function guestLanguage(): ?string
+    {
+        return is_valid_language_code($this->language_code) ? $this->language_code : null;
+    }
+
+    /** The locale a mail to this guest renders in: the language they bought in, else $fallback. */
+    public function mailLocale(?string $fallback): ?string
+    {
+        return $this->guestLanguage() ?? $fallback;
+    }
+
+    /**
+     * The event as this guest read it: its name and descriptions in their language where the
+     * event has them (Event::readIn()), and the event itself when no language was recorded.
+     */
+    public function eventAsRead(Event $event): Event
+    {
+        return $event->readIn($this->guestLanguage());
+    }
+
+    /**
+     * The ?lang= a link in this guest's mail carries to their ticket, the event page or its .ics:
+     * their language when it is not the one the schedule is written in, so the page opens as they
+     * read it. Null otherwise, and for a sale with no language, whose links stay as they were.
+     */
+    public function linkLanguage(?Role $role, ?Event $event = null): ?string
+    {
+        $lang = $this->guestLanguage();
+
+        if ($lang === null) {
+            return null;
+        }
+
+        $authored = $role?->language_code ?: ($event ?? $this->event)?->getLanguageCode();
+
+        return $lang !== $authored ? $lang : null;
+    }
+
+    /** $url with ?lang=$lang added, or $url as it is when there is no language to add. */
+    public static function withLanguage(string $url, ?string $lang): string
+    {
+        if (! $lang || $url === '') {
+            return $url;
+        }
+
+        return $url.(str_contains($url, '?') ? '&' : '?').'lang='.rawurlencode($lang);
+    }
+
+    /**
+     * The language a guest buying or registering on $role's page was reading it in, for
+     * sales.language_code: the `lang` the event page's forms post (and the cart's, the waitlist's,
+     * the booking form's), taken only when it is one of the two languages that page offers, the
+     * schedule's own and its translation. Anything else is ignored rather than trusted, since a
+     * crafted post could otherwise pick any language for the mail.
+     *
+     * Without a usable post (a page cached from before the field, a script), the page's own
+     * translate flag answers for the translation and nothing is recorded for the authored
+     * language, which leaves the mail as it was.
+     */
+    public static function languageFromRequest(\Illuminate\Http\Request $request, ?Role $role): ?string
+    {
+        if (! $role) {
+            return null;
+        }
+
+        $authored = is_valid_language_code($role->language_code) ? $role->language_code : null;
+        $target = $role->offersTranslation() && is_valid_language_code($role->translation_language_code)
+            ? $role->translation_language_code
+            : null;
+
+        $posted = $request->input('lang');
+        if (is_string($posted) && $posted !== '' && in_array($posted, array_filter([$authored, $target]), true)) {
+            return $posted;
+        }
+
+        return ($target && $request->hasSession() && $request->session()->has('translate')) ? $target : null;
     }
 
     public function boostCampaign()
@@ -781,6 +874,13 @@ class Sale extends Model
             $data->discount_amount = $this->discount_amount !== null ? (float) $this->discount_amount : null;
             $data->gift_card_amount = $this->gift_card_amount !== null ? (float) $this->gift_card_amount : null;
         }
+        // The buyer's donation, already inside payment_amount. Only the primary of a group ever
+        // carries one, so a guest row reports none and nobody counts it twice.
+        $data->donation_amount = $this->donation_amount !== null && (! $this->group_id || $this->isPrimarySale())
+            ? (float) $this->donation_amount
+            : null;
+        // The promoter link the buyer arrived through, as the id the Promoters tab knows it by.
+        $data->promoter_link_id = $this->promoter_link_id ? UrlUtils::encodeId($this->promoter_link_id) : null;
         // Rows a buyer paid for in one checkout that spanned several events share this. Exposed as
         // its own field rather than by widening payment_amount: the primary/guest contract above
         // is what stops a subscriber double-counting, and inflating a leg primary's total to the

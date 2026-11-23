@@ -75,7 +75,11 @@ class AdminController extends Controller
             return redirect()->route('home');
         }
 
-        return view('admin.confirm-password');
+        // Arriving from the invitation to join the network: say why a password is asked for.
+        $intended = (string) session('url.intended', '');
+        $fromInvite = str_contains($intended, 'card=federation') && str_contains($intended, 'from=invite');
+
+        return view('admin.confirm-password', ['fromFederationInvite' => $fromInvite]);
     }
 
     /**
@@ -1112,6 +1116,39 @@ class AdminController extends Controller
 
         return redirect(route('admin.growth', is_string($range) && $range !== '' ? ['range' => $range] : []).'#hero-test')
             ->with('message', __('messages.hero_test_reset_done'));
+    }
+
+    /**
+     * End the homepage's page round on one of its two pages (HeroExperiment::end()): from then on
+     * every visitor is given that page and the other is no longer printed. Ending it on today's
+     * page is also the switch that takes the light page off at once. Reset starts the round over.
+     */
+    public function growthEndHeroTest(Request $request): RedirectResponse
+    {
+        if (! auth()->user()->isAdmin()) {
+            return redirect()->back()->with('error', __('messages.not_authorized'));
+        }
+        abort_unless(config('app.hosted') && config('app.is_nexus'), 404);
+
+        $key = $request->input('variant');
+        $range = $request->input('range');
+        $back = route('admin.growth', is_string($range) && $range !== '' ? ['range' => $range] : []).'#hero-test';
+
+        if (! is_string($key) || ! HeroExperiment::end($key)) {
+            return redirect($back)->with('error', __('messages.invalid_request'));
+        }
+
+        AuditService::log(
+            AuditService::ADMIN_UPDATE,
+            auth()->id(),
+            null,
+            null,
+            null,
+            null,
+            'Ended the homepage test on '.$key,
+        );
+
+        return redirect($back)->with('message', __('messages.hero_test_ended_done'));
     }
 
     /**
@@ -2905,8 +2942,14 @@ class AdminController extends Controller
         // docs) ask for the network card with a query string: intended() keeps it, where it
         // drops a #fragment. Browsers do keep a fragment from a Location header, so turn it
         // back into the anchor here.
-        if ($request->query('card') === 'federation') {
-            return redirect()->to(route('admin.settings').'#federation');
+        if (in_array($request->query('card'), ['federation', 'home-schedule'], true)) {
+            // From the dashboard's invitation to join the network: the card is marked and says
+            // what happens next, once (admin/settings).
+            $redirect = redirect()->to(route('admin.settings').'#'.$request->query('card'));
+
+            return $request->query('card') === 'federation' && $request->query('from') === 'invite'
+                ? $redirect->with('federation_from_invite', true)
+                : $redirect;
         }
 
         // The nexus never renders the federation card, so skip the queries that feed
@@ -2974,6 +3017,18 @@ class AdminController extends Controller
             'federationLastSyncedAt' => Setting::get('federation_last_synced_at'),
             'federationLastError' => Setting::get('federation_last_error'),
             'federationListingsUrl' => Setting::get('federation_listings_url'),
+            // Visits the network sent here in the last 30 days, as its last answer said. Null
+            // until a network that counts them has answered.
+            'federationVisits' => Setting::get('federation_visits_30d') === null ? null : (int) Setting::get('federation_visits_30d'),
+            'federationFromInvite' => (bool) session('federation_from_invite'),
+            // The schedule a selfhost install shows at its own address (App\Support\HomeSchedule).
+            'homeScheduleAvailable' => \App\Support\HomeSchedule::available(),
+            'homeScheduleId' => \App\Support\HomeSchedule::id(),
+            'homeScheduleChoices' => \App\Support\HomeSchedule::available() ? \App\Support\HomeSchedule::choices() : collect(),
+            // The network has this install at an older address: events wait until it has the new one.
+            'federationAddressPending' => $federation->addressPending(),
+            'federationNetworkUrl' => Setting::get('federation_network_url'),
+            'federationOwnUrl' => $federation->ownUrl(),
             // The whole point of enabling this is knowing exactly what leaves your
             // install, so show it rather than describing it - including why a listed
             // event has not gone yet.
@@ -3100,6 +3155,48 @@ class AdminController extends Controller
         );
 
         return redirect()->route('admin.settings')->with('success', __('messages.settings_saved'));
+    }
+
+    /**
+     * Which schedule a selfhost install shows at its own address, if any (App\Support\HomeSchedule).
+     * Its own endpoint, like the other cards: a shared one would have to carry this through.
+     */
+    public function updateHomeSchedule(Request $request): RedirectResponse
+    {
+        if (! auth()->user()->isAdmin() || ! \App\Support\HomeSchedule::available()) {
+            return redirect()->back()->with('error', __('messages.not_authorized'));
+        }
+
+        // Only from the set the card offers, by encoded id like every id the page prints.
+        $offered = \App\Support\HomeSchedule::choices()
+            ->mapWithKeys(fn ($role) => [UrlUtils::encodeId($role->id) => $role->id]);
+
+        $request->validate([
+            'home_schedule' => ['nullable', 'string', Rule::in($offered->keys()->all())],
+        ]);
+
+        if (is_demo_mode()) {
+            return redirect()->route('admin.settings')->with('error', __('messages.demo_mode_settings_disabled'));
+        }
+
+        $old = ['home_schedule_id' => \App\Support\HomeSchedule::id()];
+        $new = ['home_schedule_id' => $request->filled('home_schedule') ? $offered[$request->input('home_schedule')] : null];
+
+        if ($old !== $new) {
+            \App\Support\HomeSchedule::set($new['home_schedule_id']);
+
+            AuditService::log(
+                AuditService::ADMIN_SETTINGS_UPDATE,
+                auth()->id(),
+                null,
+                null,
+                $old,
+                $new,
+                'Updated home schedule',
+            );
+        }
+
+        return redirect()->to(route('admin.settings').'#home-schedule')->with('success', __('messages.settings_saved'));
     }
 
     /**

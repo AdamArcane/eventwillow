@@ -1,4 +1,4 @@
-<x-app-layout :title="$guestTitle()" realtime-surface="gp" :realtime-role="$role" :realtime-event="$event">
+<x-app-layout :title="$guestTitle()" realtime-surface="gp" :realtime-role="$role" :realtime-event="$event" :force-mode="request()->embed ? null : \App\Utils\GuestTheme::pageMode($role, $otherRole ?? null, $event ?? null)" :mode-chosen="! request()->embed && \App\Utils\GuestTheme::pagePalette($role, $otherRole ?? null, $event ?? null) !== null" :carry-hosts="request()->embed ? [] : \App\Utils\GuestTheme::carryHosts($role, $otherRole ?? null, $event ?? null)">
 
     <noscript>
       <div class="bg-amber-100 dark:bg-amber-900/30 text-amber-800 dark:text-amber-200 p-4 text-center text-base">
@@ -98,6 +98,46 @@
         $bgLegacy = ! $paintBackground || (in_array($bg->background, ['gradient', 'image'], true) && $role->customCssStylesPageBackground());
         $bgAurora = ($paintBackground && $bg->background === 'aurora') ? \App\Utils\Aurora::for($bg) : null;
         $bgLayer = $bgAurora !== null || (! $bgLegacy && in_array($bg->background, ['gradient', 'image'], true));
+        // The 2026-11 redesign: a guest page is drawn on the stage's own dark ground, edge to
+        // edge, with the schedule's colour as a glow (partials/guest-stage-styles), never on the
+        // owner's background. An embed sits on the owner's own site and keeps its transparent
+        // ground.
+        $stageGround = ! request()->embed;
+        // A schedule that chose Aurora keeps it as the light across the top of its page, fading
+        // into the dark below (the owner's pick of two, 2026-11-19); every other background is
+        // the plain ground with the static glow in the schedule's colour. An owner who wants a
+        // calm page picks a solid background.
+        $auroraGlow = $stageGround && $bg->background === 'aurora' && $bgAurora !== null;
+        // Any other background the owner chose is drawn the same way (the owner's call, 2026-11-19):
+        // a photo or a gradient on the background layer, held to the top of the page and faded
+        // into the dark; a solid colour as a light of that colour across the top. The accent's
+        // own glow is the fallback for a schedule that chose no background.
+        // An owner whose custom CSS styles the page's background ($bgLegacy) keeps the page they
+        // wrote it for: their background on body, the sheet clear over it, and no glow.
+        $bgGlow = $stageGround && ! $bgLegacy && ! $auroraGlow && $bg->hasConfiguredBackground() && in_array($bg->background, ['image', 'gradient', 'solid'], true);
+        $bgGlowColor = $bgGlow && $bg->background === 'solid' ? \App\Utils\ColorUtils::normalizeHex($bg->background_color) : null;
+        if ($bgGlow && $bg->background === 'solid' && ! $bgGlowColor) {
+            $bgGlow = false;
+        }
+        // The glow is the background at every width, the schedule page's phone included (it used
+        // to paint its own banner behind the header instead, and so asked for no picture here).
+        if ($bgGlow) {
+            $showMobileBackground = true;
+        }
+        // A photo as the glow is the page's LCP element on a phone, so it is preloaded there, by
+        // the URL partials/guest-background-css paints at that width (the schedule page used to
+        // pass it for its own banner; without it a phone waited some 2.5s longer for it).
+        // The schedule page only (an event page's own flyer is its LCP, and already asked for
+        // first), and only under a header with no picture of its own, which is then the LCP
+        // (role/show-guest's $hasHeaderImage, logo walls aside).
+        $headerPictured = ! in_array($role->header_image, \App\Models\Role::HEADER_IMAGE_KEYWORDS, true) && ($role->header_image || $role->header_image_url);
+        if ($bgGlow && ! $bgGlowColor && $bg->background === 'image' && ! request()->graphic && ! ($event && $event->exists) && ! $headerPictured) {
+            $mobileBannerImage ??= $bg->backgroundImageUrl(960, pageWidth: true);
+        }
+        if ($stageGround && ! $auroraGlow && ! ($bgGlow && ! $bgGlowColor)) {
+            $bgLayer = false;
+            $bgAurora = null;
+        }
 
         $guestMetaDescription = match (true) {
             ($passwordGate ?? false) || $galleryMode => '',
@@ -116,6 +156,22 @@
              desktop from fetching a phone's image it will never paint. --}}
         @if ($mobileBannerImage)
         <link rel="preload" as="image" href="{{ $mobileBannerImage }}" media="(max-width: 767px)" fetchpriority="high">
+        @endif
+        @php
+            // With one or two coming events the list draws them as large cards (role/partials/
+            // calendar, .gk-few), and the first card's flyer is the page's LCP: asked for here, by
+            // the srcset and sizes the card uses, so it does not wait for the list's script and
+            // its fetch. $upcoming is looked up for the schedule page only.
+            $fewLead = null;
+            if ($upcoming && ! $headerPictured && ! request()->embed && ! request()->graphic && $upcoming->count() >= 1 && $upcoming->count() <= 2) {
+                $fewLead = $upcoming->first()['event'] ?? null;
+                if ($fewLead && ! $fewLead->getImageUrl()) {
+                    $fewLead = null;
+                }
+            }
+        @endphp
+        @if ($fewLead)
+        <link rel="preload" as="image" href="{{ $fewLead->getImageUrl() }}" @if ($fewLead->imageSrcset()) imagesrcset="{{ $fewLead->imageSrcset() }}" imagesizes="(min-width: 48rem) 28rem, 100vw" @endif fetchpriority="high">
         @endif
 
         {{-- The schedule half is Role::isIndexableHost(), the same rule both sitemaps apply, so
@@ -144,7 +200,7 @@
         @endif
 
         @php
-            $localeMap = ['en' => 'en_US', 'es' => 'es_ES', 'de' => 'de_DE', 'fr' => 'fr_FR', 'it' => 'it_IT', 'pt' => 'pt_BR', 'he' => 'he_IL', 'nl' => 'nl_NL', 'ar' => 'ar_SA', 'et' => 'et_EE', 'ru' => 'ru_RU', 'ro' => 'ro_RO'];
+            $localeMap = ['en' => 'en_US', 'es' => 'es_ES', 'de' => 'de_DE', 'fr' => 'fr_FR', 'it' => 'it_IT', 'pt' => 'pt_BR', 'pt-PT' => 'pt_PT', 'he' => 'he_IL', 'nl' => 'nl_NL', 'ar' => 'ar_SA', 'et' => 'et_EE', 'ru' => 'ru_RU', 'ro' => 'ro_RO'];
             $ogLocale = $localeMap[$role->language_code] ?? 'en_US';
         @endphp
         <meta property="og:locale" content="{{ $ogLocale }}">
@@ -272,6 +328,13 @@
 
     <x-slot name="head">
 
+        {{-- An event inside an embedded calendar: every link leaves the frame, because our own
+             pages, the maps, a video and an organizer's own site all refuse to be framed, and the
+             frame has no session to buy with. Back and the other dates of a series say _self. --}}
+        @if ($embedEvent)
+        <base target="_blank">
+        @endif
+
         {{-- Use the schedule's logo as the favicon on its guest pages (Pro/Enterprise) --}}
         @if ($role->isPro() && $role->profile_image_url)
             <link rel="icon" href="{{ $role->profile_image_url }}">
@@ -286,6 +349,15 @@
         {{-- array_filter: the Role accessor reads an invalid font as null, as it does a missing one.
              Served from this install (font_stylesheet_url()), never from Google Fonts, which would
              hand every visitor's IP address to Google without asking. --}}
+        {{-- The guest pages' own type (the 2026-11 redesign): Rubik, served from this install. --}}
+        @if ($stageGround && ($rubikStylesheet = font_stylesheet_url('Rubik')))
+        {{-- Its Latin file (one variable font for every weight, and the digits of every script)
+             asked for with the stylesheet rather than after it, so the swap comes sooner. --}}
+        @if (is_file(public_path('vendor/fonts/Rubik/iJWKBXyIfDnIV7nBrXyw023e.woff2')))
+        <link rel="preload" as="font" type="font/woff2" href="{{ asset('vendor/fonts/Rubik/iJWKBXyIfDnIV7nBrXyw023e.woff2') }}" crossorigin>
+        @endif
+        <link href="{{ $rubikStylesheet }}" rel="stylesheet">
+        @endif
         @foreach(array_filter($fonts) as $font)
             @if ($fontStylesheet = font_stylesheet_url($font))
             <link href="{{ $fontStylesheet }}" rel="stylesheet">
@@ -296,6 +368,7 @@
              owner's custom CSS, which must be able to overrule both. --}}
         @include('partials.guest-theme')
         @include('partials.guest-kit-styles')
+        @include('partials.guest-stage-styles')
         @if ($bgAurora)
         @include('partials.aurora-styles')
         @endif
@@ -327,11 +400,13 @@
             @media (prefers-color-scheme: light) {
                 color: #33383C !important;
             }
-            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, sans-serif !important;
+            font-family: {!! $stageGround ? "'Rubik', " : '' !!}-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, sans-serif !important;
             min-height: 100vh;
             display: flex;
             flex-direction: column;
-            @if ($bg->background == 'solid')
+            @if ($stageGround && ! $bgLegacy)
+                background: var(--gk-stage) !important;
+            @elseif ($bg->background == 'solid')
                 background-color: {{ $bg->background_color }} !important;
             @elseif ($bgLegacy)
                 @include('partials.guest-background-legacy')
@@ -340,6 +415,41 @@
 
         @if ($bgLayer)
         @include('partials.guest-background-css')
+        @endif
+        @if ($stageGround && $bgLegacy)
+        .gk-stage { background: transparent; }
+        .gk-stage::before { display: none; }
+        @endif
+        @if ($bgGlow && ! $bgGlowColor)
+        {{-- A photo or a gradient as the glow: the layer held to the top and faded into the dark,
+             and dimmed a little, so a bright photo still reads under the name. --}}
+        .gk-stage { background: transparent; }
+        .gk-stage::before { display: none; }
+        .gp-bg { position: absolute; inset: 0 0 auto 0; height: 52rem; -webkit-mask-image: linear-gradient(to bottom, rgb(0 0 0 / .9) 0%, rgb(0 0 0 / .6) 40%, rgb(0 0 0 / .2) 75%, transparent 100%); mask-image: linear-gradient(to bottom, rgb(0 0 0 / .9) 0%, rgb(0 0 0 / .6) 40%, rgb(0 0 0 / .2) 75%, transparent 100%); }
+        .gp-bg::after { content: ""; position: absolute; inset: 0; background: linear-gradient(to bottom, rgb(255 255 255 / .66), rgb(255 255 255 / .86) 16rem); }
+        {{-- Dark: a deep scrim of the page's own ground, so a light photo never turns into a grey
+             wash under white words. --}}
+        {{-- The rgb() first for a browser without color-mix(), which would otherwise drop the rule
+             and keep the light wash over a dark page. --}}
+        :where(.dark) .gp-bg::after { background: linear-gradient(to bottom, rgb(13 26 34 / .55), rgb(13 26 34 / .86) 18rem); background: linear-gradient(to bottom, color-mix(in srgb, var(--gk-stage) 55%, transparent), color-mix(in srgb, var(--gk-stage) 86%, transparent) 18rem); }
+        @media (max-width: 767.98px) { .gp-bg { display: block; } }
+        {{-- The page under the glow is the ink, never the background's own base colour (a
+             gradient sets one on body), which flooded the page below the glow. --}}
+        body { background: var(--gk-stage) !important; }
+        @elseif ($bgGlowColor)
+        {{-- A solid colour as a light of that colour across the top. --}}
+        .gk-stage::before, [dir="rtl"] .gk-stage::before { background: radial-gradient(100rem 46rem at 50% -8rem, {{ $bgGlowColor }}40, transparent 74%); }
+        :where(.dark) .gk-stage::before, :where(.dark) [dir="rtl"] .gk-stage::before { background: radial-gradient(100rem 46rem at 50% -8rem, {{ $bgGlowColor }}a6, transparent 74%); }
+        @endif
+        @if ($auroraGlow)
+        {{-- Aurora as the glow: its layer held to the top of the page and faded out, the sheet
+             clear over it, the static glow not drawn. --}}
+        .gk-stage { background: transparent; }
+        {{-- Under the glow the page is its own ground, not Aurora's warm one (the cards are the
+             page's colour and looked foreign on it). --}}
+        body { background: var(--gk-stage) !important; }
+        .gk-stage::before { display: none; }
+        .gp-bg { position: absolute; inset: 0 0 auto 0; height: 52rem; -webkit-mask-image: linear-gradient(to bottom, #000 0%, rgb(0 0 0 / .65) 40%, rgb(0 0 0 / .25) 75%, transparent 100%); mask-image: linear-gradient(to bottom, #000 0%, rgb(0 0 0 / .65) 40%, rgb(0 0 0 / .25) 75%, transparent 100%); }
         @endif
 
         @if ($role->custom_css && $role->isPro())
@@ -531,6 +641,10 @@
     @endif
 
     <div id="main-content" tabindex="-1" class="flex-grow relative">
+        @if ($exampleBar)
+            @include('partials.example-schedule-bar')
+        @endif
+
         {{-- The owner's announcement bar, full-bleed against the top edge so it reads as a
              page-level notice. Sitting above the language switcher also means the switcher's
              own pt-4 supplies the gap beneath the bar. Opt-in per view: see
@@ -546,26 +660,28 @@
             $switcherAuthoredName = isset($switcherLanguages[$role->language_code]) ? __('messages.' . $switcherLanguages[$role->language_code]) : strtoupper($role->language_code);
         @endphp
         @if (! request()->embed && $role->offersTranslation() && ! $hasInlineLangToggle)
-            <div id="gp-language-switcher" class="container mx-auto flex justify-end {{ $isRtl ? 'pl-5' : 'pr-5' }} pt-4">
+            {{-- On the stage the switch keeps to the page's own column (.gk-langbar), so it lines up
+                 with the header panel's edge rather than standing out at the window's. --}}
+            <div id="gp-language-switcher" class="{{ $stageGround ? 'gk-langbar' : 'container mx-auto flex justify-end '.($isRtl ? 'pl-5' : 'pr-5').' pt-4' }}" @if ($stageGround) style="--gk-col: {{ $upcoming !== null ? '60rem' : '70rem' }}" @endif>
                 <div class="gp-lang-switcher flex items-center rounded-full p-1 text-sm shadow-md z-50 {{ $isRtl ? 'flex-row-reverse' : '' }}" translate="no">
                     @if(session()->has('translate') || request()->lang == $switcherTarget)
-                        <span class="gp-lang-active px-3 py-1.5 rounded-full font-medium" title="{{ $switcherTargetName }}" aria-label="{{ $switcherTargetName }}">{{ strtoupper($switcherTarget) }}</span>
+                        <span class="gp-lang-active px-3 py-1.5 rounded-full font-medium" title="{{ $switcherTargetName }}" aria-label="{{ $switcherTargetName }}">{{ language_badge($switcherTarget, $role->language_code) }}</span>
                         {{-- fullUrlWithQuery, not url(), so switching language keeps the rest of
                              the query string (?layout=, ?category=, ?month= ...) intact. --}}
                         <a href="{{ str_replace('http://', 'https://', request()->fullUrlWithQuery(['lang' => $role->language_code])) }}"
                            data-lang-switch="{{ $role->language_code }}"
                            class="gp-lang-inactive px-3 py-1.5 rounded-full font-medium transition-all duration-200"
                            title="{{ $switcherAuthoredName }}" aria-label="{{ $switcherAuthoredName }}">
-                            {{ strtoupper($role->language_code) }}
+                            {{ language_badge($role->language_code, $switcherTarget) }}
                         </a>
                     @else
                         <a href="{{ str_replace('http://', 'https://', request()->fullUrlWithQuery(['lang' => $switcherTarget])) }}"
                            data-lang-switch="{{ $switcherTarget }}"
                            class="gp-lang-inactive px-3 py-1.5 rounded-full font-medium transition-all duration-200"
                            title="{{ $switcherTargetName }}" aria-label="{{ $switcherTargetName }}">
-                            {{ strtoupper($switcherTarget) }}
+                            {{ language_badge($switcherTarget, $role->language_code) }}
                         </a>
-                        <span class="gp-lang-active px-3 py-1.5 rounded-full font-medium" title="{{ $switcherAuthoredName }}" aria-label="{{ $switcherAuthoredName }}">{{ strtoupper($role->language_code) }}</span>
+                        <span class="gp-lang-active px-3 py-1.5 rounded-full font-medium" title="{{ $switcherAuthoredName }}" aria-label="{{ $switcherAuthoredName }}">{{ language_badge($role->language_code, $switcherTarget) }}</span>
                     @endif
                 </div>
             </div>
@@ -637,20 +753,39 @@
          eventschedule.com), and it used to sit against the bottom edge of the window there: the
          chip's own padding was the only room under it. --}}
     @if (! request()->embed && ! request()->graphic)
-    <nav aria-label="{{ __('messages.privacy_policy') }}" data-privacy-pill class="flex justify-center px-4 pt-6 {{ $creditReason ? '' : 'pb-8' }}">
-        <p class="inline-flex flex-wrap items-center justify-center gap-x-2 gap-y-1 rounded-full bg-white/80 px-3 py-1.5 text-xs font-medium text-gray-600 shadow-sm ring-1 ring-black/5 backdrop-blur dark:bg-gray-900/80 dark:text-gray-300 dark:ring-white/10">
-            <a href="{{ policy_url('privacy') }}" class="hover:text-gray-900 hover:underline dark:hover:text-white">{{ __('messages.privacy_policy') }}</a>
+    {{-- The foot of the page, ONE pill (the 2026-11 redesign): the privacy policy that covers
+         this page, the way back into the cookie banner (GDPR Art. 7(3): withdrawing consent must
+         be as easy as giving it), and, where it is owed, the credit. The privacy link carries a
+         small mark of its own, in colour like the credit's, so the two halves balance, and the
+         links share one hover (partials/guest-stage-styles, .es-foot-link). It is the last thing on the page, so it
+         keeps room under it (and es-credit-chip's lift clear of the phone's bar). --}}
+    <nav aria-label="{{ __('messages.page_footer') }}" data-privacy-pill class="es-credit-chip flex justify-center px-4 pt-8 pb-8 {{ $creditReason && $role->show_accessibility_widget ? 'es-a11y-credit-clear' : '' }}">
+        <p class="es-foot">
+            <a href="{{ policy_url('privacy') }}" class="es-foot-link">
+                <i class="es-foot-dot" aria-hidden="true"></i>
+                <span class="es-foot-word">{{ __('messages.privacy_policy') }}</span>
+            </a>
             @if (cookie_banner_visible())
-                <span aria-hidden="true">&middot;</span>
-                <button type="button" data-cookie-consent-reopen class="hover:text-gray-900 hover:underline dark:hover:text-white">{{ __('messages.cookie_consent_manage') }}</button>
+                <button type="button" data-cookie-consent-reopen class="es-foot-link"><span class="es-foot-word">{{ __('messages.cookie_consent_manage') }}</span></button>
+            @endif
+            @if ($creditReason)
+                <span aria-hidden="true" class="es-foot-sep"></span>
+                {{-- Per the AAL license, please do not remove the link to Event Schedule --}}
+                <a href="{{ $creditUrl }}" target="_blank" rel="noopener" title="{{ \App\Models\Role::creditChipTitle() }}" class="es-foot-credit">
+                    <span aria-hidden="true" class="es-foot-es">ES</span>
+                    <span>Event Schedule</span>
+                    <svg class="es-foot-arrow" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.25" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M5 12h14M13 6l6 6-6 6"/></svg>
+                </a>
             @endif
         </p>
     </nav>
     @endif
 
-    {{-- es-credit-chip: lifted clear of the mobile CTA bar by accessibility-widget.css. --}}
-    @if (! request()->embed && $creditReason)
-    <div class="es-credit-chip flex justify-{{ $isRtl ? 'start' : 'end' }} p-4 {{ $role->show_accessibility_widget ? 'es-a11y-credit-clear' : '' }}">
+    {{-- es-credit-chip on its own: an event shown inside an embedded calendar carries the credit as
+         the event's own page does (the copied code's credit line is under the calendar, not under
+         an overlay), and has no privacy pill of its own. --}}
+    @if (request()->embed && $embedEvent && $creditReason)
+    <div class="es-credit-chip flex justify-{{ $isRtl ? 'start' : 'end' }} p-4">
         {{-- Per the AAL license, please do not remove the link to Event Schedule --}}
         <a href="{{ $creditUrl }}" target="_blank" rel="noopener" title="{{ \App\Models\Role::creditChipTitle() }}"
            class="inline-flex items-center gap-1.5 rounded-full bg-white/80 px-3 py-1.5 text-xs font-medium text-gray-600 shadow-sm ring-1 ring-black/5 backdrop-blur transition-colors hover:bg-white hover:text-gray-900 dark:bg-gray-900/80 dark:text-gray-300 dark:ring-white/10 dark:hover:bg-gray-900 dark:hover:text-white">
@@ -662,6 +797,12 @@
 
     @if ($role->show_accessibility_widget)
         @include('partials.accessibility-widget')
+    @endif
+
+    {{-- An embedded calendar, and an event shown inside one, talk to embed.js on the organizer's
+         page when it is there (partials/embed-frame says how). --}}
+    @if (request()->embed && ! request('graphic') && request()->get('form') !== 'subscribe')
+        @include('partials.embed-frame')
     @endif
 
 </x-app-layout>

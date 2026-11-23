@@ -1,3 +1,13 @@
+{{-- Wallet passes and web push are described only where they can be used: on hosted, only what the
+     operator has set up; a selfhost operator reads about each, as each can be set up there. --}}
+@php
+    $guideGoogleWallet = \App\Services\Wallet\GoogleWalletService::isConfigured() || ! config('app.hosted');
+    $guideAppleWallet = \App\Services\Wallet\AppleWalletService::isConfigured() || ! config('app.hosted');
+    $guideWallets = $guideGoogleWallet || $guideAppleWallet;
+    $guideBothWallets = $guideGoogleWallet && $guideAppleWallet;
+    $guidePush = \App\Services\OneSignalService::isConfigured() || ! config('app.hosted');
+    $guideWalletNames = $guideBothWallets ? 'Google Wallet or Apple Wallet' : ($guideGoogleWallet ? 'Google Wallet' : 'Apple Wallet');
+@endphp
 <x-docs-page
     key="tickets"
     title="Sell Tickets: Payments, Refunds, Check-In - Event Schedule"
@@ -38,7 +48,9 @@
         </x-doc-nav-group>
         <x-doc-nav-group label="Check-in at the Door" href="#check-in">
             <x-doc-nav-link href="#checkin-dashboard">Check-in Dashboard</x-doc-nav-link>
+            @if ($guideWallets)
             <x-doc-nav-link href="#wallet-passes">Wallet Passes</x-doc-nav-link>
+            @endif
         </x-doc-nav-group>
         <x-doc-nav-link href="#waitlist">Waitlist</x-doc-nav-link>
         <x-doc-nav-link href="#interest-list">Interest List</x-doc-nav-link>
@@ -56,7 +68,7 @@
             </svg>
             General
         </h2>
-        <p class="text-gray-600 dark:text-gray-300 mb-6">Sell tickets directly from your event pages with secure payment processing, automatic confirmation emails, and a QR code on every ticket. What each plan includes is in <a href="#plan-table" class="doc-link">the plan table</a> below.</p>
+        <p class="text-gray-600 dark:text-gray-300 mb-6">Sell tickets directly from your event pages with secure payment processing, automatic confirmation emails with a calendar invite, and a QR code on every ticket. What each plan includes is in <a href="#plan-table" class="doc-link">the plan table</a> below.</p>
 
         <p class="text-gray-600 dark:text-gray-300 mb-4">Ticketing is set up and run in three places:</p>
         <ul class="doc-list mb-6">
@@ -238,7 +250,7 @@
             <li>Save the event</li>
         </ol>
 
-        <p class="text-gray-600 dark:text-gray-300 mb-4">Visitors then see a <strong class="text-gray-900 dark:text-white">Register</strong> button on your event page. After registering they receive a confirmation email with a QR code for check-in, and the registration appears in your <a href="#managing-sales" class="doc-link">Sales</a> list, where its total reads <em>Registered</em>. Whatever you write in <strong class="text-gray-900 dark:text-white">Registration notes</strong> (directions, parking, a dress code) goes into that email and onto their ticket.</p>
+        <p class="text-gray-600 dark:text-gray-300 mb-4">Visitors then see a <strong class="text-gray-900 dark:text-white">Register</strong> button on your event page. After registering they receive a confirmation email with a QR code for check-in and a calendar invite, and the registration appears in your <a href="#managing-sales" class="doc-link">Sales</a> list, where its total reads <em>Registered</em>. Whatever you write in <strong class="text-gray-900 dark:text-white">Registration notes</strong> (directions, parking, a dress code) goes into that email and onto their ticket.</p>
 
         <p class="text-gray-600 dark:text-gray-300 mb-4">Registrants can cancel themselves from the ticket page linked in their email, which frees the spot again.</p>
 
@@ -383,7 +395,7 @@
             </table>
         </div>
 
-        <p class="text-gray-600 dark:text-gray-300 mb-6">A ticket type sells by the number, not by the seat: the buyer takes three, not seats 12, 13 and 14. To sell the seats themselves, see <a href="#allocated-seating" class="doc-link">Allocated Seating</a>. There is no pay-what-you-wish pricing either: every ticket type has one fixed price, and a blank price means free.</p>
+        <p class="text-gray-600 dark:text-gray-300 mb-6">A ticket type sells by the number, not by the seat: the buyer takes three, not seats 12, 13 and 14. To sell the seats themselves, see <a href="#allocated-seating" class="doc-link">Allocated Seating</a>. Every ticket type has one fixed price, and a blank price means free. For pay what you want, give a free ticket type and switch on <a href="#donations" class="doc-link">donations</a> (Pro).</p>
 
         <h4 id="ticket-settings" class="text-base font-semibold text-gray-900 dark:text-white mb-4">Ticket settings</h4>
         <p class="text-gray-600 dark:text-gray-300 mb-4">A ticket type carries more than its Price, Quantity and Type: a line of links under those fields adds one more setting each. In the form's order:</p>
@@ -468,7 +480,7 @@
             <li>Save the event</li>
         </ol>
 
-        <p class="text-gray-600 dark:text-gray-300 mb-4">Visitors take a free ticket through the same checkout, with nothing to pay, and the button on the event page reads <strong class="text-gray-900 dark:text-white">Get Tickets</strong>. They receive a confirmation email with a QR code, and you have a list of who is coming. Add <strong class="text-gray-900 dark:text-white">Ticket notes</strong> (in the <a href="#checkout" class="doc-link">Checkout</a> row) to include directions or other instructions in that email. A holder of a free ticket can cancel it themselves from their ticket page, which releases the spot; paid orders are cancelled by you from the <a href="#managing-sales" class="doc-link">Sales</a> page.</p>
+        <p class="text-gray-600 dark:text-gray-300 mb-4">Visitors take a free ticket through the same checkout, with nothing to pay, and the button on the event page reads <strong class="text-gray-900 dark:text-white">Get Tickets</strong>. They receive a confirmation email with a QR code and a calendar invite, and you have a list of who is coming. Add <strong class="text-gray-900 dark:text-white">Ticket notes</strong> (in the <a href="#checkout" class="doc-link">Checkout</a> row) to include directions or other instructions in that email. A holder of a free ticket can cancel it themselves from their ticket page, which releases the spot; paid orders are cancelled by you from the <a href="#managing-sales" class="doc-link">Sales</a> page.</p>
 
         <p class="text-gray-600 dark:text-gray-300 mb-4">A ticket type priced at zero sells on <a href="#plan-table" class="doc-link">every plan</a>, Free included. On a Free schedule whose event mixes a free tier with paid ones, the free tier stays on sale and only the paid rows sit out until you subscribe.</p>
 
@@ -515,7 +527,11 @@
         <h3 class="doc-subheading">Buying Several Events at Once</h3>
         <p class="text-gray-600 dark:text-gray-300 mb-6">A visitor browsing your schedule can collect tickets to more than one event and pay for the lot in a single checkout. On any event with tickets they choose their quantities and select <strong class="text-gray-900 dark:text-white">Add to cart</strong> instead of Checkout, then carry on browsing. A cart button appears in the corner with a running count; opening it lists everything gathered so far with a running total, and one Checkout pays for all of it. A gift card can be applied to the whole order.</p>
 
-        <p class="text-gray-600 dark:text-gray-300 mb-6">Afterwards the buyer lands on a page listing every event they bought, each linking to its own ticket. There is no combined ticket: every event is scanned with its own code, because each door only knows about its own event. The confirmation emails arrive one per event for the same reason, and where <a href="#wallet-passes" class="doc-link">wallet passes</a> are enabled each live event on that page gets its own Add to Google Wallet button.</p>
+        <p class="text-gray-600 dark:text-gray-300 mb-6">Afterwards the buyer lands on a page listing every event they bought, each linking to its own ticket. There is no combined ticket: every event is scanned with its own code, because each door only knows about its own event. The confirmation emails arrive one per event for the same reason.
+            @if ($guideWallets)
+            Where <a href="#wallet-passes" class="doc-link">wallet passes</a> are enabled, each live event on that page gets its own {{ $guideBothWallets ? 'Add to Google Wallet and Add to Apple Wallet buttons' : 'Add to '.$guideWalletNames.' button' }}.
+            @endif
+        </p>
 
         <h4 id="cart-rules" class="text-base font-semibold text-gray-900 dark:text-white mb-4">What can share a cart</h4>
         <ul class="doc-list mb-6">
@@ -843,6 +859,11 @@
                 </thead>
                 <tbody>
                     <tr>
+                        <td><a href="#donations" class="doc-link">Ask for a donation at checkout</a></td>
+                        <td>Buyers can add an amount of their choosing to their order: up to three suggested amounts, and their own when you allow it. See below. Not on the Registration form.</td>
+                        <td>Pro</td>
+                    </tr>
+                    <tr>
                         <td>Ask for phone number</td>
                         <td>Adds a phone field to the form. Two tick boxes appear once it is on: <strong class="text-gray-900 dark:text-white">Required</strong> and <strong class="text-gray-900 dark:text-white">Country code</strong>. The number is stored on the sale, shown in the Sales list and included in the <a href="#export" class="doc-link">CSV export</a>.</td>
                         <td>Free</td>
@@ -872,6 +893,16 @@
         </div>
 
         <p class="text-gray-600 dark:text-gray-300 mb-6">The Terms URL belongs to ticket sales and is not on the Registration form. <strong class="text-gray-900 dark:text-white">Individual tickets</strong> is free on the Registration form. When the event sells tickets, the form locks it below Pro, with a <strong class="text-gray-900 dark:text-white">See what Pro adds</strong> link under it. An event that switches from Free registration to selling tickets on a free schedule loses it on the next save.</p>
+
+        <h3 id="donations" class="doc-subheading">Donations and Pay What You Want <x-doc-badge plan="pro" /></h3>
+        <p class="text-gray-600 dark:text-gray-300 mb-4">Switch on <strong class="text-gray-900 dark:text-white">Ask for a donation at checkout</strong> in the Checkout row and buyers see <em>Add a donation</em> under their tickets, with your suggested amounts (three boxes; leave all three empty for the amounts shown in them, which suit the event's currency) and <strong class="text-gray-900 dark:text-white">Other</strong> for an amount of their own unless you turn that off. Nothing is chosen until the buyer chooses, and pressing a chosen amount again clears it. The line above the amounts is yours to write, for example <em>Support the choir</em>.</p>
+        <ul class="doc-list mb-4">
+            <li><strong class="text-gray-900 dark:text-white">Pay what you want</strong>: give the event a free ticket type and switch donations on. The ticket reads <em>Free · donations welcome</em>, and each buyer pays what they choose, or nothing</li>
+            <li><strong class="text-gray-900 dark:text-white">On top of a price</strong>: with a priced ticket the donation is added to the order. Promo codes never discount it, and a gift card can pay it</li>
+            <li><strong class="text-gray-900 dark:text-white">Paid online</strong>: donations are taken through Stripe, PayPal, Payfast or Razorpay, the gateways that charge the whole order; with cash, a payment link or Invoice Ninja the Checkout row says to choose one of them. With a free ticket, a donation is at least the gateway's smallest charge (beside a priced ticket, any amount will do, as long as the whole order reaches that charge). It is at most 10,000 in dollars or euros (the same in each currency's own terms), or ten times your largest suggested amount when that is more</li>
+            <li><strong class="text-gray-900 dark:text-white">One event at a time</strong>: a donation is added on the event's own checkout, so <em>Add to cart</em> steps aside while one is chosen</li>
+            <li><strong class="text-gray-900 dark:text-white">Where it shows</strong>: as its own line in the buyer's total and confirmation email, which thanks them for it, and in the <strong class="text-gray-900 dark:text-white">Donation</strong> column of the sales export. It is part of the sale's amount, so a refund includes it</li>
+        </ul>
 
         <h3 id="checkout-fields" class="doc-subheading">Custom Checkout Fields <x-doc-badge plan="pro" /></h3>
         <p class="text-gray-600 dark:text-gray-300 mb-6">Collect additional information from attendees during checkout: dietary requirements, a T-shirt size, a company name, an emergency contact, how they heard about the event. Fields added here, under <strong class="text-gray-900 dark:text-white">Custom Fields (Per Order)</strong>, are asked once for the whole order, and an event takes up to 10 of them.</p>
@@ -1262,11 +1293,15 @@
         </ul>
 
         <h4 class="text-base font-semibold text-gray-900 dark:text-white mb-2">How to Enable</h4>
-        <p class="text-gray-600 dark:text-gray-300 mb-4">Open <strong class="text-gray-900 dark:text-white">Admin Panel &rarr; Schedule &rarr; Edit Schedule</strong>, choose the <strong class="text-gray-900 dark:text-white">Settings</strong> tab, open its <strong class="text-gray-900 dark:text-white">Notifications</strong> row and turn on <strong class="text-gray-900 dark:text-white">New ticket sale</strong>. Each owner and admin of the schedule opts in separately. If <a href="{{ route('marketing.docs.account_settings') }}" class="doc-link">push notifications</a> are enabled, the same alert is mirrored to the browser.</p>
+        <p class="text-gray-600 dark:text-gray-300 mb-4">Open <strong class="text-gray-900 dark:text-white">Admin Panel &rarr; Schedule &rarr; Edit Schedule</strong>, choose the <strong class="text-gray-900 dark:text-white">Settings</strong> tab, open its <strong class="text-gray-900 dark:text-white">Notifications</strong> row and turn on <strong class="text-gray-900 dark:text-white">New ticket sale</strong>. Each owner and admin of the schedule opts in separately.
+            @if ($guidePush)
+            If <a href="{{ route('marketing.docs.account_settings') }}" class="doc-link">push notifications</a> are enabled, the same alert is mirrored to the browser.
+            @endif
+        </p>
 
         <p class="text-gray-600 dark:text-gray-300 mb-4">Ongoing sale notifications are a Pro feature, but the <strong class="text-gray-900 dark:text-white">first paid sale on each event</strong> notifies you on every plan, including Free, as long as the toggle is on.</p>
 
-        <p class="text-gray-600 dark:text-gray-300 mb-6">On eventschedule.com, sale notification emails go out only once the schedule has its own <a href="{{ route('marketing.docs.creating_schedules') }}#integrations-email" class="doc-link">email settings</a>, and they are sent from that address. Until then the <strong class="text-gray-900 dark:text-white">New ticket sale</strong> toggle stays greyed out, unless the schedule is on Pro and push notifications are set up: the push goes out without email settings, so the toggle stays usable for it. A selfhosted install only needs a working mailer. Every notification email includes an unsubscribe link.</p>
+        <p class="text-gray-600 dark:text-gray-300 mb-6">On eventschedule.com, sale notification emails go out only once the schedule has its own <a href="{{ route('marketing.docs.creating_schedules') }}#integrations-email" class="doc-link">email settings</a>, and they are sent from that address. Until then the <strong class="text-gray-900 dark:text-white">New ticket sale</strong> toggle stays greyed out{{ $guidePush ? ', unless the schedule is on Pro and push notifications are set up: the push goes out without email settings, so the toggle stays usable for it' : '' }}. A selfhosted install only needs a working mailer. Every notification email includes an unsubscribe link.</p>
     </section>
 
     <!-- Export -->
@@ -1445,7 +1480,7 @@
                     </tr>
                     <tr>
                         <td>Find someone at the door</td>
-                        <td>On an <a href="{{ route('marketing.docs.allocated_seating') }}" class="doc-link">allocated seating</a> event, type a seat (C14), a name or an email to see who holds a seat and whether they have arrived. It only looks; admitting somebody is still done by scanning.</td>
+                        <td>Type a name or an email to see whether that person's order is paid for the date you picked and how many of its tickets are in. On an <a href="{{ route('marketing.docs.allocated_seating') }}" class="doc-link">allocated seating</a> event you can also type a seat (C14) to see who holds it. It only looks; admitting somebody is still done by scanning.</td>
                     </tr>
                     <tr>
                         <td>Ticket types</td>
@@ -1462,16 +1497,27 @@
         <p class="text-gray-600 dark:text-gray-300 mb-6">Counts are keyed to the venue's own calendar date, so an evening event west of UTC reports correctly rather than rolling over at the wrong midnight. Only redemptions count as checked in: a pass holder who booked a seat in advance appears in the reserved count until they actually arrive. The figures refresh every 10 seconds while the tab is in the foreground, so a phone in a pocket is not drained.</p>
     </section>
 
+    @if ($guideWallets)
     <!-- Wallet Passes -->
     <section id="wallet-passes" class="doc-section">
         <h3 class="doc-subheading">Wallet Passes</h3>
-        <p class="text-gray-600 dark:text-gray-300 mb-6">Ticket buyers can save their ticket into Google Wallet from the ticket page, from the order page of a multi-event purchase, or from the confirmation email. The pass carries the same QR code the ticket page shows, so it scans at the door exactly like any other ticket, and it works offline once saved.</p>
+        <p class="text-gray-600 dark:text-gray-300 mb-6">Ticket buyers can save their ticket into {{ $guideWalletNames }} from the ticket page ({{ $guideBothWallets ? 'the buttons sit under the QR code, Apple\'s first on an iPhone, iPad or Mac' : 'the button sits under the QR code' }}), from the order page of a multi-event purchase, or from the confirmation and reminder emails.
+            @if ($guideBothWallets)
+            Each wallet is switched on by whoever runs the install, so a button appears only for the wallets that are set up.
+            @endif
+            The pass carries the same QR code the ticket page shows, so it scans at the door exactly like any other ticket, and it works offline once saved.</p>
 
         <ul class="doc-list mb-6">
             <li><strong class="text-gray-900 dark:text-white">Event details on the pass</strong> - name, venue, date and time, attendee name, ticket type and seat</li>
+            @if ($guideBothWallets)
+            <li><strong class="text-gray-900 dark:text-white">Arrival reminder</strong> - when the venue has map coordinates, Google can notify the attendee as they arrive nearby; Apple Wallet raises the pass on the lock screen around the event's start</li>
+            @elseif ($guideGoogleWallet)
             <li><strong class="text-gray-900 dark:text-white">Arrival reminder</strong> - when the venue has map coordinates, Google can notify the attendee as they arrive nearby</li>
+            @else
+            <li><strong class="text-gray-900 dark:text-white">Arrival reminder</strong> - Apple Wallet raises the pass on the lock screen around the event's start</li>
+            @endif
             <li><strong class="text-gray-900 dark:text-white">One pass per event</strong> - a multi-event order gets a separate pass for each event, since each is scanned with its own code. A single order for several people is one pass showing the number it admits, unless the event issues individual tickets</li>
-            <li><strong class="text-gray-900 dark:text-white">Passes and registrations too</strong> - a <a href="{{ route('marketing.docs.subscriptions') }}" class="doc-link">pass or subscription</a> of any type saves as one undated pass rather than one per date, and shows how many people it admits at each event when that is more than one. If the pass has an expiry, Google Wallet archives it once that date passes. Free registrations get a wallet pass on the same terms as a paid ticket</li>
+            <li><strong class="text-gray-900 dark:text-white">Passes and registrations too</strong> - a <a href="{{ route('marketing.docs.subscriptions') }}" class="doc-link">pass or subscription</a> of any type saves as one undated pass rather than one per date, and shows how many people it admits at each event when that is more than one. If the pass has an expiry, {{ $guideBothWallets ? 'Google Wallet archives it and Apple Wallet greys it out' : ($guideGoogleWallet ? 'Google Wallet archives it' : 'Apple Wallet greys it out') }} once that date passes. Free registrations get a wallet pass on the same terms as a paid ticket</li>
             <li><strong class="text-gray-900 dark:text-white">Not for every order</strong> - there is no wallet button for an appointment booking, on an event you have cancelled, or while an <a href="#installments" class="doc-link">installment plan</a> is behind on its payments</li>
         </ul>
 
@@ -1481,9 +1527,14 @@
 
         <div class="doc-callout doc-callout-info">
             <div class="doc-callout-title">Turned on by the operator</div>
-            <p>Wallet passes need a Google Wallet issuer account, so the button appears only once the person running the installation has connected one. On a selfhosted install that is a one-time <a href="{{ route('marketing.docs.selfhost.google_wallet') }}" class="doc-link">setup step</a>; with nothing configured, no button is shown and nothing is sent to Google. It is free on every plan. There is no per-schedule setting: if you are unsure whether it is on, open a paid ticket and look for the badge.</p>
+            @if ($guideBothWallets)
+            <p>Each wallet is switched on by the person running the installation: Google Wallet needs a Google Wallet issuer account, Apple Wallet an Apple Developer Program membership. On a selfhosted install each is a one-time setup step (<a href="{{ route('marketing.docs.selfhost.google_wallet') }}" class="doc-link">Google Wallet</a>, <a href="{{ route('marketing.docs.selfhost.apple_wallet') }}" class="doc-link">Apple Wallet</a>); with nothing configured, no button is shown and nothing is sent anywhere. It is free on every plan. There is no per-schedule setting: if you are unsure whether it is on, open a paid ticket and look under the QR code.</p>
+            @else
+            <p>{{ $guideWalletNames }} passes are switched on by the person running the installation. They are free on every plan, and there is no per-schedule setting.</p>
+            @endif
         </div>
     </section>
+    @endif
 
     <!-- Waitlist -->
     <section id="waitlist" class="doc-section">
@@ -1505,11 +1556,11 @@
             <li>When all tickets sell out for an event date, a <strong class="text-gray-900 dark:text-white">Join Waitlist</strong> button appears on the event page</li>
             <li>Guests enter their name and email</li>
             <li>When a spot opens up (a sale is cancelled, fully refunded or expires unpaid, a pass holder cancels a booked date, or your box office releases a seat), the next person in line is notified by email. A partial refund frees no spot</li>
-            <li>They receive a link that is valid for 24 hours</li>
+            <li>The email links to the event page and gives them a 24-hour head start before the next person is told. The seat is not held for them: the date is back on sale, first come, first served</li>
             <li>If they don't purchase in time, the next person in line is notified</li>
         </ol>
 
-        <p class="text-gray-600 dark:text-gray-300 mb-6">Only one person is notified at a time, to prevent overselling. The next is notified only after the current person's 24-hour window expires or they complete their purchase.</p>
+        <p class="text-gray-600 dark:text-gray-300 mb-6">Only one person is notified at a time, so a returned seat is not announced to everyone at once. The next is notified only after the current person's 24-hour window expires, and only if the date still has room.</p>
 
         <h3 class="doc-subheading">Managing the Waitlist</h3>
         <p class="text-gray-600 dark:text-gray-300 mb-4">Open <strong class="text-gray-900 dark:text-white">Admin Panel &rarr; Sales</strong> and choose the <strong class="text-gray-900 dark:text-white">Waitlist</strong> tab. The tab is there while at least one person is waiting or has been notified, and carries their count.</p>
@@ -1536,7 +1587,7 @@
             <li>On the schedule's edit page, turn on <strong class="text-gray-900 dark:text-white">Show &ldquo;Notify Me&rdquo; Card</strong> under <a href="{{ route('marketing.docs.creating_schedules') }}#engagement-mailing-list" class="doc-link">Engagement &rarr; Mailing list</a>. It is off until you do. The switch that counts is the one on the schedule that created the event, and it applies wherever that event is listed</li>
             <li>On a public event page, a visitor opens the <strong class="text-gray-900 dark:text-white">Add to Calendar</strong> menu and chooses <strong class="text-gray-900 dark:text-white">Tell me when tickets go on sale</strong>, or <strong class="text-gray-900 dark:text-white">Tell me if anything changes</strong> once tickets are on sale. An event that is already selling tickets or taking registrations also shows a <strong class="text-gray-900 dark:text-white">Not buying today? Tell me if anything changes</strong> link beside the buy button</li>
             <li>They type an email address and press <strong class="text-gray-900 dark:text-white">Notify me</strong>. No name, no account and no confirmation email to click</li>
-            <li>Three emails go out automatically: one when that date's tickets go on sale, a reminder about 48 hours before it starts, and a cancellation notice if you cancel the event. Someone who asks once tickets are already on sale skips the first one</li>
+            <li>Three emails go out automatically: one when that date's tickets go on sale, a reminder about 48 hours before it starts, and a cancellation notice if you cancel the event. Someone who asks once tickets are already on sale skips the first one, and someone who also had a ticket by then gets the <a href="{{ route('marketing.docs.creating_schedules') }}#ticket-reminders" class="doc-link">ticket reminder</a> instead of this one, while the schedule's reminders are on</li>
             <li>A change reaches them only if you send it. When you save a new date or time on a one-off event, or a new venue or online link on any event, the editor asks <strong class="text-gray-900 dark:text-white">Notify attendees of this change?</strong>, and the list is emailed only if you choose <strong class="text-gray-900 dark:text-white">Notify attendees</strong></li>
             <li>Every message carries a one-click unsubscribe, and unsubscribing deletes the address rather than keeping it on a suppression list</li>
         </ol>
@@ -1668,7 +1719,12 @@
             </svg>
             Embed Widget
         </h2>
-        <p class="text-gray-600 dark:text-gray-300 mb-6">Embed a ticket purchase or RSVP form directly on your own website using an iframe. Visitors can buy tickets or register without leaving your site. <a href="{{ marketing_url('/features/embed-tickets') }}" class="doc-link">Embed Tickets</a> shows what the checkout looks like on a site.</p>
+        <p class="text-gray-600 dark:text-gray-300 mb-6">Put one event's tickets or its registration on your own website using an iframe. The widget shows the event, its ticket types and their prices, and one button, <strong class="text-gray-900 dark:text-white">Buy Tickets</strong> or <strong class="text-gray-900 dark:text-white">Register</strong>, that opens the event's page in a new tab with the form already open, where the buyer finishes on a secure page. <a href="{{ marketing_url('/features/embed-tickets') }}" class="doc-link">Embed Tickets</a> shows what the checkout looks like.</p>
+
+        <div class="doc-callout doc-callout-info mb-6">
+            <div class="doc-callout-title">Why the form is not inside the frame</div>
+            <p>A frame on another website gets no session from the browser, so a form sent from inside it cannot be accepted, and payment pages refuse to load inside another site's frame anyway. Opening the event's page in a new tab keeps your page open behind it. To show a whole calendar whose events open over your page, see <a href="{{ route('marketing.docs.sharing') }}#embed-events" class="doc-link">When someone opens an event</a>.</p>
+        </div>
 
         <div class="doc-callout doc-callout-plan mb-6">
             <div class="doc-callout-title">RSVP embed is free; the ticket embed is Pro</div>
@@ -1680,7 +1736,7 @@
             <li>Open your event for editing and go to the <strong class="text-gray-900 dark:text-white">Tickets</strong> tab</li>
             <li>Press <strong class="text-gray-900 dark:text-white">Sell tickets</strong> or <strong class="text-gray-900 dark:text-white">Free registration</strong> and save the event</li>
             <li>Click the <strong class="text-gray-900 dark:text-white">Embed Tickets</strong> (or <strong class="text-gray-900 dark:text-white">Embed Registration</strong>) link at the end of the tab's title row</li>
-            <li>Copy the iframe code and paste it into your website's HTML</li>
+            <li>Copy the code and paste it into your website's HTML. It is the iframe and one small script that fits the frame to the widget; a builder that strips the script leaves the frame at the 420 pixels written in it, which you can raise</li>
         </ol>
 
         <p class="text-gray-600 dark:text-gray-300 mb-6">The link that opens the snippet only appears on a saved event of a Pro schedule. On the Free plan you can still embed the RSVP form by building the URL yourself from the parameters below.</p>
@@ -1698,11 +1754,11 @@
                 <tbody>
                     <tr>
                         <td><code class="doc-inline-code">tickets=true</code></td>
-                        <td>Show the ticket purchase form <x-doc-badge plan="pro" /></td>
+                        <td>Show the ticket types and their prices, with a button to buy them <x-doc-badge plan="pro" /></td>
                     </tr>
                     <tr>
                         <td><code class="doc-inline-code">rsvp=true</code></td>
-                        <td>Show the RSVP registration form <x-doc-badge plan="free" /></td>
+                        <td>Show the event with a button to register <x-doc-badge plan="free" /></td>
                     </tr>
                     <tr>
                         <td><code class="doc-inline-code">embed=true</code></td>
@@ -1714,7 +1770,7 @@
                     </tr>
                     <tr>
                         <td><code class="doc-inline-code">promo=CODE</code></td>
-                        <td>Pre-fill a promo code</td>
+                        <td>Pre-fill a promo code in the form the button opens</td>
                     </tr>
                     <tr>
                         <td><code class="doc-inline-code">lang=xx</code></td>
@@ -1726,7 +1782,7 @@
 
         <h3 class="doc-subheading">What to Expect</h3>
         <ul class="doc-list">
-            <li><strong class="text-gray-900 dark:text-white">Payment leaves the frame.</strong> Every payment method except cash sends the buyer out of the iframe to pay: Stripe, PayPal, Payfast, Razorpay, Invoice Ninja and a payment link all open in the full browser window, since payment pages generally refuse to load inside another site's frame. Stripe, PayPal, Payfast and Razorpay bring the buyer back to their ticket page afterwards. Cash and free ticket checkouts complete inside the embed.</li>
+            <li><strong class="text-gray-900 dark:text-white">Buying happens in a new tab.</strong> The button opens the event's page with the ticket or registration form open, and everything from there, quantities, seats, add-ons, promo codes and payment by any method, happens on that page as it would for a visitor who went there directly. Stripe, PayPal, Payfast and Razorpay bring the buyer back to their ticket page afterwards.</li>
             <li><strong class="text-gray-900 dark:text-white">Hidden events do not embed.</strong> The Tickets tab does not offer the embed link on an <strong class="text-gray-900 dark:text-white">Unlisted</strong> event, and Draft and Internal events are open to schedule members only. A password-protected event only embeds for someone who has already entered the password.</li>
             <li><strong class="text-gray-900 dark:text-white">One event per widget.</strong> The <a href="#cart" class="doc-link">multi-event cart</a> is not offered inside an embed.</li>
         </ul>

@@ -2,10 +2,12 @@
 
 namespace App\Utils;
 
+use App\Models\Event;
 use App\Models\Role;
 use App\Models\Setting;
 use App\Services\DemoService;
 use App\Services\GeoIpService;
+use App\Services\RealtimeRollup;
 use Carbon\CarbonImmutable;
 use Carbon\CarbonInterface;
 use Illuminate\Database\DetectsConcurrencyErrors;
@@ -33,6 +35,9 @@ class RealtimeTracker
     public const RETENTION_MINUTES = 60;
 
     public const SURFACES = ['wp', 'gp', 'ap', 'auth', 'embed'];
+
+    /** The request attribute that holds the real visitor while a page renders as nobody. */
+    public const VIEWER_ATTRIBUTE = 'realtime_viewer';
 
     /** Heartbeats slow down once this many page views are "now", to protect the one web container. */
     public const BUSY_THRESHOLD = 300;
@@ -203,7 +208,11 @@ class RealtimeTracker
             return null;
         }
 
-        $user = $request->user();
+        // A page drawn as a signed-out visitor sees it (the framed event view) still knows who is
+        // really there (RendersGuestNotFound::renderSignedOut()): false for nobody.
+        $user = $request->attributes->has(self::VIEWER_ATTRIBUTE)
+            ? ($request->attributes->get(self::VIEWER_ATTRIBUTE) ?: null)
+            : $request->user();
         $isDemo = $user && DemoService::isDemoUser($user);
 
         $path = self::path($request);
@@ -218,7 +227,7 @@ class RealtimeTracker
             // Blade component model props arrive as EMPTY models rather than null when a view leaves
             // them out, so "exists" is the test, not instanceof alone.
             'r' => $role instanceof Role && $role->exists ? (string) UrlUtils::encodeId($role->id) : '',
-            'e' => $event instanceof \App\Models\Event && $event->exists ? (string) UrlUtils::encodeId($event->id) : '',
+            'e' => $event instanceof Event && $event->exists ? (string) UrlUtils::encodeId($event->id) : '',
             'u' => $user && ! $isDemo ? (string) UrlUtils::encodeId($user->id) : '',
             'a' => $user && $user->isAdmin() ? 1 : 0,
             'd' => $isDemo ? 1 : 0,
@@ -696,7 +705,7 @@ class RealtimeTracker
     public static function prune(?int $minutes = null, ?int $maxBatches = null): int
     {
         try {
-            \App\Services\RealtimeRollup::run();
+            RealtimeRollup::run();
         } catch (Throwable $e) {
             self::reportOnce($e);
         }

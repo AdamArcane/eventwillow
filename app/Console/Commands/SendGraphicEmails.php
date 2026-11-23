@@ -4,6 +4,7 @@ namespace App\Console\Commands;
 
 use App\Models\Role;
 use App\Services\GraphicEmailService;
+use App\Services\GraphicLink;
 use Carbon\Carbon;
 use Illuminate\Console\Command;
 
@@ -21,7 +22,7 @@ class SendGraphicEmails extends Command
      *
      * @var string
      */
-    protected $description = 'Send scheduled graphic emails to roles with enabled email settings';
+    protected $description = 'Send scheduled graphic emails, and redraw the graphics published at a public link';
 
     /**
      * Execute the console command.
@@ -35,6 +36,15 @@ class SendGraphicEmails extends Command
         foreach ($roles as $role) {
             try {
                 $settings = $role->graphic_settings ?? [];
+
+                // The public link's picture, redrawn every hour whether or not an email is set up.
+                if (GraphicLink::on($role)) {
+                    try {
+                        GraphicLink::refresh($role);
+                    } catch (\Throwable $e) {
+                        report($e);
+                    }
+                }
 
                 // Silent skip for roles where the user hasn't enabled scheduled emails -
                 // avoids log spam on instances with many roles.
@@ -56,10 +66,16 @@ class SendGraphicEmails extends Command
                     continue;
                 }
 
-                $service = new GraphicEmailService;
+                $service = app(GraphicEmailService::class);
                 $result = $service->sendGraphicEmail($role, $recipientEmails);
 
                 if ($result) {
+                    // Stamped on the settings as they are NOW, not as this run loaded them: a
+                    // run draws and sends for many schedules, and writing the copy from its start
+                    // would put back whatever the owner changed meanwhile (a public link switched
+                    // off would be switched on again, under its old key).
+                    $role->refresh();
+                    $settings = $role->graphic_settings ?? [];
                     $settings['last_sent_at'] = now()->toIso8601String();
                     $role->graphic_settings = $settings;
                     $role->save();

@@ -3,8 +3,10 @@
 namespace App\Services;
 
 use App\Models\AnalyticsDaily;
+use App\Models\BlogPost;
 use App\Models\Event;
 use App\Models\MarketingDailyStat;
+use App\Models\MarketingPageDaily;
 use App\Models\Role;
 use App\Models\SubscriptionCancellation;
 use App\Models\User;
@@ -15,7 +17,9 @@ use App\Utils\SetupGuide;
 use App\Utils\UrlUtils;
 use Carbon\Carbon;
 use Illuminate\Database\Eloquent\Collection as EloquentCollection;
+use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Schema;
 use Laravel\Cashier\Cashier;
 
 /**
@@ -33,7 +37,7 @@ class GrowthExportService
      * pulls knows whether they compare. Every bump is described in docs/GROWTH_DATA.md's changelog,
      * which GrowthDataDictionaryTest holds to this number.
      */
-    public const SCHEMA_VERSION = 25;
+    public const SCHEMA_VERSION = 29;
 
     /** How far ahead the schedule rows look for events on sale (upcoming_*). */
     public const UPCOMING_DAYS = 60;
@@ -534,7 +538,7 @@ class GrowthExportService
      */
     private ?array $billingIds = null;
 
-    private ?\Illuminate\Support\Collection $subscriptionsByRole = null;
+    private ?Collection $subscriptionsByRole = null;
 
     /** Per-build memo of customDomainHosts(): attribution and the ticket links both read it. */
     private ?array $customDomainHosts = null;
@@ -715,6 +719,13 @@ class GrowthExportService
                 .'feeds and calendar syncs. Every *_in and last_event_created is a bucket of days, never a date. meta.app_commit and a commit on '
                 .'each meta.releases entry date a deploy to its commit where the host sets APP_COMMIT; '
                 .'hero_test.daily splits the headline test by day.',
+            'Since schema_version 29, hero_test can hold a page round: two homepages under one headline '
+                .'(rows[].page full or new), split evenly (split even) and ended by a person, never by '
+                .'the code. Its rows carry saved_schedule and saved_event over the same accounts as '
+                .'signups. Decide on signups per visitor at the dates in looks, not on any day between: '
+                .'a visitor is a browser-day, and a visitor without analytics consent is given a page '
+                .'afresh on each view, so some people count in both arms. marketing_pages is not split '
+                .'by arm, so its figures for the homepage move while a page round runs.',
             'Since schema_version 24, blocked accounts (AccountBlockService, nearly always spam) are left '
                 .'out of every count of people and of what they made: the funnel, the signup and schedule '
                 .'rows, traffic[].verified_signups, daily and every schedule-based section. A block applies '
@@ -785,6 +796,7 @@ class GrowthExportService
             'event_form' => $this->eventForm($months),
             ...($full ? [
                 'daily' => $this->daily(),
+                'signup_sources' => $signups['sources'],
                 'nudge_outcomes' => $this->nudgeOutcomes(),
                 'onboarding_nudges' => $this->onboardingNudges(),
                 'dismissed_steps' => $this->dismissedSteps(),
@@ -792,6 +804,7 @@ class GrowthExportService
                 'reach' => $this->reach(),
                 'usage' => $this->usage($months),
                 'blog' => $this->blog(),
+                'marketing_pages' => $this->marketingPages(),
                 'geography' => $this->geographyFrom($schedules),
                 'boost' => $this->boost(),
                 'referrals' => $this->referrals(),
@@ -938,7 +951,11 @@ class GrowthExportService
             ->pluck('c', 'user_id');
 
         $rows = [];
+        // Each row's signup day, by position, for signupSources() only. Never a column: a row
+        // carries its attribution beside it, and a day on it would date one person's signup.
+        $signupDays = [];
         foreach ((clone $base)->orderByDesc('id')->limit($this->rowCap())->cursor() as $u) {
+            $signupDays[] = substr((string) $u->getRawOriginal('created_at'), 0, 10);
             $roleAgg = $rolesByUser[$u->id] ?? null;
             $ticketAgg = $ticketsByUser[$u->id] ?? null;
             $firstAt = $roleAgg?->first_at ? Carbon::parse($roleAgg->first_at) : null;
@@ -984,6 +1001,9 @@ class GrowthExportService
                 // The account-wide "Turn off suggestions" switch: no guide and no next steps in
                 // the app. The reminder emails are not part of it (they follow is_subscribed).
                 $u->suggestions_off_at !== null,
+                // Why they came to sign up, from the link they pressed (User::ARRIVAL_INTENTS, our
+                // own fixed vocabulary): a seller page, a plan's button, a schedule's public page.
+                in_array($u->arrival_intent, User::ARRIVAL_INTENTS, true) ? $u->arrival_intent : null,
             ];
         }
 
@@ -991,7 +1011,7 @@ class GrowthExportService
             'referrer_domain', 'referrer_channel', 'landing_path', 'auth', 'reached_schedule_form',
             'saved_schedule', 'saved_event', 'saved_ticket', 'saved_paid_ticket', 'schedules_count',
             'days_to_first_schedule', 'hero_variant', 'referred', 'logins_90d', 'event_edits_90d',
-            'setup_guide', 'setup_guide_hidden', 'suggestions_off'];
+            'setup_guide', 'setup_guide_hidden', 'suggestions_off', 'arrival_intent'];
 
         // In place: by value, every row it rewrote would be copied while the caller's array was
         // still alive, doubling the row table's memory on a 128MB worker.
@@ -1000,9 +1020,45 @@ class GrowthExportService
         return [
             'columns' => $columns,
             'rows' => $rows,
+            'sources' => $this->signupSources($rows, array_flip($columns), $signupDays),
             'total' => $total,
             'truncated' => $total > $this->rowCap(),
         ];
+    }
+
+    /** How far back signup_sources reaches. */
+    private const SIGNUP_SOURCE_DAYS = 90;
+
+    /**
+     * Signups per day and per source, so a spike can be traced to what caused it: the signup rows
+     * carry only a month. Built from the rows AFTER anonymizeAttribution(), so every value here is
+     * one the rows already export; a cell is a count, never a person.
+     *
+     * @param  array<int, array<int, mixed>>  $rows
+     * @param  array<string, int>  $i
+     * @param  array<int, string>  $days
+     */
+    private function signupSources(array $rows, array $i, array $days): array
+    {
+        $from = now()->copy()->subDays(self::SIGNUP_SOURCE_DAYS - 1)->toDateString();
+        $dims = ['signup_intent', 'referrer_channel', 'referrer_domain', 'utm_source', 'landing_path'];
+
+        $cells = [];
+        foreach ($rows as $n => $row) {
+            $day = $days[$n] ?? '';
+            if ($day < $from) {
+                continue;
+            }
+            $values = array_map(fn ($d) => $row[$i[$d]], $dims);
+            $key = $day."\0".implode("\0", array_map(fn ($v) => (string) $v, $values));
+            $cells[$key] ??= [$day, ...$values, 0];
+            $cells[$key][count($dims) + 1]++;
+        }
+
+        $out = array_values($cells);
+        usort($out, fn ($a, $b) => [$a[0], -$a[count($dims) + 1]] <=> [$b[0], -$b[count($dims) + 1]]);
+
+        return ['columns' => ['date', ...$dims, 'signups'], 'rows' => $out];
     }
 
     /**
@@ -1875,7 +1931,7 @@ class GrowthExportService
     }
 
     /** Every subscription, grouped by role_id, newest first - the Cashier relation's own order. */
-    private function subscriptionsByRole(): \Illuminate\Support\Collection
+    private function subscriptionsByRole(): Collection
     {
         return $this->subscriptionsByRole ??= Cashier::$subscriptionModel::query()
             ->orderBy('created_at', 'desc')
@@ -2783,11 +2839,11 @@ class GrowthExportService
         // A transfer cancels the old owner's subscription, but the schedule changed hands rather
         // than left, so it is counted apart.
         $churned = (clone $rows)->whereNull('resumed_at')
-            ->whereNotIn('source', \App\Models\SubscriptionCancellation::NOT_CHURN_SOURCES);
+            ->whereNotIn('source', SubscriptionCancellation::NOT_CHURN_SOURCES);
 
         return [
             'cancelled' => (clone $churned)->count(),
-            'transferred' => (clone $rows)->whereIn('source', \App\Models\SubscriptionCancellation::NOT_CHURN_SOURCES)->count(),
+            'transferred' => (clone $rows)->whereIn('source', SubscriptionCancellation::NOT_CHURN_SOURCES)->count(),
             'resumed' => (clone $rows)->whereNotNull('resumed_at')->count(),
             'with_reason' => (clone $churned)->whereNotNull('reason')->count(),
             'by_reason' => (clone $churned)->selectRaw("COALESCE(reason, 'none') as k, COUNT(*) as c")
@@ -3099,6 +3155,7 @@ class GrowthExportService
                 .'SUM(signup_code_requests) as signup_code_requests, '
                 .'SUM(signup_code_verified) as signup_code_verified, '
                 .'SUM(signup_code_invalid) as signup_code_invalid, '
+                .'SUM(signup_google_starts) as signup_google_starts, '
                 .'SUM(guest_submit_views) as guest_submit_views, '
                 .'SUM(guest_submit_code_requests) as guest_submit_code_requests, '
                 .'SUM(guest_submit_submissions) as guest_submit_submissions, '
@@ -3177,6 +3234,9 @@ class GrowthExportService
                 'signup_code_requests' => $count('signup_code_requests'),
                 'signup_code_verified' => $count('signup_code_verified'),
                 'signup_code_invalid' => $count('signup_code_invalid'),
+                // Pressed "Continue with Google" on the sign-up page: the other way off it. With
+                // signup_code_requests it splits "left the page" from "left part way".
+                'signup_google_starts' => $count('signup_google_starts'),
                 // The public "Submit your event" page, its own funnel beside the sign-up one: one
                 // visitor per day who saw the form, who asked for the emailed code, and who got an
                 // event through. The middle one is not a stage everybody passes: only a NEW
@@ -3587,11 +3647,11 @@ class GrowthExportService
     {
         $columns = ['path', 'section', 'source', 'published', 'words', 'views', 'noindex'];
 
-        if (! config('app.is_nexus') || ! \Illuminate\Support\Facades\Schema::hasColumn('blog_posts', 'category')) {
+        if (! config('app.is_nexus') || ! Schema::hasColumn('blog_posts', 'category')) {
             return ['columns' => $columns, 'rows' => []];
         }
 
-        $rows = \App\Models\BlogPost::published()
+        $rows = BlogPost::published()
             ->orderByDesc('published_at')
             ->get(['slug', 'category', 'source', 'published_at', 'content', 'view_count', 'noindex'])
             ->map(fn ($post) => [
@@ -3606,6 +3666,64 @@ class GrowthExportService
             ->all();
 
         return ['columns' => $columns, 'rows' => $rows];
+    }
+
+    /**
+     * Per-page marketing counters (MarketingPageDaily): visitors, reached the end, sign-up clicks,
+     * by page and device over the last 90 days, and by page family and device per month for the
+     * recent months. Each count is visitors per page per day, so rates within a row are per
+     * visitor and a sum over pages is not the site's visitor count. Nexus only.
+     */
+    private function marketingPages(): array
+    {
+        $columns = ['page', 'group', 'device', 'visitors', 'reached_end', 'signup_clicks'];
+        $monthlyColumns = ['month', 'group', 'device', 'visitors', 'reached_end', 'signup_clicks'];
+        $since = now()->subDays(89)->toDateString();
+        $empty = [
+            'tracked_from' => MarketingPageDaily::TRACKED_FROM,
+            'since' => $since,
+            'columns' => $columns,
+            'rows' => [],
+            'monthly' => ['columns' => $monthlyColumns, 'rows' => []],
+        ];
+
+        if (! config('app.is_nexus') || ! Schema::hasTable('marketing_page_daily')) {
+            return $empty;
+        }
+
+        $sums = 'SUM(visitors) as visitors, SUM(reached_end) as reached_end, SUM(signup_clicks) as signup_clicks';
+        $groups = [];
+        $groupOf = function (string $page) use (&$groups): string {
+            return $groups[$page] ??= MarketingPageDaily::groupOf($page);
+        };
+
+        $rows = MarketingPageDaily::query()
+            ->where('date', '>=', $since)
+            ->groupBy('page', 'device')
+            ->selectRaw('page, device, '.$sums)
+            ->orderByDesc('visitors')->orderBy('page')->orderBy('device')
+            ->get()
+            ->map(fn ($r) => [$r->page, $groupOf($r->page), $r->device, (int) $r->visitors, (int) $r->reached_end, (int) $r->signup_clicks])
+            ->all();
+
+        // Grouped by page in SQL and folded into families here: the family is read from the
+        // route's path, which SQL cannot see.
+        $monthly = [];
+        MarketingPageDaily::query()
+            ->where('date', '>=', $this->recentMonths()[0].'-01')
+            ->groupBy(DB::raw("DATE_FORMAT(date, '%Y-%m')"), 'page', 'device')
+            ->selectRaw("DATE_FORMAT(date, '%Y-%m') as ym, page, device, ".$sums)
+            ->get()
+            ->each(function ($r) use (&$monthly, $groupOf) {
+                $key = $r->ym.'|'.$groupOf($r->page).'|'.$r->device;
+                $monthly[$key] ??= [$r->ym, $groupOf($r->page), $r->device, 0, 0, 0];
+                $monthly[$key][3] += (int) $r->visitors;
+                $monthly[$key][4] += (int) $r->reached_end;
+                $monthly[$key][5] += (int) $r->signup_clicks;
+            });
+        ksort($monthly);
+
+        return [...$empty, 'rows' => $rows, 'monthly' => ['columns' => $monthlyColumns, 'rows' => array_values($monthly)]];
     }
 
     /** Activation and selling by country, from the (k-anonymised) schedule rows. */

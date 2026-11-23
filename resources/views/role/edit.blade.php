@@ -162,6 +162,36 @@
                 flex-basis: 100%;
             }
         }
+        /* The two boxes' names over the glossary, from a tablet up, lined up with the boxes
+           (the remove button's 1.75rem and the row's gap at the end). */
+        .glossary-heads {
+            display: none;
+        }
+        @media (min-width: 640px) {
+            .glossary-heads {
+                display: grid;
+                grid-template-columns: repeat(2, minmax(0, 1fr));
+                gap: 0.5rem;
+                margin-inline-end: calc(1.75rem + 0.75rem);
+                padding-bottom: 0.375rem;
+                font-size: 0.75rem;
+                font-weight: 500;
+                color: rgb(var(--ap-ink-3));
+            }
+        }
+        /* A glossary term on a phone: its two boxes one under the other, the remove button still
+           at the end of the line it removes. */
+        @media (max-width: 639px) {
+            .glossary-item .sched-label-fields {
+                order: 0;
+                flex-basis: auto;
+            }
+            /* The translation belongs to the term above it, not a second term. */
+            .glossary-item .sched-label-fields > :nth-child(2) {
+                margin-inline-start: 1rem;
+                width: calc(100% - 1rem);
+            }
+        }
         /* One Cancel at a time on the sponsor form: the edit's own, when a sponsor is being edited. */
         #cancel-edit-sponsor-btn:not(.hidden) ~ #sponsor-form-close {
             display: none;
@@ -222,7 +252,7 @@
         }
 
         function updateFontOptions() {
-            var langCode = $('#language_code').val();
+            var langCode = esVal(document.getElementById('language_code'));
             var filteredFonts = filterFontsByLanguage(langCode);
             var select = document.getElementById('font_family');
             var currentValue = select.value;
@@ -259,24 +289,27 @@
             $scriptFontFamily = $scriptValue(old('font_family', $role->font_family));
             $scriptLanguageCode = $scriptValue(old('language_code', $role->language_code));
         @endphp
+        {{-- Written the way .val() wrote them: no event is fired (resources/js/style/state.js counts on
+             that), and #background is no element (the backgrounds are radios), so that line has
+             always written nothing. --}}
         document.addEventListener('DOMContentLoaded', () => {
-            $('#background').val(@json($scriptBackground));
-            $('#background_colors').val(@json($scriptBackgroundColors));
+            esSetVal(document.getElementById('background'), @json($scriptBackground));
+            esSetVal(document.getElementById('background_colors'), @json($scriptBackgroundColors));
 
             // If stored background_colors doesn't match any preset option, select "Custom"
-            var $bgColors = $('#background_colors');
+            var bgColors = document.getElementById('background_colors');
             var storedBgColors = @json($scriptBackgroundColors);
-            if (storedBgColors && $bgColors.val() !== storedBgColors) {
-                $bgColors.val('');
+            if (storedBgColors && esVal(bgColors) !== storedBgColors) {
+                esSetVal(bgColors, '');
                 // Pre-populate custom color inputs from stored values
                 var storedColors = storedBgColors.split(', ');
-                if (storedColors.length >= 1) $('#custom_color1').val(storedColors[0]);
-                if (storedColors.length >= 2) $('#custom_color2').val(storedColors[1]);
+                if (storedColors.length >= 1) esSetVal(document.getElementById('custom_color1'), storedColors[0]);
+                if (storedColors.length >= 2) esSetVal(document.getElementById('custom_color2'), storedColors[1]);
             }
 
-            $('#font_family').val(@json($scriptFontFamily));
-            $('#language_code').val(@json($scriptLanguageCode));
-            $('#timezone').val(@json(\App\Utils\TimezoneUtils::canonicalize(old('timezone', $role->timezone)) ?? old('timezone', $role->timezone)));
+            esSetVal(document.getElementById('font_family'), @json($scriptFontFamily));
+            esSetVal(document.getElementById('language_code'), @json($scriptLanguageCode));
+            esSetVal(document.getElementById('timezone'), @json(\App\Utils\TimezoneUtils::canonicalize(old('timezone', $role->timezone)) ?? old('timezone', $role->timezone)));
 
             updateFontOptions();
 
@@ -530,11 +563,11 @@
             var ci = window.getCountryInput('country_code');
             if (ci) {
                 var selected = ci.getSelectedCountryData();
-                $('#country_code').val(selected.iso2);
+                esSetVal(document.getElementById('country_code'), selected.iso2);
             }
         }
 
-        // The Background row shows the pane of the type chosen. Plain DOM, no jQuery.
+        // The Background row shows the pane of the type chosen.
         function onChangeBackground() {
             var checked = document.querySelector('input[name="background"]:checked');
             var background = checked ? checked.value : '';
@@ -653,43 +686,53 @@
             syncLogo();
         });
 
+        {{-- The answer line keeps what Validate found on the element itself (esValidatedAddress),
+             where Accept reads it. A text of undefined is left unwritten, as .text(undefined)
+             was a read. --}}
         function onValidateClick() {
-            $('#address_response').text(@json(__('messages.searching'), JSON_UNESCAPED_UNICODE) + '...').show();
-            $('#accept_button').hide();
+            var answer = document.getElementById('address_response');
+            if (answer) {
+                answer.textContent = @json(__('messages.searching'), JSON_UNESCAPED_UNICODE) + '...';
+            }
+            esShow(answer);
+            esHide(document.getElementById('accept_button'));
             var ci = window.getCountryInput('country_code');
             var country = ci ? ci.getSelectedCountryData() : null;
-            $.post({
-                url: '{{ route('validate_address') }}',
-                data: {
-                    _token: '{{ csrf_token() }}',
-                    address1: $('#address1').val(),
-                    city: $('#city').val(),
-                    state: $('#state').val(),
-                    postal_code: $('#postal_code').val(),
-                    country_code: country ? country.iso2 : '',
-                },
-                success: function(response) {
-                    if (response) {
-                        var address = response['data']['formatted_address'];
-                        $('#address_response').text(address);
-                        $('#accept_button').show();
-                        $('#address_response').data('validated_address', response['data']);
-                    } else {
-                        $('#address_response').text(@json(__('messages.address_not_found'), JSON_UNESCAPED_UNICODE));    
+            esPost('{{ route('validate_address') }}', {
+                _token: '{{ csrf_token() }}',
+                address1: esVal(document.getElementById('address1')),
+                city: esVal(document.getElementById('city')),
+                state: esVal(document.getElementById('state')),
+                postal_code: esVal(document.getElementById('postal_code')),
+                country_code: country ? country.iso2 : '',
+            }, function(response) {
+                var answer = document.getElementById('address_response');
+                if (response) {
+                    var address = response['data']['formatted_address'];
+                    if (answer && address !== undefined) {
+                        answer.textContent = address;
                     }
-                },
-                error: function(xhr, status, error) {
-                    $('#address_response').text(@json(__('messages.an_error_occurred'), JSON_UNESCAPED_UNICODE));
+                    esShow(document.getElementById('accept_button'));
+                    if (answer) {
+                        answer.esValidatedAddress = response['data'];
+                    }
+                } else if (answer) {
+                    answer.textContent = @json(__('messages.address_not_found'), JSON_UNESCAPED_UNICODE);
+                }
+            }, function(xhr, status, error) {
+                var answer = document.getElementById('address_response');
+                if (answer) {
+                    answer.textContent = @json(__('messages.an_error_occurred'), JSON_UNESCAPED_UNICODE);
                 }
             });
         }
 
         function viewMap() {
             var address = [
-                $('#address1').val(),
-                $('#city').val(),
-                $('#state').val(),
-                $('#postal_code').val(),
+                esVal(document.getElementById('address1')),
+                esVal(document.getElementById('city')),
+                esVal(document.getElementById('state')),
+                esVal(document.getElementById('postal_code')),
                 (window.getCountryInput('country_code') ? window.getCountryInput('country_code').getSelectedCountryData().name : '')
             ].filter(Boolean).join(', ');
 
@@ -711,16 +754,17 @@
 
         function acceptAddress(event) {
             event.preventDefault();
-            var validatedAddress = $('#address_response').data('validated_address');
+            var answer = document.getElementById('address_response');
+            var validatedAddress = answer ? answer.esValidatedAddress : undefined;
             if (validatedAddress) {
-                $('#address1').val(validatedAddress['address1']);
-                $('#city').val(validatedAddress['city']);
-                $('#state').val(validatedAddress['state']);
-                $('#postal_code').val(validatedAddress['postal_code']);
-                                
+                esSetVal(document.getElementById('address1'), validatedAddress['address1']);
+                esSetVal(document.getElementById('city'), validatedAddress['city']);
+                esSetVal(document.getElementById('state'), validatedAddress['state']);
+                esSetVal(document.getElementById('postal_code'), validatedAddress['postal_code']);
+
                 // Hide the address response and accept button after accepting
-                $('#address_response').hide();
-                $('#accept_button').hide();
+                esHide(answer);
+                esHide(document.getElementById('accept_button'));
             }
         }
 
@@ -821,6 +865,10 @@
         // The address the schedule hands out: its domain only when that is the main address, and
         // never one that is still pending or failed.
         $scheduleUrl = $role->getGuestUrl(true);
+        // What its short links and sub-schedules hang off. The same address, except for a selfhost
+        // install's home schedule (App\Support\HomeSchedule): its page is at the site's root,
+        // and everything under it stays under its path.
+        $schedulePathBase = $role->exists ? $role->guestPathBase(true) : '';
         // Split by hand: parse_url() mangles a non-ASCII host on macOS.
         $scheduleLinkText = $scheduleUrl ? \App\Utils\UrlUtils::clean($scheduleUrl) : '';
         $scheduleLinkSlash = strpos($scheduleLinkText, '/');
@@ -924,6 +972,7 @@
             'accommodation' => __('messages.accommodation'),
             'ticket_presets' => __('messages.ticket_presets'),
             'gift_cards' => __('messages.tickets_row_gift_cards'),
+            'reminders' => __('messages.ticket_reminders'),
             'mailing_list' => __('messages.engagement_row_mailing_list'),
             'auto_import' => __('messages.auto_import_settings'),
             'banner_is_pro' => $role->isPro(),
@@ -1251,26 +1300,37 @@
 
                             <div id="translation-language-wrapper" class="mt-4 {{ old('translation_enabled', $role->translation_language_code && $role->translation_language_code !== $role->language_code) ? '' : 'hidden' }}">
                                 <x-input-label for="translation_language_code" :value="__('messages.translate_into')" />
+                                {{-- By name, as the reader's language sorts them, and starting on the
+                                     schedule's country's language (App\Utils\TranslationTargets), not
+                                     on the first code in the list. --}}
+                                @php
+                                    $suggestedTarget = \App\Utils\TranslationTargets::suggest($role);
+                                    $chosenTarget = old('translation_language_code', $suggestedTarget);
+                                @endphp
                                 <select name="translation_language_code" id="translation_language_code" {{ is_demo_mode() ? 'disabled' : '' }}
+                                    data-suggested="{{ $suggestedTarget }}"
                                     class="mt-1 block w-full border-gray-300 dark:border-gray-700 dark:bg-gray-900 dark:text-gray-300 focus:border-[var(--brand-blue)] focus:ring-[var(--brand-blue)] rounded-lg shadow-sm">
-                                    @foreach(config('app.supported_languages') as $key => $value)
-                                    <option value="{{ $key }}" {{ $role->translation_language_code == $key ? 'SELECTED' : '' }} {{ $key === $role->language_code ? 'hidden disabled' : '' }}>
-                                        {{ __('messages.' . $value) }}
+                                    <option value="" disabled {{ $chosenTarget ? '' : 'selected' }}>{{ __('messages.choose_a_language') }}</option>
+                                    @foreach(\App\Utils\TranslationTargets::options() as $key => $name)
+                                    <option value="{{ $key }}" {{ $chosenTarget === $key ? 'selected' : '' }} {{ $key === $role->language_code ? 'hidden disabled' : '' }}>
+                                        {{ $name }}
                                     </option>
                                     @endforeach
                                 </select>
                                 <x-input-error class="mt-2" :messages="$errors->get('translation_language_code')" />
 
                                 <p class="mt-2 text-xs">
-                                    <x-link href="https://eventschedule.com/features/ai" target="_blank">{{ __('messages.learn_more') }}</x-link>
+                                    <x-link href="{{ marketing_url('/docs/creating-schedules#details-translation') }}" target="_blank">{{ __('messages.learn_more') }}</x-link>
                                 </p>
 
-                                <div class="mt-3 bg-amber-50 dark:bg-amber-900/20 border border-amber-200 dark:border-amber-700 rounded-lg p-3 flex items-start gap-2">
-                                    <svg class="w-5 h-5 text-amber-600 dark:text-amber-400 flex-shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
-                                        <path stroke-linecap="round" stroke-linejoin="round" d="M12 9v3.75m-9.303 3.376c-.866 1.5.217 3.374 1.948 3.374h14.71c1.73 0 2.813-1.874 1.948-3.374L13.949 3.378c-.866-1.5-3.032-1.5-3.898 0L2.697 16.126zM12 15.75h.007v.008H12v-.008z" />
-                                    </svg>
-                                    <p class="text-sm text-amber-800 dark:text-amber-200">{{ __('messages.translation_language_notice') }}</p>
-                                </div>
+                                {{-- Where the glossary is, for whoever looks for it here. --}}
+                                <p class="mt-2 text-xs text-gray-500 dark:text-gray-400">
+                                    {{ __('messages.glossary_hint') }}
+                                    <x-link href="#details-tab-glossary" data-open-glossary>{{ __('messages.translation_glossary') }}</x-link>
+                                </p>
+
+                                {{-- How translation works, not a warning: the kit's information notice. --}}
+                                <x-page-notice tone="info" class="mt-3">{{ __('messages.translation_language_notice') }}</x-page-notice>
                             </div>
                         </div>
 
@@ -1282,14 +1342,17 @@
                             var target = document.getElementById('translation_language_code');
                             if (!toggle || !wrapper || !target) return;
 
-                            function firstAvailable() {
-                                return Array.from(target.options).find(function (o) { return !o.disabled; });
-                            }
+                            // A choice that is no longer offered (the language it is written in)
+                            // goes back to the suggestion, else to "Choose a language": never to
+                            // the first language in the list.
                             function ensureValidTarget() {
                                 var sel = target.options[target.selectedIndex];
                                 if (!sel || sel.disabled) {
-                                    var f = firstAvailable();
-                                    if (f) target.value = f.value;
+                                    var suggested = target.dataset.suggested
+                                        ? Array.from(target.options).find(function (o) { return o.value === target.dataset.suggested && !o.disabled; })
+                                        : null;
+                                    target.value = suggested ? suggested.value : '';
+                                    target.dispatchEvent(new Event('change', { bubbles: true }));
                                 }
                             }
 
@@ -1353,6 +1416,185 @@
                             </div>
 
                         </div>
+
+                        <!-- Tab Content: Translation glossary -->
+                        {{-- Names automatic translation keeps as written, and words with a fixed
+                             translation (App\Services\TranslationGlossary). Shown only while the
+                             schedule offers a second language; hidden, not removed, so the list is
+                             still posted and switching translation off and on loses nothing. --}}
+                        @php
+                            $glossaryTranslationOn = (bool) old('translation_enabled', $role->translation_language_code && $role->translation_language_code !== $role->language_code);
+                            $glossaryRows = old('glossary_submitted') ? array_values((array) old('glossary', [])) : \App\Services\TranslationGlossary::entries($role);
+                            // The terms this page shows, so a save removes only those: one added
+                            // from another tab meanwhile stays. Carried through a refused save.
+                            $glossarySeen = old('glossary_seen_submitted') ? array_values((array) old('glossary_seen', [])) : array_column(\App\Services\TranslationGlossary::entries($role), 'term');
+                            // An empty list starts with one empty row, so the first term is typed
+                            // straight away. Posted empty, it is dropped (TranslationGlossary::save()).
+                            if (! $glossaryRows) {
+                                $glossaryRows = [['term' => '', 'translation' => null]];
+                            }
+                            // The language the second box is in: the one "Translate into" shows.
+                            $glossaryTargetCode = old('translation_language_code', \App\Utils\TranslationTargets::suggest($role));
+                            $glossaryTarget = \App\Utils\TranslationTargets::options()[$glossaryTargetCode] ?? __('messages.translate_into');
+                        @endphp
+                        <x-form-row group="details" tab="glossary" :title="__('messages.translation_glossary')" class="details-tab" :hidden="! $glossaryTranslationOn"
+                            :summary="collect($glossaryRows)->pluck('term')->filter()->implode(', ') ?: __('messages.none')" :muted="! collect($glossaryRows)->pluck('term')->filter()->count()" />
+                        <div id="details-tab-glossary" class="event-subrow-body details-tab-content" hidden>
+                            <input type="hidden" name="glossary_submitted" value="1">
+                            <input type="hidden" name="glossary_seen_submitted" value="1">
+                            @foreach ($glossarySeen as $glossarySeenTerm)
+                            <input type="hidden" name="glossary_seen[]" value="{{ $glossarySeenTerm }}">
+                            @endforeach
+                            <p class="text-sm text-gray-500 dark:text-gray-400 mb-4">{{ __('messages.glossary_help') }}</p>
+
+                            {{-- Which box is which, from a tablet up; on a phone the boxes stack and
+                                 the placeholders say it. --}}
+                            <div class="glossary-heads" aria-hidden="true">
+                                <span>{{ __('messages.glossary_term') }}</span>
+                                {{-- The language alone: "Translation (Portuguese (Brazil))" doubled its brackets.
+                                     Follows "Translate into" before it is saved (the script below). --}}
+                                <span data-glossary-language>{{ $glossaryTarget }}</span>
+                            </div>
+                            <div id="glossary-items" class="event-list sched-list" data-glossary-next="{{ count($glossaryRows) }}"
+                                data-label="{{ __('messages.glossary_translation_into', ['language' => '__LANGUAGE__']) }}">
+                                @foreach ($glossaryRows as $glossaryIndex => $glossaryRow)
+                                <div class="event-list-row glossary-item" data-list-row>
+                                    <div class="sched-label-fields has-second">
+                                        <x-text-input type="text" name="glossary[{{ $glossaryIndex }}][term]" value="{{ $glossaryRow['term'] ?? '' }}"
+                                            class="block w-full" maxlength="{{ \App\Services\TranslationGlossary::MAX_LENGTH }}"
+                                            aria-label="{{ __('messages.glossary_term') }}" placeholder="{{ __('messages.glossary_term') }}" />
+                                        <x-text-input type="text" name="glossary[{{ $glossaryIndex }}][translation]" value="{{ $glossaryRow['translation'] ?? '' }}"
+                                            class="block w-full" maxlength="{{ \App\Services\TranslationGlossary::MAX_LENGTH }}"
+                                            aria-label="{{ __('messages.glossary_translation_into', ['language' => $glossaryTarget]) }}" placeholder="{{ __('messages.glossary_keep_as_written') }}" />
+                                    </div>
+                                    <button type="button" data-action="remove-glossary-term" class="event-icon-btn is-remove" title="{{ __('messages.remove') }}" aria-label="{{ __('messages.remove') }}">
+                                        <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" class="w-5 h-5" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" d="M6 18L18 6M6 6l12 12" /></svg>
+                                    </button>
+                                </div>
+                                @endforeach
+                            </div>
+                            <template id="glossary-row-template">
+                                <div class="event-list-row glossary-item" data-list-row>
+                                    <div class="sched-label-fields has-second">
+                                        <input type="text" data-glossary-field="term" maxlength="{{ \App\Services\TranslationGlossary::MAX_LENGTH }}"
+                                            aria-label="{{ __('messages.glossary_term') }}" placeholder="{{ __('messages.glossary_term') }}"
+                                            dir="auto" autocomplete="off" class="block w-full border-gray-300 dark:border-gray-700 dark:bg-gray-900 dark:text-gray-300 focus:border-[var(--brand-blue)] focus:ring-[var(--brand-blue)] rounded-lg shadow-sm">
+                                        <input type="text" data-glossary-field="translation" maxlength="{{ \App\Services\TranslationGlossary::MAX_LENGTH }}"
+                                            aria-label="{{ __('messages.glossary_translation_into', ['language' => $glossaryTarget]) }}" placeholder="{{ __('messages.glossary_keep_as_written') }}"
+                                            dir="auto" autocomplete="off" class="block w-full border-gray-300 dark:border-gray-700 dark:bg-gray-900 dark:text-gray-300 focus:border-[var(--brand-blue)] focus:ring-[var(--brand-blue)] rounded-lg shadow-sm">
+                                    </div>
+                                    <button type="button" data-action="remove-glossary-term" class="event-icon-btn is-remove" title="{{ __('messages.remove') }}" aria-label="{{ __('messages.remove') }}">
+                                        <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" class="w-5 h-5" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" d="M6 18L18 6M6 6l12 12" /></svg>
+                                    </button>
+                                </div>
+                            </template>
+                            <button type="button" id="add-glossary-term" class="mt-3 text-sm font-medium text-[var(--brand-blue)] hover:text-[var(--brand-blue-dark)]"
+                                data-max="{{ \App\Services\TranslationGlossary::MAX_ENTRIES }}">
+                                + {{ __('messages.glossary_add_term') }}
+                            </button>
+                            <x-input-error class="mt-2" :messages="$errors->get('glossary')" />
+                            <x-input-error class="mt-2" :messages="$errors->get('glossary.*')" />
+                        </div>
+                        <script {!! nonce_attr() !!}>
+                        document.addEventListener('DOMContentLoaded', function () {
+                            var row = document.querySelector('button[data-row-group="details"][data-tab="glossary"]');
+                            var pane = document.getElementById('details-tab-glossary');
+                            var list = document.getElementById('glossary-items');
+                            var add = document.getElementById('add-glossary-term');
+                            var template = document.getElementById('glossary-row-template');
+                            var toggle = document.getElementById('translation_enabled');
+                            if (! row || ! pane || ! list || ! add || ! template) return;
+
+                            // The second box names the language "Translate into" shows, before Save too.
+                            var picker = document.getElementById('translation_language_code');
+                            function languageChanged() {
+                                var option = picker && picker.options[picker.selectedIndex];
+                                var name = option && option.value ? option.textContent.trim() : '';
+                                if (! name) {
+                                    return;
+                                }
+                                var head = document.querySelector('[data-glossary-language]');
+                                if (head) {
+                                    head.textContent = name;
+                                }
+                                var label = (list.dataset.label || '').replace('__LANGUAGE__', name);
+                                document.querySelectorAll('#glossary-items [name$="[translation]"], #glossary-row-template').forEach(function (node) {
+                                    (node.content ? node.content.querySelectorAll('[data-glossary-field="translation"]') : [node]).forEach(function (input) {
+                                        input.setAttribute('aria-label', label);
+                                    });
+                                });
+                            }
+                            if (picker) {
+                                picker.addEventListener('change', languageChanged);
+                            }
+
+                            // The hint under the translation switch opens this row.
+                            var hint = document.querySelector('[data-open-glossary]');
+                            if (hint) {
+                                hint.addEventListener('click', function (event) {
+                                    event.preventDefault();
+                                    if (window.FormKit && window.FormKit.openFromHash) {
+                                        window.FormKit.openFromHash('#details-tab-glossary');
+                                    }
+                                    row.scrollIntoView({ block: 'start', behavior: 'smooth' });
+                                });
+                            }
+
+                            // Only while the schedule offers a second language. Heard after the
+                            // switch's own listener above, which may put it back on.
+                            if (toggle) {
+                                toggle.addEventListener('change', function () {
+                                    row.hidden = ! toggle.checked;
+                                    if (! toggle.checked) {
+                                        pane.hidden = true;
+                                        row.setAttribute('aria-expanded', 'false');
+                                    }
+                                });
+                            }
+
+                            function rows() {
+                                return Array.prototype.slice.call(list.querySelectorAll('[data-list-row]'));
+                            }
+                            function state() {
+                                return JSON.stringify(rows().map(function (item) {
+                                    return Array.prototype.slice.call(item.querySelectorAll('input')).map(function (input) { return input.value.trim(); });
+                                }).filter(function (pair) { return pair[0] !== ''; }));
+                            }
+                            function syncAdd() {
+                                add.hidden = rows().length >= Number(add.dataset.max || 100);
+                            }
+
+                            // Save says what it will do: what uses a changed term is translated again.
+                            var saved = state();
+                            var says = @json(__('messages.glossary_says_retranslate'), JSON_UNESCAPED_UNICODE);
+                            function tell() {
+                                document.dispatchEvent(new CustomEvent('formkit:says', { detail: { key: 'glossary', text: state() === saved ? '' : says } }));
+                            }
+
+                            var next = Number(list.dataset.glossaryNext || 0);
+                            add.addEventListener('click', function () {
+                                var item = template.content.firstElementChild.cloneNode(true);
+                                item.querySelectorAll('[data-glossary-field]').forEach(function (input) {
+                                    input.name = 'glossary[' + next + '][' + input.dataset.glossaryField + ']';
+                                });
+                                next++;
+                                list.appendChild(item);
+                                item.querySelector('input').focus();
+                                syncAdd();
+                            });
+                            list.addEventListener('click', function (event) {
+                                var remove = event.target.closest('[data-action="remove-glossary-term"]');
+                                if (remove) {
+                                    remove.closest('[data-list-row]').remove();
+                                    syncAdd();
+                                    tell();
+                                }
+                            });
+                            list.addEventListener('input', tell);
+                            syncAdd();
+                        });
+                        </script>
+                        <!-- End Tab Content: Translation glossary -->
 
                         <!-- Tab Content: Contact Info -->
                         <x-form-row group="details" tab="contact" :title="__('messages.contact_info')" class="details-tab" />
@@ -2162,6 +2404,42 @@
                     <x-form-row group="style" tab="background" :title="__('messages.background')" pane="style-content-background" class="style-tab-button" id="style-tab-background" chip />
                     <div id="style-content-background" class="event-subrow-body" hidden>
 
+                            {{-- How the guest pages are drawn: Automatic follows the background's
+                                 brightness (GuestTheme::pageMode()); a palette is the portal's own
+                                 (GuestTheme::PALETTES), its swatch drawn from the same colours. --}}
+                            @php
+                                $pageMode = old('page_mode', $role->guestPageSetting->page_mode ?? 'auto');
+                                $pageModeGroups = [
+                                    null => ['auto'],
+                                    __('messages.page_style_light') => ['sand', 'mist', 'paper'],
+                                    __('messages.page_style_dark') => ['espresso', 'midnight', 'carbon'],
+                                ];
+                            @endphp
+                            <fieldset class="mb-6">
+                                <legend class="block font-medium text-sm text-gray-700 dark:text-gray-300">{{ __('messages.page_style') }}</legend>
+                                @foreach ($pageModeGroups as $groupName => $modes)
+                                <div class="mt-2 flex flex-wrap items-center gap-2">
+                                    @if ($groupName)<span class="text-sm text-gray-500 dark:text-gray-400" style="min-inline-size: 3rem; padding-inline-end: .25rem">{{ $groupName }}</span>@endif
+                                    <div class="event-pills flex-wrap">
+                                    @foreach ($modes as $modeKey)
+                                    <label class="event-pill" for="page_mode_{{ $modeKey }}">
+                                        <input type="radio" id="page_mode_{{ $modeKey }}" name="page_mode" value="{{ $modeKey }}" {{ $pageMode === $modeKey ? 'checked' : '' }} class="sr-only">
+                                        <span class="inline-flex items-center gap-2">
+                                            @if ($modeKey !== 'auto')
+                                            @php [, $swGround, $swCard, , $swInk] = \App\Utils\GuestTheme::PALETTES[$modeKey]; @endphp
+                                            <i aria-hidden="true" class="inline-block h-4 w-4 rounded-full" style="background: linear-gradient(135deg, {{ $swGround }} 50%, {{ $swCard }} 50%); box-shadow: inset 0 0 0 1px {{ $swInk }}33;"></i>
+                                            @endif
+                                            {{ $modeKey === 'auto' ? __('messages.automatic') : __('messages.variant_'.$modeKey) }}
+                                        </span>
+                                    </label>
+                                    @endforeach
+                                    </div>
+                                </div>
+                                @endforeach
+                                <p class="mt-2 text-sm text-gray-500 dark:text-gray-400">{{ __('messages.page_style_help') }}</p>
+                                <x-input-error class="mt-2" :messages="$errors->get('page_mode')" />
+                            </fieldset>
+
                             <div class="mb-6">
                                 <x-input-label :value="__('messages.background_type')" />
                                 {{-- old(): a refused save used to come back on the stored type. --}}
@@ -2419,6 +2697,23 @@
                                     help="{{ __('messages.show_next_event_help') }}" />
                                 <x-input-error class="mt-2" :messages="$errors->get('show_next_event')" />
                             </div>
+
+                            {{-- How large each event's picture is in the list (GuestPageSetting::LIST_IMAGE_SIZES,
+                                 the stage's .gk-img-m / .gk-img-l). Stored in guest_page_settings. --}}
+                            @php $listImageSize = old('list_image_size', $role->guestPageSetting->list_image_size ?? 'small'); @endphp
+                            <fieldset class="mb-6">
+                                <legend class="block font-medium text-sm text-gray-700 dark:text-gray-300">{{ __('messages.list_image_size') }}</legend>
+                                <div class="event-pills flex-wrap mt-2">
+                                    @foreach (\App\Models\GuestPageSetting::LIST_IMAGE_SIZES as $sizeKey)
+                                    <label class="event-pill" for="list_image_size_{{ $sizeKey }}">
+                                        <input type="radio" id="list_image_size_{{ $sizeKey }}" name="list_image_size" value="{{ $sizeKey }}" {{ $listImageSize === $sizeKey ? 'checked' : '' }} class="sr-only">
+                                        <span>{{ __('messages.list_image_'.$sizeKey) }}</span>
+                                    </label>
+                                    @endforeach
+                                </div>
+                                <p class="mt-2 text-sm text-gray-500 dark:text-gray-400">{{ __('messages.list_image_size_help') }}</p>
+                                <x-input-error class="mt-2" :messages="$errors->get('list_image_size')" />
+                            </fieldset>
 
                         {{-- Event animation: how event cards arrive as visitors scroll the schedule
                              (resources/css/list-reveal.css). The radios are plain Blade so the form
@@ -2764,7 +3059,7 @@
                                         \App\Utils\UrlUtils::reservedPathSlugs(),
                                         array_filter($socialLinkSlugs),
                                     );
-                                    $socialHostPrefix = preg_replace('/^https?:\/\//', '', $scheduleUrl);
+                                    $socialHostPrefix = preg_replace('/^https?:\/\//', '', $schedulePathBase);
                                 @endphp
                                 @foreach($role->decodeLinks('social_links') as $link)
                                 @php
@@ -2812,7 +3107,7 @@
                                                 <p class="link-slug-url text-xs truncate {{ $linkSlug !== '' ? 'text-gray-400 dark:text-gray-500' : 'text-gray-300 dark:text-gray-600 italic' }}" dir="ltr">{{ $socialHostPrefix }}/{{ $linkSlug !== '' ? $linkSlug : $linkSuggestion }}</p>
                                                 {{-- Copy only when the slug is live: copying a suggestion
                                                      would hand the owner a URL that does not resolve. --}}
-                                                <button type="button" data-action="copy-vanity-url" class="link-slug-copy flex-shrink-0 text-gray-400 dark:text-gray-500 hover:text-[var(--brand-blue)] transition-colors" data-url="{{ $scheduleUrl }}/{{ $linkSlug }}" title="{{ __('messages.copy') }}" @if ($linkSlug === '') style="display:none" @endif>
+                                                <button type="button" data-action="copy-vanity-url" class="link-slug-copy flex-shrink-0 text-gray-400 dark:text-gray-500 hover:text-[var(--brand-blue)] transition-colors" data-url="{{ $schedulePathBase }}/{{ $linkSlug }}" title="{{ __('messages.copy') }}" @if ($linkSlug === '') style="display:none" @endif>
                                                     <svg class="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke-width="2" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" d="M15.666 3.888A2.25 2.25 0 0013.5 2.25h-3c-1.03 0-1.9.693-2.166 1.638m7.332 0c.055.194.084.4.084.612v0a.75.75 0 01-.75.75H9.75a.75.75 0 01-.75-.75v0c0-.212.03-.418.084-.612m7.332 0c.646.049 1.288.11 1.927.184 1.1.128 1.907 1.077 1.907 2.185V19.5a2.25 2.25 0 01-2.25 2.25H6.75A2.25 2.25 0 014.5 19.5V6.257c0-1.108.806-2.057 1.907-2.185a48.208 48.208 0 011.927-.184" /></svg>
                                                 </button>
                                                 <button type="button" class="btn-edit-link-slug link-slug-toggle flex-shrink-0 text-xs text-[var(--brand-blue)] hover:text-[var(--brand-blue-dark)] transition-colors">{{ $linkSlug !== '' ? __('messages.edit') : __('messages.add') }}</button>
@@ -3471,8 +3766,8 @@
                                                 </div>
                                                 @if ($groupSlug)
                                                 <div class="sched-sub-url" id="group-url-display-{{ $groupKey }}">
-                                                    <a href="{{ $scheduleUrl }}/{{ $groupSlug }}" target="_blank" rel="noopener" class="sched-sub-link" dir="ltr">{{ \App\Utils\UrlUtils::clean($scheduleUrl) }}/{{ $groupSlug }}</a>
-                                                    <button type="button" data-action="copy-group-url" data-copy-url="{{ $scheduleUrl }}/{{ $groupSlug }}" class="event-icon-btn" title="{{ __('messages.copy') }}" aria-label="{{ __('messages.copy') }}">
+                                                    <a href="{{ $schedulePathBase }}/{{ $groupSlug }}" target="_blank" rel="noopener" class="sched-sub-link" dir="ltr">{{ \App\Utils\UrlUtils::clean($schedulePathBase) }}/{{ $groupSlug }}</a>
+                                                    <button type="button" data-action="copy-group-url" data-copy-url="{{ $schedulePathBase }}/{{ $groupSlug }}" class="event-icon-btn" title="{{ __('messages.copy') }}" aria-label="{{ __('messages.copy') }}">
                                                         <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" class="w-5 h-5" aria-hidden="true">
                                                             <path stroke-linecap="round" stroke-linejoin="round" d="M15.666 3.888A2.25 2.25 0 0013.5 2.25h-3c-1.03 0-1.9.693-2.166 1.638m7.332 0c.055.194.084.4.084.612v0a.75.75 0 01-.75.75H9a.75.75 0 01-.75-.75v0c0-.212.03-.418.084-.612m7.332 0c.646.049 1.288.11 1.927.184 1.1.128 1.907 1.077 1.907 2.185V19.5a2.25 2.25 0 01-2.25 2.25H6.75A2.25 2.25 0 014.5 19.5V6.257c0-1.108.806-2.057 1.907-2.185a48.208 48.208 0 011.927-.184" />
                                                         </svg>
@@ -3480,7 +3775,7 @@
                                                     <button type="button" data-action="toggle-group-slug" data-group-id="{{ $groupKey }}" id="edit-button-{{ $groupKey }}" class="event-link" title="{{ __('messages.edit') }}: {{ __('messages.slug') }}">{{ __('messages.edit') }}</button>
                                                 </div>
                                                 <div class="sched-sub-url hidden" id="group-slug-edit-{{ $groupKey }}">
-                                                    <span class="event-slug-prefix" dir="ltr">{{ \App\Utils\UrlUtils::clean($scheduleUrl) }}/</span>
+                                                    <span class="event-slug-prefix" dir="ltr">{{ \App\Utils\UrlUtils::clean($schedulePathBase) }}/</span>
                                                     <x-text-input id="group_slug_{{ $groupKey }}" name="groups[{{ $groupKey }}][slug]" type="text" class="block w-full" :value="$groupSlug" aria-label="{{ __('messages.slug') }}" />
                                                     <button type="button" data-action="toggle-group-slug" data-group-id="{{ $groupKey }}" id="cancel-button-{{ $groupKey }}" class="event-link hidden">{{ __('messages.cancel') }}</button>
                                                 </div>
@@ -4517,6 +4812,53 @@
                         @endif
                         </div>
                         <!-- End Tab Content: Gift cards -->
+
+                        {{-- Ticket reminders (ticket_reminder_settings, app:send-ticket-reminders): every plan, a day
+                             before, and on or off as Role::optionalMailOnByDefault() says while the owner has
+                             chosen nothing. Inside the saved-schedule branch, because the preview draws its next
+                             event. ticket_reminders_shown tells the save what the switch showed, so a save that
+                             leaves it alone keeps following the default. --}}
+                        @php
+                            $reminderSetting = $role->ticketReminderSetting;
+                            $reminderShown = (bool) old('ticket_reminders_shown', $role->ticketRemindersOn());
+                            $reminderOn = (bool) old('ticket_reminders_enabled', $reminderShown);
+                            $reminderDefaultOff = is_null($reminderSetting->enabled) && ! $role->optionalMailOnByDefault();
+                            $reminderHours = (int) old('ticket_reminders_hours', $reminderSetting->hours_before);
+                            $reminderOptions = [
+                                3 => __('messages.ticket_reminders_3_hours'),
+                                24 => __('messages.ticket_reminders_1_day'),
+                                48 => __('messages.ticket_reminders_2_days'),
+                                72 => __('messages.ticket_reminders_3_days'),
+                            ];
+                        @endphp
+                        <x-form-row group="tickets" tab="reminders" :title="__('messages.ticket_reminders')" :summary="$reminderOn ? ($reminderOptions[$reminderHours] ?? __('messages.ticket_reminders')) : __('messages.summary_off')" :muted="! $reminderOn" class="tickets-tab" />
+                        <div id="tickets-tab-reminders" class="event-subrow-body tickets-tab-content" hidden>
+                            <input type="hidden" name="ticket_reminders_shown" value="{{ $reminderShown ? 1 : 0 }}">
+                            <x-toggle name="ticket_reminders_enabled" id="ticket_reminders_enabled"
+                                :checked="$reminderOn"
+                                label="{{ __('messages.ticket_reminders_toggle') }}"
+                                help="{{ __('messages.ticket_reminders_help') }}" />
+                            @if ($reminderDefaultOff)
+                            <p class="mt-2 text-sm text-gray-500 dark:text-gray-400">{{ __('messages.ticket_reminders_default_off') }}</p>
+                            @endif
+                            <x-input-error class="mt-2" :messages="$errors->get('ticket_reminders_enabled')" />
+
+                            <div class="mt-5 max-w-xs">
+                                <x-input-label for="ticket_reminders_hours" :value="__('messages.ticket_reminders_send')" />
+                                <select id="ticket_reminders_hours" name="ticket_reminders_hours" class="mt-1 block w-full border-gray-300 dark:border-gray-700 dark:bg-gray-900 dark:text-gray-300 focus:border-[var(--brand-blue)] focus:ring-[var(--brand-blue)] rounded-lg shadow-sm">
+                                    @foreach ($reminderOptions as $hours => $label)
+                                    <option value="{{ $hours }}" @selected($reminderHours === $hours)>{{ $label }}</option>
+                                    @endforeach
+                                </select>
+                                <x-input-error class="mt-2" :messages="$errors->get('ticket_reminders_hours')" />
+                            </div>
+                            <p class="mt-2 text-xs text-gray-500 dark:text-gray-400">{{ __('messages.ticket_reminders_night') }}</p>
+
+                            <p class="mt-4 text-sm">
+                                <x-link href="{{ route('role.ticket_reminder_preview', ['subdomain' => $role->subdomain]) }}" target="_blank">{{ __('messages.ticket_reminders_preview') }}</x-link>
+                            </p>
+                        </div>
+                        <!-- End Tab Content: Reminders -->
                         </div>
                     </div>
                 </div>
@@ -5810,6 +6152,9 @@
                             @endif
                         </div>
 
+                        {{-- Hosted with no Azure app: no Outlook row at all (outlook_sync_offered()), unless this
+                             schedule somehow still syncs, which keeps the way to stop it. --}}
+                        @if (outlook_sync_offered() || $role->microsoft_sync_direction)
                         <!-- Tab Content: Outlook / Microsoft Calendar -->
                         <x-form-row group="integration" tab="microsoft" :title="__('messages.microsoft_calendar')" class="integration-tab" />
                         <div id="integration-tab-microsoft" class="event-subrow-body integration-tab-content {{ is_demo_mode() ? 'opacity-50 pointer-events-none' : '' }}" hidden>
@@ -5915,6 +6260,7 @@
                             </x-secondary-link>
                             @endif
                         </div>
+                        @endif
 
                         <!-- Tab Content: CalDAV -->
                         <x-form-row group="integration" tab="caldav" :title="__('messages.caldav_calendar')" class="integration-tab" />
@@ -8012,7 +8358,9 @@ document.addEventListener('DOMContentLoaded', function() {
         }
         // "America/Argentina/Buenos_Aires" says Buenos Aires.
         var zone = kit.value('#timezone').split('/').pop().replace(/_/g, ' ');
-        return kit.join([zone, kit.chosen('#language_code')]);
+        // Both languages, as the Language and time row says them ("English + Português (Portugal)").
+        var translated = kit.on('translation_enabled') ? kit.chosen('#translation_language_code') : '';
+        return kit.join([zone, kit.chosen('#language_code') + (translated ? ' + ' + translated : '')]);
     });
     // In the words the settings page uses ("12-hour"), the zone by its city as the tab says it,
     // and the first day of the week only when it is not the usual Sunday.
@@ -8025,6 +8373,10 @@ document.addEventListener('DOMContentLoaded', function() {
             kit.on('use_24_hour_time') ? words.hours_24 : words.hours_12,
             weekStart,
         ]);
+    });
+    // The glossary's terms, by name (a count would need a plural in every language).
+    kit.summary('details:glossary', function() {
+        return list(values('#glossary-items input[name$="[term]"]'));
     });
     // The message's first line as it reads, without its Markdown; off (or not on Pro, where the
     // page does not show it) says so.
@@ -8303,8 +8655,18 @@ document.addEventListener('DOMContentLoaded', function() {
     }
     kit.summary('section-tickets', function() {
         var names = presetPlainNames();
+        // Reminders are left out: on a paying schedule they are on by default, so naming them would
+        // take every tab's quiet "Not set up" away. Their row says what they do.
         var held = kit.join([names.join(', '), kit.on('gift_cards_enabled') ? words.gift_cards : '']);
         return held || { text: words.not_set_up, empty: true };
+    });
+    // On and when ("1 day before"), or Off: the select's own label says the when.
+    kit.summary('tickets:reminders', function() {
+        if (! kit.on('ticket_reminders_enabled')) {
+            return { text: words.off, empty: true };
+        }
+        var select = byId('ticket_reminders_hours');
+        return select && select.selectedIndex >= 0 ? select.options[select.selectedIndex].text : words.reminders;
     });
     // Whether the calendar entries carry text of the schedule's own, then the two feeds, which a
     // saved schedule always has. Its field names read as a list of things switched on.
@@ -8621,6 +8983,7 @@ document.addEventListener('DOMContentLoaded', function() {
         ['section-page', '#sponsors-list'],
         ['section-engagement', '#approved-subdomains-items'],
         ['section-sources', '#source-schedule-items'],
+        ['section-details', '#glossary-items'],
         ['section-tickets', '#gift-card-amounts-items'],
         ['section-tickets', '#ticket-preset-items'],
         ['section-integrations', '#import-url-items'],
@@ -10638,7 +11001,8 @@ document.addEventListener('DOMContentLoaded', function() {
             payment_links: JSON.parse(document.getElementById('payment_links_data').value || '[]')
         };
         var currentLinkType = '';
-        var guestUrl = @json($scheduleUrl);
+        // Short links hang off this, never the address a home schedule shows at the root.
+        var guestUrl = @json($schedulePathBase);
 
         // Helper: update hidden input and trigger unsaved changes warning
         function updateLinkInput(linkType) {

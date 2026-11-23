@@ -27,8 +27,12 @@ class HeroExperimentTest extends TestCase
     {
         $this->assertArrayHasKey(HeroExperiment::DEFAULT, HeroExperiment::VARIANTS);
 
-        foreach (HeroExperiment::VARIANTS as $key => $copy) {
-            $this->assertSame(['line1', 'line2', 'subtitle'], array_keys($copy), $key);
+        // The round waiting to go live is held to the same rules now, not when it is switched on.
+        foreach (HeroExperiment::VARIANTS + HeroExperiment::NEW_PAGE_ROUND as $key => $copy) {
+            // Its words, and for a page round the homepage it shows (the new one; none is today's).
+            $this->assertSame(['line1', 'line2', 'subtitle'], array_slice(array_keys($copy), 0, 3), $key);
+            $this->assertSame([], array_diff(array_keys($copy), ['line1', 'line2', 'subtitle', 'page']), $key);
+            $this->assertContains($copy['page'] ?? HeroExperiment::PAGE_NEW, [HeroExperiment::PAGE_NEW], "{$key} names a page that does not exist");
             $this->assertMatchesRegularExpression('/^[a-z0-9_]{1,32}$/', $key, 'keys are stored in varchar(32) columns');
 
             // .es-mask animates each line as one block, so a wrapped line rises as a slab.

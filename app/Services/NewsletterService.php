@@ -4,15 +4,20 @@ namespace App\Services;
 
 use App\Jobs\SendNewsletterBatch;
 use App\Mail\NewsletterEmail;
+use App\Mail\NewsletterRepeatSkippedMail;
 use App\Models\Event;
+use App\Models\Group;
 use App\Models\Newsletter;
+use App\Models\NewsletterAbTest;
 use App\Models\NewsletterRecipient;
 use App\Models\NewsletterSegment;
 use App\Models\NewsletterUnsubscribe;
 use App\Models\Role;
+use App\Models\RoleSubscriber;
+use App\Models\User;
 use App\Repos\EventRepo;
 use App\Utils\MarkdownUtils;
-use App\Utils\MoneyUtils;
+use App\Utils\UrlUtils;
 use Carbon\Carbon;
 use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\DB;
@@ -64,10 +69,32 @@ class NewsletterService
 
         $newsletter->refresh();
 
+        // Email sending paused on the owner's account or the author's (AudienceMailGuard, rule
+        // C): nothing goes, whatever the audience. Checked live, so a watched word added today
+        // stops a newsletter scheduled last week.
+        if (! $newsletter->isAdmin() && AudienceMailGuard::mailPaused($role, $newsletter->user)) {
+            Log::warning('Newsletter send blocked: email sending is paused on the account', [
+                'newsletter_id' => $newsletter->id,
+                'role_id' => $newsletter->role_id,
+            ]);
+
+            $this->releaseToDraft($newsletter);
+
+            return ['mail_paused', 0];
+        }
+
         $segmentIds = $newsletter->segment_ids ?? [];
         $recipients = $newsletter->isAdmin()
             ? $this->resolveAdminRecipients($segmentIds)
             : $this->resolveRecipients($newsletter->role, $segmentIds);
+
+        // Everyone it was for came from an import or was typed in by hand, and the owner has not
+        // paid yet (AudienceMailGuard, rule A): refused, rather than sent to the team alone.
+        if (! $newsletter->isAdmin() && $this->onlyUnsolicited($newsletter->role, $segmentIds)) {
+            $this->releaseToDraft($newsletter);
+
+            return ['imported_unpaid', 0];
+        }
 
         if ($recipients->isEmpty()) {
             $this->releaseToDraft($newsletter);
@@ -103,6 +130,22 @@ class NewsletterService
                     return ['limit_exceeded', $recipients->count()];
                 }
             }
+        }
+
+        // Held for an operator's review instead of sent (AudienceMailGuard, rule B): a newer
+        // sender's newsletter to more than a handful of people, or one with a watched word in
+        // it. 'review' is a status no runner reads, so it waits there until it is approved.
+        if (! $newsletter->isAdmin() && ($why = AudienceMailGuard::reviewReason($newsletter, $recipients->count(), $newsletter->user))) {
+            AudienceMailGuard::hold($newsletter, $why, $recipients->count(), $this->audienceMix($role, $segmentIds));
+            $this->forgetEventsAsOf($newsletter);
+
+            return ['review', $recipients->count()];
+        }
+
+        // A watched word from an owner who has paid goes, and an operator is shown the account.
+        if (! $newsletter->isAdmin() && ! $newsletter->approved_at && AudienceMailGuard::applies($role)
+            && AudienceMailGuard::watchedWordIn($newsletter) !== null) {
+            AudienceMailGuard::flag($role->user, AudienceMailGuard::REASON_WORD);
         }
 
         DB::beginTransaction();
@@ -234,7 +277,8 @@ class NewsletterService
      * verification needed) is skipped and the owner is told. The newsletter has already moved on,
      * so one bad month never stops the series.
      *
-     * @return string 'sent', 'skipped' or 'lost' (another rail had it, or it no longer repeats)
+     * @return string 'sent', 'held' (the copy waits for review), 'skipped' or 'lost' (another
+     *                rail had it, or it no longer repeats)
      */
     public function runRepeat(Newsletter $parent): string
     {
@@ -287,6 +331,10 @@ class NewsletterService
             return 'sent';
         }
 
+        if ($reason === 'held') {
+            return 'held';
+        }
+
         $this->notifyRepeatSkipped($parent, $reason, $due, $next);
 
         return 'skipped';
@@ -316,7 +364,7 @@ class NewsletterService
      * @return bool|array as send(), plus ['no_events', 0] / ['picked_passed', 0] for a copy with
      *                    nothing to list
      */
-    public function sendCopyNow(Newsletter $parent, \App\Models\User $by): bool|array
+    public function sendCopyNow(Newsletter $parent, User $by): bool|array
     {
         if (! $parent->isRepeating() || ! $parent->role) {
             return false;
@@ -410,6 +458,11 @@ class NewsletterService
                 return null;
             }
 
+            // Held for review: the copy stays, in the review queue, and goes when it is approved.
+            if (is_array($result) && $result[0] === 'review') {
+                return 'held';
+            }
+
             if ($result === false) {
                 $copy->refresh();
                 if ($copy->status === 'draft') {
@@ -448,7 +501,7 @@ class NewsletterService
         return $role->user_id ?: $parent->user_id;
     }
 
-    private function stillRuns(\App\Models\User $user, Role $role): bool
+    private function stillRuns(User $user, Role $role): bool
     {
         return (int) $user->id === (int) $role->user_id
             || ($role->members()->where('users.id', $user->id)->wherePivotIn('level', ['owner', 'admin'])->exists()
@@ -469,7 +522,7 @@ class NewsletterService
 
         foreach ($people as $user) {
             try {
-                $mail = new \App\Mail\NewsletterRepeatSkippedMail($parent, $user, $reason, $due, $next);
+                $mail = new NewsletterRepeatSkippedMail($parent, $user, $reason, $due, $next);
                 $mail->locale(is_valid_language_code($user->language_code) ? $user->language_code : 'en');
                 Mail::to($user->email)->send($mail);
             } catch (\Throwable $e) {
@@ -560,10 +613,92 @@ class NewsletterService
             return $this->resolvedRecipients[$memoKey];
         }
 
-        return $this->resolvedRecipients[$memoKey] = $this->resolveRecipientsUncached($role, $segmentIds);
+        // Addresses nobody gave the schedule themselves are left out until the owner has paid
+        // (AudienceMailGuard, rule A). Here, so every send, count and preview agrees.
+        [$recipients, $unsolicitedEmails, $memberEmails] = $this->resolveRaw($role, $segmentIds);
+        [$recipients, $this->leftOut[$memoKey]] = AudienceMailGuard::withoutUnsolicited($role, $recipients, $unsolicitedEmails);
+        $this->audienceLeft[$memoKey] = $recipients->filter(fn ($recipient) => ! isset($memberEmails[$recipient->email]))->count();
+
+        return $this->resolvedRecipients[$memoKey] = $recipients;
     }
 
-    private function resolveRecipientsUncached(Role $role, array $segmentIds): Collection
+    /** How many of resolveRecipients()' recipients are not the schedule's own team. */
+    private array $audienceLeft = [];
+
+    /**
+     * Whether rule A took everyone a send was for: addresses were left out, and nobody is left
+     * but the schedule's own team, who are always copied in. Such a send is refused with the
+     * reason, rather than going out to the team alone.
+     */
+    public function onlyUnsolicited(Role $role, array $segmentIds): bool
+    {
+        $ids = $segmentIds;
+        sort($ids);
+        $memoKey = $role->id.':'.implode(',', $ids);
+
+        if ($this->unsolicitedLeftOut($role, $segmentIds) === 0) {
+            return false;
+        }
+
+        return ($this->audienceLeft[$memoKey] ?? 0) === 0;
+    }
+
+    /**
+     * Where a newsletter's audience came from, for the operator reviewing it: how many gave the
+     * schedule their address themselves, how many came only from an import or were typed in by
+     * hand, and how many it would go to now (rule A leaves the second kind out until the owner
+     * has paid).
+     *
+     * @return array{opted_in: int, imported: int, sends_to: int}
+     */
+    public function audienceMix(Role $role, array $segmentIds): array
+    {
+        [$all, $unsolicitedEmails] = $this->resolveRaw($role, $segmentIds);
+        $optedIn = $unsolicitedEmails === [] ? [] : NewsletterSegment::optedInAmong($role, array_keys($unsolicitedEmails));
+        $imported = $all->filter(fn ($recipient) => isset($unsolicitedEmails[$recipient->email]) && ! isset($optedIn[$recipient->email]))->count();
+
+        return [
+            'opted_in' => $all->count() - $imported,
+            'imported' => $imported,
+            'sends_to' => $this->resolveRecipients($role, $segmentIds)->count(),
+        ];
+    }
+
+    /** How many addresses resolveRecipients() left out under rule A for these segments. */
+    private array $leftOut = [];
+
+    public function unsolicitedLeftOut(Role $role, array $segmentIds): int
+    {
+        $ids = $segmentIds;
+        sort($ids);
+        $memoKey = $role->id.':'.implode(',', $ids);
+
+        if (! isset($this->leftOut[$memoKey])) {
+            $this->resolveRecipients($role, $segmentIds);
+        }
+
+        return $this->leftOut[$memoKey] ?? 0;
+    }
+
+    /** One resolution per (role, segments) per instance, before rule A: send and review share it. */
+    private array $raw = [];
+
+    private function resolveRaw(Role $role, array $segmentIds): array
+    {
+        $ids = $segmentIds;
+        sort($ids);
+
+        return $this->raw[$role->id.':'.implode(',', $ids)] ??= $this->resolveRecipientsUncached($role, $segmentIds);
+    }
+
+    /** Every account that switched email off, once per instance: the admin queue resolves many. */
+    private ?array $unsubscribedUserEmails = null;
+
+    /**
+     * @return array{0: Collection<int, object>, 1: array<string, true>, 2: array<string, true>} the
+     *                                                                                           recipients, the addresses nobody gave the schedule themselves (rule A), and the team's
+     */
+    private function resolveRecipientsUncached(Role $role, array $segmentIds): array
     {
         if (empty($segmentIds)) {
             // Both audience types, not just account followers. This is the "everyone" default, and
@@ -578,8 +713,12 @@ class NewsletterService
         }
 
         $allRecipients = collect();
+        $unsolicitedEmails = [];
         foreach ($segments as $segment) {
             $allRecipients = $allRecipients->merge($segment->resolveRecipients());
+            foreach ($segment->unsolicitedEmails() as $email) {
+                $unsolicitedEmails[$email] = true;
+            }
         }
 
         // Default audience: no segment was asked for and none is saved, so this send means
@@ -608,7 +747,7 @@ class NewsletterService
                 // objects do not have.
                 ->toBase()
             )->merge(
-                \App\Models\RoleSubscriber::where('role_id', $role->id)
+                RoleSubscriber::where('role_id', $role->id)
                     ->confirmed()
                     ->get(['email', 'name'])
                     ->map(fn ($subscriber) => (object) [
@@ -618,6 +757,14 @@ class NewsletterService
                     ])
                     ->toBase()
             );
+        }
+
+        // A subscriber a restore brought in, or a checkout's tick box with no paid sale behind
+        // it, did not sign up here themselves (rule A).
+        if (empty($segmentIds)) {
+            foreach (NewsletterSegment::unsolicitedSubscriberEmails($role) as $email) {
+                $unsolicitedEmails[$email] = true;
+            }
         }
 
         // Always include schedule members (owner, admin, viewer)
@@ -632,6 +779,7 @@ class NewsletterService
                 'name' => $user->name,
             ]);
         $allRecipients = $allRecipients->merge($members);
+        $memberEmails = $members->pluck('email')->flip()->map(fn () => true)->all();
 
         // Deduplicate by lowercase email
         $allRecipients = $allRecipients->unique('email');
@@ -643,7 +791,7 @@ class NewsletterService
             ->toArray();
 
         // Exclude users with is_subscribed = false
-        $unsubscribedUserEmails = \App\Models\User::where('is_subscribed', false)
+        $unsubscribedUserEmails = $this->unsubscribedUserEmails ??= User::where('is_subscribed', false)
             ->pluck('email')
             ->map(fn ($email) => strtolower($email))
             ->toArray();
@@ -655,14 +803,14 @@ class NewsletterService
                 && ! $this->isTestEmail($recipient->email);
         });
 
-        return $allRecipients->values();
+        return [$allRecipients->values(), $unsolicitedEmails, $memberEmails];
     }
 
     public function resolveAdminRecipients(array $segmentIds): Collection
     {
         if (empty($segmentIds)) {
             // Default to all subscribed, verified users
-            $allRecipients = \App\Models\User::whereNotNull('email_verified_at')
+            $allRecipients = User::whereNotNull('email_verified_at')
                 ->where('is_subscribed', true)
                 ->whereNull('admin_newsletter_unsubscribed_at')
                 ->select('id', 'email', 'name')
@@ -684,7 +832,7 @@ class NewsletterService
 
             // Safety net: filter unsubscribed users regardless of segment implementation
             $unsubscribedEmails = array_flip(
-                \App\Models\User::whereNotNull('admin_newsletter_unsubscribed_at')
+                User::whereNotNull('admin_newsletter_unsubscribed_at')
                     ->orWhere('is_subscribed', false)
                     ->pluck('email')
                     ->map(fn ($e) => strtolower($e))
@@ -725,6 +873,7 @@ class NewsletterService
         $asOf = $this->eventsAsOf($newsletter);
         $month = $this->monthFor($newsletter, $asOf);
         $ranged = [];
+        $grouped = [];
 
         foreach ($blocks as &$block) {
             $type = $block['type'] ?? '';
@@ -753,8 +902,11 @@ class NewsletterService
                 $pairs = collect();
                 if ($role) {
                     $range = self::eventRange($block['data'] ?? []);
+                    $picked = ! ($block['data']['useAllEvents'] ?? true);
+                    $groupKey = $picked ? '' : self::blockGroupKey($block['data'] ?? []);
                     $pairs = match (true) {
-                        ! ($block['data']['useAllEvents'] ?? true) => $this->pickedEvents($role, $block['data']['eventIds'] ?? []),
+                        $picked => $this->pickedEvents($role, $block['data']['eventIds'] ?? []),
+                        $groupKey !== '' => $grouped[$range.'|'.$groupKey] ??= $this->groupEvents($role, $range, $groupKey, $asOf),
                         $range === 'all' => $upcoming ??= $this->upcomingEvents($role),
                         default => $ranged[$range] ??= $this->eventsInRange($role, $range, $asOf),
                     };
@@ -1018,9 +1170,9 @@ class NewsletterService
      *
      * @return Collection<int, array{event: Event, date: ?string}>
      */
-    private function upcomingEvents(Role $role, int $limit = 10): Collection
+    private function upcomingEvents(Role $role, int $limit = 10, ?Group $group = null): Collection
     {
-        $pairs = app(EventRepo::class)->upcomingForGuest($role, null, $limit * 2, self::SERIES_HORIZON_DAYS)
+        $pairs = app(EventRepo::class)->upcomingForGuest($role, $group, $limit * 2, self::SERIES_HORIZON_DAYS)
             ->map(fn (array $pair) => $this->aheadOfNow($pair['event'], $pair['date']))
             ->filter()
             ->sortBy(fn (array $pair) => $pair['date'].' '.$pair['event']->localTimeOfDay())
@@ -1030,6 +1182,37 @@ class NewsletterService
         $this->loadForRows($pairs->pluck('event'));
 
         return $pairs;
+    }
+
+    /**
+     * The sub-schedule an Events block is narrowed to, as stored (an encoded id), or '' for all
+     * of them. Picked events ignore it: the picker already lists what the owner chose.
+     */
+    public static function blockGroupKey(array $data): string
+    {
+        $key = $data['groupId'] ?? '';
+
+        return is_string($key) && preg_match('/^[A-Za-z0-9_-]{1,64}$/', $key) === 1 ? $key : '';
+    }
+
+    /**
+     * What a block narrowed to one sub-schedule lists: the same list as without it, of that
+     * sub-schedule's events only. A sub-schedule that is gone, or another schedule's, lists
+     * nothing: a block meant for the music nights must not go out full of everything else.
+     *
+     * @return Collection<int, array{event: Event, date: ?string}>
+     */
+    private function groupEvents(Role $role, string $range, string $groupKey, Carbon $asOf): Collection
+    {
+        $group = Group::where('role_id', $role->id)->find(UrlUtils::decodeId($groupKey));
+
+        if (! $group) {
+            return collect();
+        }
+
+        return $range === 'all'
+            ? $this->upcomingEvents($role, 10, $group)
+            : $this->eventsInRange($role, $range, $asOf, $group);
     }
 
     /** The date ranges an Events block can list, besides every upcoming event. */
@@ -1085,12 +1268,12 @@ class NewsletterService
      *
      * @return Collection<int, array{event: Event, date: ?string}>
      */
-    private function eventsInRange(Role $role, string $range, Carbon $asOf): Collection
+    private function eventsInRange(Role $role, string $range, Carbon $asOf, ?Group $group = null): Collection
     {
         $zone = Newsletter::zoneOf($role);
         $window = self::rangeWindow($range, $asOf, $zone);
         if (! $window) {
-            return $this->upcomingEvents($role);
+            return $this->upcomingEvents($role, 10, $group);
         }
 
         [$from, $to] = $window;
@@ -1104,7 +1287,7 @@ class NewsletterService
 
         $pairs = app(EventRepo::class)->upcomingForGuest(
             $role,
-            null,
+            $group,
             self::RANGE_EVENT_LIMIT * 4,
             self::SERIES_HORIZON_DAYS,
             null,
@@ -1382,10 +1565,10 @@ class NewsletterService
             'price' => match (true) {
                 $state === 'sold_out' => __('messages.sold_out'),
                 ! $summary => null,
-                // Event::priceWording(): a free type beside paid ones is Free, never "From $0".
+                // Event::priceWording(): Free only where every type is; beside paid ones it is
+                // "Free - $20", and paid prices that differ are the range, as on the event page.
                 $summary['says'] === 'free' => __('messages.free'),
-                $summary['says'] === 'from' => __('messages.price_from', ['price' => MoneyUtils::format($summary['min'], $summary['currency'])]),
-                default => MoneyUtils::format($summary['min'], $summary['currency']),
+                default => Event::priceText($summary['says'], $summary['min'], $summary['max'], $summary['currency'], true),
             },
             'soldOut' => $state === 'sold_out',
             'low' => $state === 'open' && ($summary['low'] ?? false) ? __('messages.few_left') : null,
@@ -1405,7 +1588,7 @@ class NewsletterService
             : $start->translatedFormat('M j').' - '.$end->translatedFormat('M j').$year;
     }
 
-    public function selectAbTestWinner(\App\Models\NewsletterAbTest $abTest): void
+    public function selectAbTestWinner(NewsletterAbTest $abTest): void
     {
         $abTest->load('newsletters.recipients');
 
@@ -1449,7 +1632,7 @@ class NewsletterService
         };
     }
 
-    protected function sendToRemainingRecipients(\App\Models\NewsletterAbTest $abTest, Newsletter $winnerNewsletter): void
+    protected function sendToRemainingRecipients(NewsletterAbTest $abTest, Newsletter $winnerNewsletter): void
     {
         // Check for existing remainder newsletter from a prior attempt
         $remainderNewsletter = Newsletter::where('ab_test_id', $abTest->id)
@@ -1467,6 +1650,16 @@ class NewsletterService
                 ->map(fn ($e) => strtolower($e))
                 ->toArray()
         );
+
+        // Paused since the test went out (AudienceMailGuard, rule C): the rest are not sent.
+        if (! $winnerNewsletter->isAdmin() && AudienceMailGuard::mailPaused($winnerNewsletter->role, $winnerNewsletter->user)) {
+            Log::warning('A/B test remainder not sent: email sending is paused on the account', [
+                'ab_test_id' => $abTest->id,
+                'role_id' => $winnerNewsletter->role_id,
+            ]);
+
+            return;
+        }
 
         // Resolve full recipient list and remove already-sent
         $allRecipients = $winnerNewsletter->isAdmin()

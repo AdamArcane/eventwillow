@@ -445,7 +445,7 @@
                     ['open', 'Opens with the link'],
                     ['shut', 'Excluded'],
                     ['shut', 'Excluded'],
-                    ['key', 'Password required'],
+                    ['key', 'Via the link, with a password'],
                 ],
             ],
         ];
@@ -487,7 +487,23 @@
         $faqs = [
             [
                 'q' => 'How do I make an event private?',
-                'a' => 'Every event has a Visibility setting in its Details section, with four options. Public lists it. Draft keeps it to members until you publish it. Internal keeps it to members permanently. Unlisted keeps it off your schedule while the direct link still opens, with an optional password. Public and Draft are on every plan; Internal and Unlisted are Enterprise.',
+                'a' => 'Every event has a Visibility setting on its Listing tab, with four options. Public lists it. Draft keeps it to members until you publish it. Internal keeps it to members permanently. Unlisted keeps it off your schedule while the direct link still opens, with an optional password. Public and Draft are on every plan; Internal and Unlisted are Enterprise.',
+            ],
+            [
+                'q' => 'What is a private event?',
+                'a' => 'An event that is not advertised to the public: a staff party, a members-only class, a wedding, a private hire. In practice "private" means one of three things, and it pays to know which you need. Kept to your own team (Draft until it is ready, Internal if it never will be). Open only to the people you send the link to (Unlisted). Or open only to people with the link AND a password (Unlisted with a password). None of them stops an invited guest from forwarding what they were sent.',
+            ],
+            [
+                'q' => 'How do I share a private event link safely?',
+                'a' => 'Set the event to Unlisted, give it a password, and send the two separately: the link in the invitation, the password in a second message or in person. Pick a password that is not the event\'s name or date, and remember it must be typed exactly, capitals included. If the event sells tickets or takes registrations, set a password and send it with the link. Keep door codes and home addresses out of the description and send them to confirmed guests directly.',
+            ],
+            [
+                'q' => 'Can I make a private event on the free plan?',
+                'a' => 'Partly. Draft is free on every plan and keeps an event to your schedule\'s team, which covers holds, plans and anything not ready yet, but nobody outside the team can open a Draft. A page that invited guests can open while the public cannot is Unlisted, which is on the Enterprise plan, as is Internal. A selfhosted installation has all four states. For a private hire that only needs to show the room is taken, a Public event called "Private event" with nothing else in it works on any plan; it will also appear in your feeds and in the digest your subscribers get, so keep its name plain.',
+            ],
+            [
+                'q' => 'Will an unlisted event show up in Google?',
+                'a' => 'It should not. An Unlisted page tells search engines not to index it or follow its links, and it is left out of your sitemap, your feeds and the search on eventschedule.com, with or without a password. That is an instruction search engines follow, not a lock: if somebody posts the link on a public page, anyone who clicks it can open the event unless it has a password.',
             ],
             [
                 'q' => 'Can I mix public and private events on the same schedule?',
@@ -495,19 +511,19 @@
             ],
             [
                 'q' => 'Where exactly does a hidden event disappear from?',
-                'a' => 'Your public schedule page and its calendar, the public iCal feed (the live calendar guests can subscribe to from an event\'s Add to Calendar menu) and the RSS feed, the XML sitemap, the discovery search on eventschedule.com, the automatic digest of new events your email subscribers get, the upcoming-events block in a newsletter, and the generated event graphics. A hidden event also cannot be put behind an on-network promotion, and the "Tell me when tickets go on sale" sign-up is not offered on it. The one door left open is the direct link, and only for Unlisted.',
+                'a' => 'Your public schedule page and its calendar, the public iCal feed (the live calendar guests can subscribe to from an event\'s Add to Calendar menu) and the RSS feed, the XML sitemap, the discovery search on eventschedule.com, the automatic digest of new events your email subscribers get, the upcoming-events block in a newsletter, and the generated event graphics.'.(config('ads.enabled') && config('ads.native_enabled') ? ' A hidden event also cannot be put behind an on-network promotion, and the "Tell me when tickets go on sale" sign-up is not offered on it.' : ' The "Tell me when tickets go on sale" sign-up is not offered on it either.').' The one door left open is the direct link, and only for Unlisted.',
             ],
             [
                 'q' => 'Who can see an unlisted event?',
-                'a' => 'Anyone holding its link can open it, and if you set a password they see only the title until they enter it. Guests will not find it on your schedule page, in your iCal or RSS feed, the sitemap or search, or in the digest your email subscribers get, and the "Tell me when tickets go on sale" sign-up is not offered on it. Signed-in members of your schedule still see it on the calendar. A guest can buy a ticket or register only after entering the password, so an unlisted event that should sell needs one.',
+                'a' => 'Anyone holding its link can open it, and if you set a password they see only the title until they enter it. Guests will not find it on your schedule page, in your iCal or RSS feed, the sitemap or search, or in the digest your email subscribers get, and the "Tell me when tickets go on sale" sign-up is not offered on it. Signed-in members of your schedule still see it on the calendar. If it sells tickets or takes registrations, set a password and send it with the link.',
             ],
             [
                 'q' => 'Does a private event still sync to my own calendar?',
-                'a' => 'Draft and Internal events are never pushed to a connected calendar at all. An Unlisted event is pushed, and it is written as private: private visibility on Google, private sensitivity on Outlook, and CLASS:PRIVATE on CalDAV. The public iCal and RSS feeds your visitors subscribe to leave all three out.',
+                'a' => 'Draft and Internal events are never pushed to a connected calendar at all. An Unlisted event is pushed, and it is written as private: private visibility on Google, '.(outlook_sync_enabled() ? 'private sensitivity on Outlook, and ' : 'and ').'CLASS:PRIVATE on CalDAV. The public iCal and RSS feeds your visitors subscribe to leave all three out.',
             ],
             [
                 'q' => 'Can I sell tickets to an unlisted event?',
-                'a' => 'Yes, and this is the one thing worth knowing before you set it up. Ticket checkout and registration on an Unlisted event are accepted from signed-in members of the schedule, or from a guest who has entered the event password. If you want an unlisted event to sell to the people you sent the link to, give it a password.',
+                'a' => 'Yes, on Enterprise. Set a password on the event and send it with the link, so that the people you invited are the ones who book.',
             ],
             [
                 'q' => 'What if people asked to hear about an event I then hide?',
@@ -527,6 +543,42 @@
             ],
         ];
 
+        // Which kind of private: the event, who should see it, the setting, the plan.
+        // Plans from FEATURES.md (Public and Draft free; Internal and Unlisted Enterprise);
+        // registration with a capacity is free (MarketingTicketingTierTest).
+        $kinds = [
+            ['A date you are holding while the contract is signed', 'Your team, until it is confirmed', 'Draft, then Publish', 'Free'],
+            ['A staff party, a board meeting, a rehearsal', 'Your team, and nobody else, ever', 'Internal', 'Enterprise'],
+            ['A members-only class or preview', 'Members you email the link and the password to', 'Unlisted, with a password', 'Enterprise'],
+            ['A wedding, a birthday, a private dinner', 'The guests you invite, who reply', 'Unlisted, with a password, and free registration with a capacity', 'Enterprise'],
+            ['Somebody else\'s party in your room', 'The public should see the room is taken, not whose party it is', 'Public, named "Private event", with nothing else in it (it also reaches your feeds and the subscriber digest, so keep the name plain)', 'Free'],
+        ];
+
+        // Sending an unlisted link. Sourced: checkout refused to a guest without the
+        // password (Event::guestVisibilityFailure via TicketController); the password is
+        // compared exactly (RoleController::checkEventPassword, hash_equals); the check is
+        // throttled to 10 tries in 5 minutes (routes/web.php throttle:10,5); an unlock is
+        // a session flag that a new password does not clear; the locked page and an
+        // unlisted page both carry noindex, nofollow (layouts/app-guest).
+        $shareSteps = [
+            ['Give it a password if anyone will book', 'An Unlisted event that sells tickets or takes registrations should have a password. Set one and send it with the link, so the people booking are the people you invited.'],
+            ['Send the link and the password apart', 'The link in the invitation, the password in a second message, a text or on the printed card. An invitation forwarded whole then carries half of what it takes to get in.'],
+            ['Make it typeable, not guessable', 'It is matched exactly, capitals included, so avoid characters people mistype on a phone. Avoid the event\'s name and date too: those are the first guesses. The form allows ten tries in five minutes before it makes the visitor wait.'],
+            ['Change it, and know what changing does', 'A new password stops the old one working for anybody new. A guest who already unlocked the page keeps it open on that browser for as long as their session lasts (a day after their last visit), so change it before the link spreads, not after.'],
+            ['Check how the link unfurls', 'Locked, a pasted link previews as the password notice under your schedule\'s name and logo, with no event name, description or flyer. Without a password it previews like any event page, title and picture included, in every chat it lands in.'],
+            ['Keep the sensitive part off the page', 'The door code, the host\'s home address, the dress-code note about the surprise: send those to the guests who replied, not in the description of a page that can be forwarded.'],
+        ];
+
+        // What no visibility setting can promise. General advice, plus two product facts:
+        // members are owner, admin and viewer (User::isMember()), and an Unlisted event is
+        // pushed to a connected calendar marked private (see the sync card above).
+        $limits = [
+            ['A link can be forwarded', 'Unlisted means not advertised, not secret. Treat every link you send as one that may reach a friend of a friend, and add a password when that would matter.'],
+            ['What was seen stays seen', 'A guest who opened the page, took a screenshot or downloaded the ticket keeps what they have. Hiding the event later, or changing its password, only affects what happens next.'],
+            ['Internal is only as private as your team list', 'Everyone on the schedule\'s team, viewers included, sees Internal and Draft events. Before you add the board meeting, read the team list.'],
+            ['Your own calendar has its own sharing', 'Unlisted events sync to a connected calendar marked private. Who can read that calendar is decided by the calendar\'s own sharing settings, so check them once.'],
+        ];
+
         $dotSections = [
             ['top', 'Four doors'],
             ['states', 'One setting'],
@@ -536,6 +588,8 @@
             ['default', 'The house default'],
             ['rest', 'Every other surface'],
             ['who', 'Who uses it'],
+            ['kinds', 'Which kind'],
+            ['share', 'Sending the link'],
             ['faq', 'Questions'],
             ['claim', 'Get started'],
         ];
@@ -655,7 +709,7 @@
                         It is one field on the event, <span class="es-vault-lit">not a plan you move to.</span>
                     </h2>
                     <p class="mt-5 text-lg es-vault-band-soft" data-reveal style="--reveal-delay: 0.15s;">
-                        Open the event, open Details, choose a door. Nothing else about the event changes.
+                        Open the event, open its Listing tab, choose a door. Nothing else about the event changes.
                     </p>
                 </div>
 
@@ -757,8 +811,8 @@
                     <p class="es-vault-muted text-sm">Every cell above is what a guest gets. Signed in, you and your members see all four states on the schedule page, badged Draft or Internal. A Draft or Internal event will not open on a direct link either.</p>
                 </div>
                 <div class="es-vault-card p-5" data-reveal="panel">
-                    <p class="es-vault-tag mb-2">Password required</p>
-                    <p class="es-vault-muted text-sm">Checkout and registration on an Unlisted event are taken from members, or from a guest who has entered the password. Selling to an invite list means setting one.</p>
+                    <p class="es-vault-tag mb-2">Set a password</p>
+                    <p class="es-vault-muted text-sm">An Unlisted event that sells tickets or takes registrations should have a password. Set one and send it with the link, so the people booking are the ones you invited.</p>
                 </div>
                 <div class="es-vault-card p-5" data-reveal="panel">
                     <p class="es-vault-tag mb-2">A separate gate</p>
@@ -832,7 +886,9 @@
                             </div>
                             <p class="es-vault-muted mt-4 text-sm">Of the fan content only the counts survive, never a photo, a video or a line of a comment.</p>
                             <p class="es-vault-muted mt-3 text-sm">The locked page is also marked noindex and nofollow, and its social preview tags carry the password notice in place of the event: no name, no description and no flyer. The only picture is your schedule's own logo, or none at all if the schedule has no logo. Pasting the link into a chat gives nothing away.</p>
-                            <p class="es-vault-muted mt-3 text-sm">And if your schedule is on the free plan and shows ads, none are ever rendered in front of a password prompt.</p>
+                            @if (config('ads.enabled'))
+                                <p class="es-vault-muted mt-3 text-sm">And if your schedule is on the free plan and shows ads, none are ever rendered in front of a password prompt.</p>
+                            @endif
                         </div>
                     </div>
                 </div>
@@ -963,6 +1019,10 @@
                 </p>
             </div>
 
+            {{-- Card 4 (promotions and ads) is there only where this install runs the promotions
+                 network (ads.enabled and ads.native_enabled). Without it, card 3 widens to close the
+                 second row and card 6 runs the full third row, so the grid has no hole either way. --}}
+            @php($promoLive = config('ads.enabled') && config('ads.native_enabled'))
             <div class="grid grid-cols-1 gap-4 md:grid-cols-2 lg:grid-cols-3" data-reveal-group="110">
                 <!-- 1 -->
                 <div class="es-bento group relative md:col-span-2" data-reveal="panel" data-tilt="3.5">
@@ -996,20 +1056,21 @@
                 </div>
 
                 <!-- 3 -->
-                <div class="es-bento group relative" data-reveal="panel" data-tilt="5">
+                <div class="es-bento group relative{{ $promoLive ? '' : ' lg:col-span-2' }}" data-reveal="panel" data-tilt="5">
                     <div class="es-tilt-inner es-vault-card relative flex h-full flex-col overflow-hidden p-7">
                         <div class="relative z-10">
                             <div class="mb-4 flex flex-wrap items-center gap-2">
                                 <h3 class="es-vault-ink text-xl font-bold">Shareable graphics</h3>
-                                <span class="es-vault-plan">Pro</span>
+                                <span class="es-vault-plan es-vault-plan-free">Free</span>
                             </div>
-                            <p class="es-vault-muted">Generated event graphics are drawn from the same public set, so a hidden event is not in one and cannot end up in an image you post. The scheduled graphic email, an Enterprise extra, is built from that same query.</p>
+                            <p class="es-vault-muted">The Events graphic is drawn from the same public set: drafts, unlisted and password-protected events are left out, so a hidden event cannot end up in an image you post. The scheduled graphic email, an Enterprise extra, is built from that same query.</p>
                         </div>
                         <div class="es-glare" aria-hidden="true"></div>
                         <div class="es-ring-glow" aria-hidden="true"></div>
                     </div>
                 </div>
 
+                @if ($promoLive)
                 <!-- 4 -->
                 <div class="es-bento group relative md:col-span-2" data-reveal="panel" data-tilt="3.5">
                     <div class="es-tilt-inner es-vault-card relative flex h-full flex-col overflow-hidden p-7">
@@ -1027,6 +1088,8 @@
                     </div>
                 </div>
 
+                @endif
+
                 <!-- 5 -->
                 <div class="es-bento group relative" data-reveal="panel" data-tilt="5">
                     <div class="es-tilt-inner es-vault-card relative flex h-full flex-col overflow-hidden p-7">
@@ -1043,14 +1106,14 @@
                 </div>
 
                 <!-- 6 -->
-                <div class="es-bento group relative lg:col-span-2" data-reveal="panel" data-tilt="3.5">
+                <div class="es-bento group relative {{ $promoLive ? 'lg:col-span-2' : 'lg:col-span-3' }}" data-reveal="panel" data-tilt="3.5">
                     <div class="es-tilt-inner es-vault-card relative flex h-full flex-col overflow-hidden p-7">
                         <div class="relative z-10">
                             <div class="mb-4 flex flex-wrap items-center gap-2">
                                 <h3 class="es-vault-ink text-xl font-bold">Sync to your own calendar</h3>
                                 <span class="es-vault-plan es-vault-plan-free">Free</span>
                             </div>
-                            <p class="es-vault-muted mb-4">Draft and Internal events are never pushed to a connected calendar. An Unlisted event is pushed, and it is written as private: private visibility on Google, private sensitivity on Outlook, and CLASS:PRIVATE on CalDAV.</p>
+                            <p class="es-vault-muted mb-4">Draft and Internal events are never pushed to a connected calendar. An Unlisted event is pushed, and it is written as private: private visibility on Google, {{ outlook_sync_enabled() ? 'private sensitivity on Outlook, and' : 'and' }} CLASS:PRIVATE on CalDAV.</p>
                             <p class="es-vault-muted text-sm">
                                 That is the distinction that matters. Your own calendar is not a public surface, so an unlisted event belongs on it, marked for what it is.
                                 <a href="{{ marketing_url('/features/calendar-sync') }}" class="es-vault-link font-medium hover:underline">How calendar sync works</a>
@@ -1091,6 +1154,115 @@
                         <p class="es-vault-muted text-sm">{{ $audBody }}</p>
                     </div>
                 @endforeach
+            </div>
+        </div>
+    </section>
+
+    <!-- ============================================================ -->
+    <!-- 8b. Which kind of private                                    -->
+    <!-- ============================================================ -->
+    <section id="kinds" class="scroll-mt-24 border-t py-20 lg:py-28" style="border-color: rgba(122, 90, 18, 0.16);">
+        <div class="mx-auto max-w-6xl px-4 sm:px-6 lg:px-8">
+            <div class="mx-auto mb-12 max-w-3xl text-center">
+                <span class="es-vault-plate es-vault-plate-lg mb-6" data-reveal aria-hidden="true"><span>09</span></span>
+                <p class="es-vault-tag mb-4" data-reveal style="--reveal-delay: 0.05s;">Pick the door</p>
+                <h2 class="es-balance es-vault-ink text-3xl font-black tracking-tight md:text-5xl" data-reveal style="--reveal-delay: 0.1s;">
+                    Which kind of private <span class="es-vault-accent">is your event?</span>
+                </h2>
+                <p class="es-vault-muted mt-5 text-lg" data-reveal style="--reveal-delay: 0.15s;">
+                    "Private" covers events that want opposite things. A staff party should reach nobody outside the team; a wedding should reach every guest and nobody else; a private hire should tell the public the room is taken. Start from who must be able to open the page.
+                </p>
+            </div>
+
+            <div class="es-vault-card p-5 sm:p-7" data-reveal="panel">
+                <div class="es-vault-reg-wrap">
+                    <table class="es-vault-reg">
+                        <caption class="sr-only">Five kinds of private event, who should see each, and the visibility to use</caption>
+                        <thead>
+                            <tr>
+                                <th scope="col">The event</th>
+                                <th scope="col">Who should open it</th>
+                                <th scope="col">Set it to</th>
+                                <th scope="col">Plan</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            @foreach ($kinds as [$kindEvent, $kindWho, $kindSet, $kindPlan])
+                                <tr>
+                                    <th scope="row" class="es-vault-ink text-sm font-bold">{{ $kindEvent }}</th>
+                                    <td>{{ $kindWho }}</td>
+                                    <td class="es-vault-ink font-semibold">{{ $kindSet }}</td>
+                                    <td><span class="es-vault-plan @if ($kindPlan === 'Free') es-vault-plan-free @endif">{{ $kindPlan }}</span></td>
+                                </tr>
+                            @endforeach
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+
+            <div class="mt-8 grid gap-4 md:grid-cols-3" data-reveal-group="90">
+                <div class="es-vault-card flex flex-col p-6" data-reveal="panel">
+                    <p class="es-vault-tag mb-2">Private parties</p>
+                    <p class="es-vault-muted text-sm">Free registration with a capacity does the guest list: each reply is a name and an email address you can see, and the limit stops a forwarded link from filling the room. Ask your own questions, such as dietary needs, with ticket-type questions on any plan.</p>
+                </div>
+                <div class="es-vault-card flex flex-col p-6" data-reveal="panel">
+                    <p class="es-vault-tag mb-2">Members-only events</p>
+                    <p class="es-vault-muted text-sm">Put the link and the password in the members' newsletter, and change the password each season so a lapsed member's old copy stops working for anyone new. A members-only event that recurs can stay one Unlisted series with one password.</p>
+                </div>
+                <div class="es-vault-card flex flex-col p-6" data-reveal="panel">
+                    <p class="es-vault-tag mb-2">Private hire at a venue</p>
+                    <p class="es-vault-muted text-sm">The hirer's party is not yours to announce, but an empty-looking Saturday invites enquiries and walk-ins. A Public event named "Private event", with no description or tickets, shows the room is booked and says nothing about whose party it is. It will also appear in your feeds and in the digest your subscribers get, so keep its name plain.</p>
+                </div>
+            </div>
+        </div>
+    </section>
+
+    <!-- ============================================================ -->
+    <!-- 8c. Sending the link (fixed-dark band)                       -->
+    <!-- ============================================================ -->
+    <section id="share" class="relative scroll-mt-24 px-2 py-14 sm:px-4 lg:py-20">
+        <div class="es-vault-band noise relative overflow-hidden rounded-[2.5rem] border border-white/[0.06] px-4 py-16 sm:px-6 lg:px-8 lg:py-20 2xl:mx-auto 2xl:max-w-[100rem]">
+            <div class="pointer-events-none absolute inset-0" aria-hidden="true">
+                <div class="es-aurora es-aurora-1" style="background: radial-gradient(circle at 30% 25%, rgba(229, 194, 106, 0.12), rgba(229, 194, 106, 0) 60%);"></div>
+                <div class="grid-overlay absolute inset-0 opacity-20"></div>
+            </div>
+
+            <div class="relative z-10 mx-auto max-w-6xl">
+                <div class="mx-auto mb-12 max-w-3xl text-center">
+                    <span class="es-vault-plate es-vault-plate-lg mb-6" data-reveal aria-hidden="true"><span>10</span></span>
+                    <p class="es-vault-tag mb-4" data-reveal style="--reveal-delay: 0.05s;">Handing out the key</p>
+                    <h2 class="es-balance text-3xl font-black tracking-tight text-white md:text-5xl" data-reveal style="--reveal-delay: 0.1s;">
+                        Sending an unlisted link, <span class="es-vault-lit">safely.</span>
+                    </h2>
+                    <p class="mt-5 text-lg es-vault-band-soft" data-reveal style="--reveal-delay: 0.15s;">
+                        An Unlisted event is as private as the way you hand it out. Six habits close most of the gaps.
+                    </p>
+                </div>
+
+                <div class="grid gap-4 md:grid-cols-2 lg:grid-cols-3" data-reveal-group="90">
+                    @foreach ($shareSteps as $shareIndex => [$shareTitle, $shareBody])
+                        <div class="es-vault-card flex flex-col p-6" data-reveal="panel">
+                            <p class="es-vault-lit mb-3 font-mono text-sm font-bold">{{ str_pad($shareIndex + 1, 2, '0', STR_PAD_LEFT) }}</p>
+                            <h3 class="mb-2 text-lg font-bold es-vault-band-ink">{{ $shareTitle }}</h3>
+                            <p class="text-sm es-vault-band-muted">{{ $shareBody }}</p>
+                        </div>
+                    @endforeach
+                </div>
+
+                <div class="es-vault-card mt-6 p-6 sm:p-8" data-reveal="panel">
+                    <div class="mb-5 flex flex-wrap items-center gap-3">
+                        <span class="es-vault-plate"><span>The limits</span></span>
+                        <h3 class="text-lg font-bold es-vault-band-ink">What no visibility setting can promise</h3>
+                    </div>
+                    <div class="grid gap-x-8 gap-y-5 md:grid-cols-2">
+                        @foreach ($limits as [$limitTitle, $limitBody])
+                            <div>
+                                <p class="text-sm font-bold es-vault-band-ink">{{ $limitTitle }}</p>
+                                <p class="mt-1 text-sm es-vault-band-muted">{{ $limitBody }}</p>
+                            </div>
+                        @endforeach
+                    </div>
+                </div>
             </div>
         </div>
     </section>
@@ -1166,7 +1338,7 @@
     <section id="faq" class="scroll-mt-24 border-t py-20 lg:py-28" style="border-color: rgba(122, 90, 18, 0.16);">
         <div class="mx-auto max-w-3xl px-4 sm:px-6 lg:px-8">
             <div class="mb-12 text-center">
-                <span class="es-vault-plate es-vault-plate-lg mb-6" data-reveal aria-hidden="true"><span>09</span></span>
+                <span class="es-vault-plate es-vault-plate-lg mb-6" data-reveal aria-hidden="true"><span>11</span></span>
                 <h2 class="es-balance es-vault-ink mb-4 text-3xl font-black tracking-tight md:text-4xl" data-reveal style="--reveal-delay: 0.05s;">
                     Frequently asked questions
                 </h2>

@@ -284,7 +284,7 @@ return [
             'shot' => 'tickets--sales',
             'shot_alt' => 'The Sales page, listing orders',
             'published' => '2024-01-01',
-            'modified' => '2026-10-23',
+            'modified' => '2026-11-11',
         ],
 
         'subscriptions' => [
@@ -480,7 +480,7 @@ return [
             'blurb' => 'Install, configure and run Event Schedule on your own server.',
             'icon' => 'server',
             'published' => '2024-01-01',
-            'modified' => '2026-10-23',
+            'modified' => '2026-11-11',
         ],
 
         'selfhost/installation' => [
@@ -492,7 +492,19 @@ return [
             'blurb' => 'Step-by-step server setup: database, web server, and first run.',
             'icon' => 'terminal',
             'published' => '2024-01-01',
-            'modified' => '2026-10-23',
+            'modified' => '2026-11-11',
+        ],
+
+        'selfhost/docker' => [
+            'group' => 'selfhost',
+            'route' => 'marketing.docs.selfhost.docker',
+            'path' => '/docs/selfhost/docker',
+            'feature' => 'marketing.open_source',
+            'title' => 'Docker',
+            'blurb' => 'Run it with Docker Compose: HTTPS behind a proxy, email, Stripe, backups and updates.',
+            'icon' => 'code',
+            'published' => '2026-11-06',
+            'modified' => '2026-11-06',
         ],
 
         'selfhost/stripe' => [
@@ -528,7 +540,18 @@ return [
             'blurb' => 'Let buyers save tickets to Google Wallet.',
             'icon' => 'ticket',
             'published' => '2026-09-07',
-            'modified' => '2026-10-23',
+            'modified' => '2026-11-11',
+        ],
+
+        'selfhost/apple-wallet' => [
+            'group' => 'selfhost',
+            'route' => 'marketing.docs.selfhost.apple_wallet',
+            'path' => '/docs/selfhost/apple-wallet',
+            'title' => 'Apple Wallet',
+            'blurb' => 'Let buyers save tickets to Apple Wallet.',
+            'icon' => 'ticket',
+            'published' => '2026-11-11',
+            'modified' => '2026-11-11',
         ],
 
         'selfhost/microsoft-calendar' => [
@@ -596,7 +619,7 @@ return [
             'group' => 'selfhost',
             'route' => 'marketing.docs.selfhost.federation',
             'path' => '/docs/selfhost/federation',
-            'title' => 'Federation',
+            'title' => 'Event Schedule Network',
             'blurb' => 'Share your public events with the eventschedule.com listings.',
             'icon' => 'globe',
             'published' => '2026-07-26',
@@ -628,7 +651,7 @@ return [
             'blurb' => 'Subdomain-based multi-tenant routing, branding and plans.',
             'icon' => 'cloud',
             'published' => '2024-01-01',
-            'modified' => '2026-10-23',
+            'modified' => '2026-11-11',
         ],
 
         'saas/custom-domains' => [
@@ -673,7 +696,7 @@ return [
             'route' => 'marketing.docs.saas.federation',
             'path' => '/docs/saas/federation',
             'feature' => 'marketing.saas',
-            'title' => 'Federation',
+            'title' => 'Event Schedule Network',
             'blurb' => 'Share your public events with the eventschedule.com listings.',
             'icon' => 'globe',
             'published' => '2026-07-26',

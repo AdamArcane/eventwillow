@@ -4,6 +4,8 @@ namespace App\Http\Controllers\Auth;
 
 use App\Http\Controllers\Controller;
 use App\Http\Middleware\CaptureUtmParameters;
+use App\Models\MarketingDailyStat;
+use App\Models\PageView;
 use App\Models\Referral;
 use App\Models\User;
 use App\Rules\NotBlocklisted;
@@ -89,9 +91,20 @@ class SocialAuthController extends Controller
     private function redirectToProvider(string $provider, string $callbackRoute, bool $reRequest = false): RedirectResponse
     {
         $previous = url()->previous();
-        session([self::ORIGIN_KEY => $previous && parse_url($previous, PHP_URL_PATH) === parse_url(route('sign_up'), PHP_URL_PATH)
-            ? 'sign_up'
-            : 'login']);
+        $fromSignUp = $previous && parse_url($previous, PHP_URL_PATH) === parse_url(route('sign_up'), PHP_URL_PATH);
+        session([self::ORIGIN_KEY => $fromSignUp ? 'sign_up' : 'login']);
+
+        // The sign-up page's other exit (marketing_daily_stats.signup_google_starts), counted like
+        // the code step's: once a visitor a day, bots and probes left out.
+        if ($fromSignUp && $provider === 'google') {
+            $ip = request()->header('CF-Connecting-IP') ?? request()->ip();
+
+            if (! PageView::isBot(request()->userAgent())
+                && ! PageView::isSuspiciousRequest(request())
+                && PageView::isFirstDailyVisit('signup_google_starts', $ip, request()->userAgent())) {
+                MarketingDailyStat::record('signup_google_starts');
+            }
+        }
 
         // The sign-up page's "Don't email me news, tips or digests" box, copied onto this link by
         // the page; applied in the callback only if an account is created.
@@ -235,7 +248,10 @@ class SocialAuthController extends Controller
         $providerLocale = $provider === 'google' ? ($socialUser->user['locale'] ?? null) : null;
         $languageCode = null;
 
-        if ($providerLocale && is_valid_language_code(substr($providerLocale, 0, 2))) {
+        // The whole locale first, so Google's 'pt-PT' is European Portuguese and not 'pt'.
+        if ($providerLocale && is_valid_language_code(str_replace('_', '-', $providerLocale))) {
+            $languageCode = str_replace('_', '-', $providerLocale);
+        } elseif ($providerLocale && is_valid_language_code(substr($providerLocale, 0, 2))) {
             $languageCode = substr($providerLocale, 0, 2);
         } elseif (session()->has('guest_language') && is_valid_language_code(session('guest_language'))) {
             $languageCode = session('guest_language');
@@ -266,6 +282,7 @@ class SocialAuthController extends Controller
             // the utm_* values, not this.
             'hero_variant' => CaptureUtmParameters::heroVariant(request()),
             'signup_intent' => signup_intent_from_session(),
+            'arrival_intent' => arrival_intent_from_session(),
             ...pending_schedule_from_session(),
         ]);
 

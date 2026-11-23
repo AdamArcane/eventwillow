@@ -42,7 +42,7 @@
             <p>For easier installation, you can use:</p>
             <ul class="doc-list mt-2">
                 <li><a href="https://www.softaculous.com/apps/calendars/Event_Schedule" target="_blank" rel="noopener noreferrer" class="doc-link">Softaculous</a> - One-click installation on cPanel hosts</li>
-                <li><a href="https://github.com/eventschedule/dockerfiles" target="_blank" rel="noopener noreferrer" class="doc-link">Docker</a> - Containerized deployment with Docker Compose</li>
+                <li><a href="{{ route('marketing.docs.selfhost.docker') }}" class="doc-link">Docker</a> - Containerized deployment with Docker Compose</li>
             </ul>
         </div>
     </section>
@@ -389,7 +389,7 @@
                         <td>Every 15 minutes</td>
                     </tr>
                     <tr>
-                        <td>Release unpaid ticket reservations, expire waitlist offers, charge installment payments, send feedback requests, appointment and carpool reminders, event graphic emails, the new-event digest to confirmed subscribers, interest-list emails (tickets on sale, and the reminder before the event), send your events to the Event Schedule network when <a href="{{ route('marketing.docs.selfhost.federation') }}" class="doc-link">federation</a> is on, and, with <code class="doc-inline-code">CACHE_STORE=database</code>, delete expired cache entries</td>
+                        <td>Release unpaid ticket reservations, expire waitlist offers, charge installment payments, send feedback requests, ticket, appointment and carpool reminders, event graphic emails, the new-event digest to confirmed subscribers, interest-list emails (tickets on sale, and the reminder before the event), send your events to the Event Schedule network when <a href="{{ route('marketing.docs.selfhost.federation') }}" class="doc-link">federation</a> is on, and, with <code class="doc-inline-code">CACHE_STORE=database</code>, delete expired cache entries</td>
                         <td>Hourly</td>
                     </tr>
                     <tr>
@@ -441,7 +441,7 @@
             <li>Add a <a href="{{ route('marketing.docs.selfhost.ai') }}" class="doc-link">Gemini or OpenAI key</a> to turn on AI event import, agenda scanning and translation</li>
             <li>Set up <a href="{{ route('marketing.docs.selfhost.google_calendar') }}" class="doc-link">Google Calendar integration</a></li>
             <li>Set up <a href="{{ route('marketing.docs.selfhost.microsoft_calendar') }}" class="doc-link">Outlook Calendar integration</a></li>
-            <li>Let ticket buyers save their ticket to <a href="{{ route('marketing.docs.selfhost.google_wallet') }}" class="doc-link">Google Wallet</a> (optional)</li>
+            <li>Let ticket buyers save their ticket to <a href="{{ route('marketing.docs.selfhost.google_wallet') }}" class="doc-link">Google Wallet</a> or <a href="{{ route('marketing.docs.selfhost.apple_wallet') }}" class="doc-link">Apple Wallet</a> (optional)</li>
             <li>Set up <a href="{{ route('marketing.docs.saas.twilio') }}" class="doc-link">Twilio</a> to verify phone numbers by text message and to create events from WhatsApp messages (<code class="doc-inline-code">TWILIO_SID</code>, <code class="doc-inline-code">TWILIO_AUTH_TOKEN</code>, <code class="doc-inline-code">TWILIO_FROM_NUMBER</code>). A selfhosted install never texts or emails an invitation to a venue or performer you added</li>
             <li>Add <a href="#google-keys" class="doc-link">Google keys</a> for venue coordinates, map images and YouTube search (optional)</li>
             <li>Switch on the <a href="{{ route('marketing.docs.selfhost.admin') }}#venue-map" class="doc-link">venue map</a>, a map of a schedule's venues on its public page, by naming an address search service (optional, off by default)</li>

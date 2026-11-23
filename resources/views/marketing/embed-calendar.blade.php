@@ -1,18 +1,18 @@
 <x-marketing-layout :hp="true">
     <x-slot name="title">Embed an Event Calendar on Your Website - Event Schedule</x-slot>
-    <x-slot name="description">One iframe tag puts your live calendar on the site you already have. It follows the visitor's dark mode, speaks 12 languages, and never needs pasting twice.</x-slot>
+    <x-slot name="description">One iframe tag puts your live calendar on your own site, and a small script opens each event over your page. Follows dark mode, speaks 13 languages, never re-pasted.</x-slot>
     <x-slot name="breadcrumbTitle">Embed Calendar</x-slot>
 
     <x-slot name="structuredData">
     <x-seo.webpage
         name="Event Schedule Embed Calendar"
-        description="One iframe tag puts your live calendar on the site you already have. It follows the visitor's dark mode, speaks 12 languages, and never needs pasting twice." />
+        description="One iframe tag puts your live calendar on your own site, and a small script opens each event over your page. Follows dark mode, speaks 13 languages, never re-pasted." />
     <script type="application/ld+json" {!! nonce_attr() !!}>
     {
         "@context": "https://schema.org",
         "@type": "HowTo",
         "name": "How to embed your Event Schedule calendar on your own website",
-        "description": "Copy one iframe tag out of your schedule, paste it into your page, and leave it alone.",
+        "description": "Copy the embed code out of your schedule, paste it into your page, and leave it alone.",
         "step": [
             {
                 "@type": "HowToStep",
@@ -472,11 +472,12 @@
         // roles.event_layout in Role::activeEventLayout().
         $knobs = [
             ['?embed=true', 'required', 'Renders the calendar on its own, with no header, footer or banner around it. It is also the only URL Event Schedule permits another site to frame.'],
+            ['?events=', 'onsite', 'Shows an event on your site when it is clicked: over your page with the script beside the frame, inside the frame without it. Left off, an event opens its own page in a new tab. The Embed dialog adds it unless you choose the new tab.'],
             ['width', '100%', 'The frame takes the width of whatever column you drop it into.'],
-            ['height', '800', 'You choose the height. Nothing measures the calendar and resizes the frame for you.'],
+            ['height', '800', 'The height it starts at. When you show events on your site, the small script the Embed dialog adds beside the frame fits it to the calendar; without the script, this is the height it keeps.'],
             ['loading', 'lazy', 'Plain HTML, not a product feature: the browser waits until the frame scrolls into view before fetching it.'],
             ['?layout=', 'list', 'Opens the frame as a list or as a month calendar, whatever the schedule itself is set to. Two frames on the same page can each take their own. The calendar wants about 768px of frame width; narrower than that it shows a day-by-day agenda instead.'],
-            ['?lang=', 'de', 'Renders the calendar in one of 12 languages. Arabic and Hebrew lay the frame out right to left.'],
+            ['?lang=', 'de', 'Renders the calendar in one of 13 languages. Arabic and Hebrew lay the frame out right to left.'],
             ['?schedule=', 'jazz-nights', 'Shows a single sub-schedule instead of everything on the calendar.'],
             ['?dark=true', 'optional', 'Forces dark mode, and ?dark=false forces light. Left off, the frame follows the visitor\'s own system setting.'],
             ['?month= &year=', '3 / 2027', 'Opens the frame on a specific month instead of the current one.'],
@@ -493,17 +494,18 @@
             ['Your schedule\'s own look', 'Background, colours and font come from your Appearance settings, with an Aurora background held still inside the frame so it never distracts from your own page. Custom CSS, on Pro, applies inside the frame too.'],
             ['Your layout choice', 'Month calendar or list view, whichever your schedule is set to, or pinned per frame with ?layout=.'],
             ['Sub-schedules and their colours', 'Colour-coded on the calendar, and filterable down to one strand with a URL parameter.'],
-            ['RSVP and ticket links', 'A click inside the frame opens in a new tab, so your own page is never replaced by an event page.'],
+            ['Your events, on your page', 'A click on an event shows it over your own page, with its details, prices and Add to Calendar, so visitors stay on your site. Tickets and registration open in a new tab, on a secure page. If you would rather send every event to its own page, the Embed dialog has that choice too.'],
         ];
 
         $staysBehind = [
             ['Your schedule\'s header and footer', 'The frame is the calendar and nothing else. No banner, no navigation, no page chrome.'],
             ['The "Powered by Event Schedule" footer', 'Never inside the frame. Free schedules get it as a small credit line in the copied code, under the frame, and white-label on Pro removes it.'],
-            ['Ads', 'A free schedule\'s own public pages can carry them. An embed never does, by design.'],
+            // Only where the install runs ads at all (config('ads.enabled'), env only).
+            ...(config('ads.enabled') ? [['Ads', 'A free schedule\'s own public pages can carry them. An embed never does, by design.']] : []),
             ['The language switcher', 'Hidden inside a frame, which is why the language is set in the URL instead.'],
-            ['Sign-up and Add to Calendar', 'No email sign-up, no Add to Calendar menu and no "tell me when tickets go on sale" box inside the frame. They are on the event page a click opens in a new tab (the box only where you have switched on the "Notify me" card), along with the link to subscribe to your whole calendar.'],
+            ['Sign-up and the calendar feed', 'No email sign-up, no "tell me when tickets go on sale" box and no link to subscribe to your whole calendar inside the frame. An event opened on your site has Add to Calendar for its date; the rest is on the event\'s own page, one click away (the box only where you have switched on the "Notify me" card).'],
             ['Search engines', 'The embed URL is served noindex, nofollow, so the page that ranks is yours, not the frame inside it.'],
-            ['Your view count', 'Loads inside a frame are deliberately not recorded as schedule views, so analytics stay a measure of your own schedule page.'],
+            ['Your view count', 'Loads of the calendar inside a frame are deliberately not recorded as schedule views, so analytics stay a measure of your own schedule page. An event a visitor opens from it is counted, as a view of that event from your website.'],
         ];
 
         $faqs = [
@@ -512,12 +514,16 @@
                 'a' => 'Open your schedule in the admin portal and choose Embed Schedule. The panel shows the embed URL, the iframe tag and a live preview of the calendar before you take it anywhere. Copy the tag and paste it into your page\'s HTML wherever the calendar belongs. Any CMS block that accepts raw HTML or an embed will take it.',
             ],
             [
+                'q' => 'Is there a calendar widget or plugin to install?',
+                'a' => 'No. The embeddable calendar is one iframe, with one small script beside it in the code the Embed dialog hands you, so there is nothing to install, update or patch on your website. You paste the code into a block that accepts HTML (a Custom HTML block on WordPress, a Code block on Squarespace, Embed HTML on Wix) and the calendar inside it reads your live schedule. If your builder strips the script, the calendar still works: an event then opens inside the frame instead of over your page.',
+            ],
+            [
                 'q' => 'Can I customize the embedded calendar\'s appearance?',
-                'a' => 'The frame renders your schedule, so your own appearance settings come with it: background, colours, font, and whether events show as a month calendar or a list. On top of that the URL takes ?layout=calendar or ?layout=list to pin the layout for that frame, ?dark=true to force dark mode, ?schedule= to show a single sub-schedule and ?lang= to pick one of 12 languages. Custom CSS, on the Pro plan, applies inside the frame as well.',
+                'a' => 'The frame renders your schedule, so your own appearance settings come with it: background, colours, font, and whether events show as a month calendar or a list. On top of that the URL takes ?layout=calendar or ?layout=list to pin the layout for that frame, ?dark=true to force dark mode, ?schedule= to show a single sub-schedule and ?lang= to pick one of 13 languages. Custom CSS, on the Pro plan, applies inside the frame as well.',
             ],
             [
                 'q' => 'Does the embed slow down my website?',
-                'a' => 'It is one iframe, so the browser loads it alongside your page rather than waiting for it, and it brings no JavaScript, no stylesheet and no dependency into your own page. Add loading="lazy" to the tag and the browser will not fetch the calendar at all until it scrolls into view.',
+                'a' => 'It is one iframe, so the browser loads it alongside your page rather than waiting for it. When you show events on your site, the code adds one small script of a few kilobytes, loaded without holding up your page, with no stylesheet and no dependency. Add loading="lazy" to the tag and the browser will not fetch the calendar at all until it scrolls into view.',
             ],
             [
                 'q' => 'Will the embedded calendar compete with my own page in search?',
@@ -525,7 +531,7 @@
             ],
             [
                 'q' => 'Does it work on mobile?',
-                'a' => 'Yes. A width of 100% means the frame takes the width of whatever column you drop it into, and the calendar inside it is responsive. The height is the one thing you choose: nothing measures the calendar and resizes the frame for you, so either give it room or let it scroll.',
+                'a' => 'Yes. A width of 100% means the frame takes the width of whatever column you drop it into, and the calendar inside it is responsive. An event a visitor opens fills the screen on a phone, with a close button at its corner. When you show events on your site, the script beside the frame also fits the frame to the calendar; without it, the height is the one thing you choose, so either give it room or let it scroll.',
             ],
             [
                 'q' => 'Is embedding the calendar free?',
@@ -533,11 +539,11 @@
             ],
             [
                 'q' => 'Do embed views show up in my analytics?',
-                'a' => 'No. Loads inside a frame are deliberately not recorded as schedule views. Clicks through from the frame open your event page in a new tab, and those are ordinary views, so they are counted.',
+                'a' => 'The calendar itself, no: loads inside a frame are deliberately not recorded as schedule views. The events people open from it, yes. An event shown on your site is counted as a view of that event, with Your website as where it came from, and if you chose to open events in a new tab, those are ordinary views of your event page, so they are counted too.',
             ],
             [
                 'q' => 'Can visitors add events to their calendar or subscribe from the embed?',
-                'a' => 'Not inside the frame, which is the calendar on its own. A click on an event opens its page in a new tab, and that page has the rest: Add to Calendar for that date, a link to subscribe to your whole schedule as a live calendar feed that updates itself when a date moves, and, on an upcoming event with the "Notify me" card switched on, a box to leave an email address and hear when tickets go on sale or if anything changes. To put the feed link on your own page as well, copy its address from your schedule\'s settings under Integrations, then Calendar text and feeds.',
+                'a' => 'Add to Calendar, yes: an event a visitor opens from the calendar has it, for that date. The rest is on the event\'s own page, one click away with View full page: a link to subscribe to your whole schedule as a live calendar feed that updates itself when a date moves, and, on an upcoming event with the "Notify me" card switched on, a box to leave an email address and hear when tickets go on sale or if anything changes. To put the feed link on your own page as well, copy its address from your schedule\'s settings under Integrations, then Calendar text and feeds.',
             ],
         ];
 
@@ -582,12 +588,12 @@
                     </h1>
 
                     <p class="es-fade-up es-d-2 es-paste-muted mb-8 max-w-xl text-lg sm:text-xl">
-                        Your calendar goes into the website you already have as <span class="es-paste-sel es-paste-mono">one iframe tag</span>. No script, no plugin, no build step. You keep adding events here, and the page on your own site is already up to date.
+                        Your calendar goes into the website you already have as <span class="es-paste-sel es-paste-mono">one iframe tag</span>, and works on its own: no plugin, no build step. The small script the code carries beside it opens each event over your page and fits the frame to the calendar. You keep adding events here, and the page on your own site is already up to date.
                     </p>
 
                     <div class="es-fade-up es-d-3 mb-9 flex flex-wrap gap-2">
-                        <span class="es-paste-chip">No script tag</span>
-                        <span class="es-paste-chip">No dependencies</span>
+                        <span class="es-paste-chip">Works as one tag</span>
+                        <span class="es-paste-chip">No plugin</span>
                         <span class="es-paste-chip">No re-pasting</span>
                     </div>
 
@@ -670,7 +676,11 @@
                     </div>
 
                     <p class="es-paste-slip-code es-paste-slip-ink">
-                        <span class="es-paste-slip-accent">&lt;iframe</span> <span class="es-paste-slip-dim">src=</span><span class="es-paste-sel">"https://your-schedule.eventschedule.com?embed=true"</span> <span class="es-paste-slip-dim">width=</span>"100%" <span class="es-paste-slip-dim">height=</span>"800" <span class="es-paste-slip-dim">frameborder=</span>"0" <span class="es-paste-slip-dim">style=</span>"border: none;"<span class="es-paste-slip-accent">&gt;&lt;/iframe&gt;</span>
+                        <span class="es-paste-slip-accent">&lt;iframe</span> <span class="es-paste-slip-dim">src=</span><span class="es-paste-sel">"https://your-schedule.eventschedule.com?embed=true&amp;events=onsite"</span> <span class="es-paste-slip-dim">width=</span>"100%" <span class="es-paste-slip-dim">height=</span>"800" <span class="es-paste-slip-dim">frameborder=</span>"0" <span class="es-paste-slip-dim">style=</span>"border: none;"<span class="es-paste-slip-accent">&gt;&lt;/iframe&gt;</span>
+                    </p>
+
+                    <p class="es-paste-slip-code es-paste-slip-ink mt-3">
+                        <span class="es-paste-slip-accent">&lt;script</span> <span class="es-paste-slip-dim">src=</span>"https://app.eventschedule.com/embed.js" <span class="es-paste-slip-dim">async</span><span class="es-paste-slip-accent">&gt;&lt;/script&gt;</span>
                     </p>
 
                     <p class="es-paste-slip-code es-paste-slip-dim mt-3">
@@ -678,7 +688,7 @@
                     </p>
 
                     <p class="es-paste-slip-rule es-paste-slip-dim mt-5 pt-4 text-sm leading-relaxed">
-                        Two lines, and the second one is optional furniture: free schedules carry a small credit line under the frame, and white-label on the Pro plan takes it out of the copied code. The frame itself is one tag with your own subdomain in it.
+                        Three lines, and only the first is the calendar: one tag with your own subdomain in it, which works on its own. The second is the small script that shows an event over your page and fits the frame to the calendar; a builder that strips it leaves a calendar that still works, with events opening inside the frame. The third is optional furniture: free schedules carry a small credit line under the frame, and white-label on the Pro plan takes it out of the copied code.
                     </p>
                 </div>
 
@@ -687,8 +697,9 @@
                     @foreach ([
                         ['?embed=true', 'The part that matters. It renders the calendar on its own, and it is the only URL Event Schedule allows another site to frame. Point a plain schedule URL at an iframe and the browser refuses it.'],
                         ['width="100%"', 'The frame is as wide as the column you put it in, so it fits a narrow sidebar and a full-bleed section without being told twice.'],
-                        ['height="800"', 'Your call, and the one honest limitation on this page: nothing measures the calendar and resizes the frame for you. Give it room, or let it scroll.'],
+                        ['height="800"', 'Where it starts. When you show events on your site, the small script that comes with the code fits the frame to the calendar from there. Without it, the height is your call: give it room, or let it scroll.'],
                         ['frameborder="0"', 'No browser border drawn around it, so the calendar reads as part of your page rather than a window cut into it.'],
+                        ['embed.js', 'A few kilobytes, loaded without holding your page up. It opens an event over your page, a full-screen sheet on a phone, and fits the frame to the calendar. Choose "Open the event\'s page in a new tab" in the Embed dialog and the code comes without it.'],
                     ] as [$part, $why])
                         <div class="es-paste-card p-5" data-reveal>
                             <code class="es-paste-mono es-paste-accent text-sm font-bold">{{ $part }}</code>
@@ -708,10 +719,10 @@
             <div class="mx-auto mb-12 max-w-3xl text-center">
                 <div class="es-paste-mark mb-6" data-reveal><span>02 &middot; the rectangle</span></div>
                 <h2 class="es-balance es-paste-ink text-3xl font-black tracking-tight md:text-4xl" data-reveal style="--reveal-delay: 0.1s;">
-                    You are giving it <span class="es-paste-sel">a rectangle,</span> not a script.
+                    You are giving it <span class="es-paste-sel">a rectangle.</span> The script only helps.
                 </h2>
                 <p class="es-paste-muted mt-5 text-lg" data-reveal style="--reveal-delay: 0.15s;">
-                    Which means everything you can change about the embedded calendar lives in the iframe tag and its URL. There is no settings screen on your side of the fence, and nothing to keep in sync.
+                    Which means everything you can change about the embedded calendar lives in the iframe tag and its URL. The script beside it has no settings of its own: leave it in and events open over your page, take it out and they open inside the frame. There is no settings screen on your side of the fence, and nothing to keep in sync.
                 </p>
             </div>
 
@@ -815,16 +826,20 @@
                     It is <span class="es-paste-sel">on this page</span> right now.
                 </h2>
                 <p class="es-paste-muted mt-5 text-lg" data-reveal style="--reveal-delay: 0.15s;">
-                    The rectangle below is not a screenshot. It is a demo schedule in an ordinary iframe, pasted into this marketing page the same way it would be pasted into yours.
+                    The rectangle below is not a screenshot. It is a demo schedule in an ordinary iframe, with the same small script beside it, pasted into this marketing page the same way it would be pasted into yours.
                 </p>
             </div>
 
             <div class="es-paste-card p-3 sm:p-4" data-reveal="panel">
                 <div class="es-paste-slot es-paste-ants overflow-hidden p-1.5">
-                    <iframe src="{{ $demoUrl }}?embed=true"
+                    <iframe src="{{ $demoUrl }}?embed=true&amp;events=onsite"
                             width="100%" height="800" loading="lazy"
                             title="Live demo of an embedded Event Schedule calendar"
+                            allow="clipboard-write; web-share; fullscreen"
                             style="border: none; display: block; border-radius: 6px; background: #ffffff;"></iframe>
+                    {{-- The same script the Embed dialog's code carries, so a click here does what it
+                         would on the reader's own site. --}}
+                    <script src="{{ app_url('/embed.js') }}" async {!! nonce_attr() !!}></script>
                 </div>
                 <div class="mt-3 flex flex-wrap items-center justify-between gap-3 px-1">
                     <span class="es-paste-mono es-paste-muted text-[0.65rem] uppercase tracking-widest">iframe &middot; width 100% &middot; height 800</span>
@@ -838,7 +853,7 @@
             </div>
 
             <p class="es-paste-muted mx-auto mt-6 max-w-2xl text-center text-sm leading-relaxed" data-reveal>
-                Try a date. The event opens in a new tab rather than replacing what you are reading, which is the behaviour the calendar switches to as soon as it notices it is inside a frame.
+                Try a date. The event opens over this page, as it would over yours, and closes back to it. Tickets and registration open in a new tab, on a secure page.
             </p>
         </div>
     </section>
@@ -865,6 +880,40 @@
                         <div class="es-paste-accent es-paste-mono mb-3 text-2xl font-black">{{ $stepNum }}</div>
                         <h3 class="es-paste-ink mb-2 text-lg font-bold">{{ $stepTitle }}</h3>
                         <p class="es-paste-muted text-sm leading-relaxed">{{ $stepBody }}</p>
+                    </div>
+                @endforeach
+            </div>
+
+            {{-- Where step two happens on the builders people search for by name ("add event
+                 calendar to website", "embed calendar on website", "iframe calendar widget"). Only
+                 the name of the block each builder takes raw HTML in, nothing about their plans:
+                 the WordPress caveats are sourced on /wordpress-event-calendar, which this links. --}}
+            <div class="mx-auto mt-16 mb-8 max-w-3xl text-center">
+                <h3 class="es-balance es-paste-ink text-2xl font-black tracking-tight md:text-3xl" data-reveal>
+                    Adding the calendar to WordPress, Squarespace, Wix and the rest
+                </h3>
+                <p class="es-paste-muted mt-4" data-reveal>
+                    Every website builder has one block that takes raw HTML, and that block is where the iframe goes. Here is its name on the common ones.
+                </p>
+            </div>
+
+            <div class="grid grid-cols-1 gap-4 md:grid-cols-3" data-reveal-group="90">
+                @foreach ([
+                    ['WordPress', 'In the block editor, add a Custom HTML block where the calendar belongs and paste the tag into it.', ['label' => 'The WordPress guide', 'href' => route('marketing.wordpress_event_calendar')]],
+                    ['Squarespace', 'Add a Code block to the section that should hold the calendar, and paste the tag into the block.', null],
+                    ['Wix', 'From Add Elements choose Embed Code, then Embed HTML, and paste the tag in as code.', null],
+                    ['Webflow', 'Drag a Code Embed element onto the page where the calendar goes and paste the tag into it.', null],
+                    ['Google Sites', 'Choose Insert, then Embed, switch to the Embed code tab, and paste the tag.', null],
+                    ['Any other page', 'Paste the tag into the HTML where the calendar should sit. A builder that offers an HTML, code or embed block takes it the same way.', null],
+                ] as [$builder, $builderHow, $builderLink])
+                    <div class="es-paste-card flex flex-col p-6" data-reveal="panel">
+                        <h4 class="es-paste-ink mb-2 font-bold">{{ $builder }}</h4>
+                        <p class="es-paste-muted text-sm leading-relaxed">{{ $builderHow }}</p>
+                        @if ($builderLink)
+                            <p class="mt-auto pt-4 text-sm">
+                                <x-link href="{{ $builderLink['href'] }}">{{ $builderLink['label'] }}</x-link>
+                            </p>
+                        @endif
                     </div>
                 @endforeach
             </div>
@@ -950,7 +999,7 @@
                 </a>
                 <div class="es-paste-card flex flex-col p-6 md:col-span-2" data-reveal>
                     <h3 class="es-paste-ink mb-1 text-base font-bold">Everything else on the free plan</h3>
-                    <p class="es-paste-muted text-sm leading-relaxed">The calendar itself, two-way Google, Outlook and CalDAV sync, RSVP with a capacity per date, sub-schedules, built-in analytics, 10 newsletter emails a month (each recipient counts as one) and unlimited free registration are all free. Pro adds paid ticket sales, the check-in dashboard, the ticket purchase widget and custom fields. Event Schedule takes zero platform fees on ticket sales, on every plan.</p>
+                    <p class="es-paste-muted text-sm leading-relaxed">The calendar itself, two-way {{ outlook_sync_enabled() ? 'Google, Outlook and CalDAV' : 'Google and CalDAV' }} sync, RSVP with a capacity per date, sub-schedules, built-in analytics, 10 newsletter emails a month (each recipient counts as one) and unlimited free registration are all free. Pro adds paid ticket sales, the check-in dashboard, the ticket purchase widget and custom fields. Event Schedule takes zero platform fees on ticket sales, on every plan.</p>
                     <div class="mt-auto pt-4">
                         <x-link href="{{ marketing_url('/pricing') }}">See pricing</x-link>
                     </div>
@@ -969,7 +1018,7 @@
                 <div data-reveal>
                     <x-feature-link-card
                         name="Calendar Sync"
-                        description="Two-way sync with Google, Outlook and CalDAV"
+                        :description="outlook_sync_enabled() ? 'Two-way sync with Google, Outlook and CalDAV' : 'Two-way sync with Google and CalDAV'"
                         :url="marketing_url('/features/calendar-sync')"
                         icon-color="blue"
                     >
@@ -1083,7 +1132,7 @@
                         Take the name, take <span class="es-paste-sel">the line.</span>
                     </h2>
                     <p class="es-paste-dim mx-auto mb-10 max-w-2xl text-lg sm:text-xl">
-                        Claim a schedule, add your first event, and copy one tag into the site you already have. Nothing to install, and nothing to keep in sync afterwards.
+                        Claim a schedule, add your first event, and copy the code into the site you already have. Nothing to install, and nothing to keep in sync afterwards.
                     </p>
 
                     <div class="mx-auto flex max-w-2xl flex-col items-stretch justify-center gap-3 sm:flex-row">

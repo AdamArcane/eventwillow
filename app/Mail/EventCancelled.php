@@ -4,9 +4,11 @@ namespace App\Mail;
 
 use App\Models\Event;
 use App\Models\Role;
+use App\Utils\TicketInvite;
 use Illuminate\Bus\Queueable;
 use Illuminate\Mail\Mailable;
 use Illuminate\Mail\Mailables\Address;
+use Illuminate\Mail\Mailables\Attachment;
 use Illuminate\Mail\Mailables\Content;
 use Illuminate\Mail\Mailables\Envelope;
 use Illuminate\Queue\SerializesModels;
@@ -23,6 +25,22 @@ class EventCancelled extends Mailable
      */
     protected ?string $date = null;
 
+    /**
+     * The buyer this copy of the mail goes to, for the calendar update it carries (TicketInvite).
+     * Set by EventChangeNotifier through forAttendee(); a copy without it (the owner's preview of
+     * a change) attaches nothing. A property with a default rather than a constructor argument: a
+     * mail queued before it existed unserializes without it, and an uninitialised typed property
+     * would throw.
+     */
+    protected ?string $attendeeEmail = null;
+
+    /**
+     * The language the attendee bought in (Sale::guestLanguage()), whose name for the event this
+     * copy prints. Set through readBy(); null prints the stored name. A property with a default,
+     * for the reason $attendeeEmail gives.
+     */
+    protected ?string $readerLanguage = null;
+
     public function __construct(
         protected Event $event,
         protected ?Role $role,
@@ -33,6 +51,32 @@ class EventCancelled extends Mailable
         ?string $date = null,
     ) {
         $this->date = $date;
+    }
+
+    public function forAttendee(string $email): static
+    {
+        $this->attendeeEmail = $email;
+
+        return $this;
+    }
+
+    public function readBy(?string $language): static
+    {
+        $this->readerLanguage = $language;
+
+        return $this;
+    }
+
+    /**
+     * @return array<int, Attachment>
+     */
+    public function attachments(): array
+    {
+        if (! $this->attendeeEmail) {
+            return [];
+        }
+
+        return TicketInvite::attachmentsFor($this->event, $this->role, $this->attendeeEmail, 'CANCEL');
     }
 
     public function envelope(): Envelope
@@ -51,7 +95,7 @@ class EventCancelled extends Mailable
         }
 
         return new Envelope(
-            subject: __('messages.event_cancelled_subject', ['event' => $this->event->name]),
+            subject: __('messages.event_cancelled_subject', ['event' => $this->event->readIn($this->readerLanguage)->name]),
             from: new Address($fromAddress, $fromName),
         );
     }
@@ -62,7 +106,7 @@ class EventCancelled extends Mailable
             view: 'emails.event_cancelled',
             text: 'emails.event_cancelled_text',
             with: [
-                'event' => $this->event,
+                'event' => $this->event->readIn($this->readerLanguage),
                 'role' => $this->role,
                 'note' => $this->note,
                 'recipientName' => $this->recipientName,

@@ -149,7 +149,6 @@
                 'details' => __('messages.details'),
                 'paying' => __('messages.admin_dash_paying'),
                 'inTrial' => __('messages.admin_dash_in_trial'),
-                'ifConvert' => __('messages.admin_dash_if_convert'),
                 'atRisk' => __('messages.admin_dash_at_risk'),
                 // :label is what fill() swaps for the amount.
                 'ofMrr' => __('messages.admin_dash_of_mrr', ['amount' => ':label']),
@@ -157,15 +156,45 @@
                 // The active users chart in the Revenue card (hosted).
                 'activeUsers' => __('messages.active_users_7_days'),
                 'last12Weeks' => __('messages.admin_dash_last_12_weeks'),
+                'last3Months' => __('messages.admin_dash_last_3_months'),
+                'mrrRebuilt' => __('messages.admin_dash_mrr_rebuilt'),
                 'organizers' => __('messages.admin_dash_organizers'),
                 'countOfTotal' => __('messages.admin_dash_count_of_total', ['count' => ':count', 'total' => ':total']),
                 'active30' => __('messages.admin_dash_active_30_days'),
                 'estimate' => __('messages.admin_dash_estimate'),
                 'exact' => __('messages.admin_dash_exact'),
+                // The "So far today, against before" card (_so-far) and the verdict every comparison
+                // on the page is said with (fairVerdict in _script).
+                'soFar' => collect([
+                    'title', 'clock', 'yesterday', 'usual', 'projected_legend', 'projected', 'at_now', 'now',
+                    'before_had', 'hidden_early', 'hidden_too_few', 'hidden_no_history', 'show_table',
+                    'show_chart', 'table_caption', 'col_by', 'col_usual', 'col_projected', 'tip_by',
+                    'tip_today', 'tip_yesterday', 'tip_usual', 'tip_projected', 'yesterday_by', 'usual_by',
+                    'usually', 'times', 'summary', 'summary_alone', 'no_count', 'how', 'range',
+                    'periods', 'this_period', 'period_had', 'last_month_had', 'so_far', 'projected_period',
+                    'projected_month', 'hidden_month_early', 'col_day', 'tip_before', 'today_so_far',
+                    'summary_period', 'previous_7d', 'previous_28d', 'previous_month', 'previous_month_scaled',
+                    'usual_week', 'before_7d', 'before_28d', 'before_month', 'hidden_too_few_month',
+                ])->mapWithKeys(fn ($key) => [$key => __('messages.realtime_so_far_'.$key)])->all() + [
+                    'today' => __('messages.today'),
+                    'collecting' => __('messages.realtime_trend_collecting'),
+                    'period' => collect(\App\Services\RealtimeSoFar::PERIODS)->mapWithKeys(fn ($period) => [$period => __('messages.realtime_so_far_period_'.$period)])->all(),
+                ],
+                'verdict' => [
+                    'up' => __('messages.realtime_verdict_up'),
+                    'down' => __('messages.realtime_verdict_down'),
+                    'maybeUp' => __('messages.realtime_verdict_maybe_up'),
+                    'maybeDown' => __('messages.realtime_verdict_maybe_down'),
+                    'same' => __('messages.realtime_verdict_same'),
+                    'tooFew' => __('messages.realtime_verdict_too_few'),
+                    'none' => __('messages.realtime_verdict_none'),
+                    'new' => __('messages.realtime_verdict_from_none'),
+                ],
             ];
             $realtimeConfig = [
                 'url' => route('admin.realtime.data'),
                 'trendsUrl' => route('admin.realtime.trends'),
+                'soFarUrl' => route('admin.realtime.so_far'),
                 // Hosted only, where there is billing: elsewhere the corner is the Now card's.
                 'revenueUrl' => config('app.hosted') ? route('admin.dashboard.revenue').($sample ? '?sample=1' : '') : null,
                 'pageUrl' => route('admin.dashboard'),
@@ -193,10 +222,11 @@
                 @include('admin.realtime._toolbar')
             </template>
 
-            {{-- The Now card and, on hosted, Revenue in the corner. From xl the two take the three
-                 columns of the Today grid below (realtime-top in _script), so the corner card stands
-                 over the Activity rail, and the board of who is where runs the full width under
-                 both. With tracking off, the card that says how to turn it on takes the Now card's
+            {{-- Four panels: Visitors (the Now card) and Sign-ups, and on hosted Revenue and Active
+                 users in the corner beside them. From xl they take the three columns of the Today
+                 grid below, two rows (realtime-top in _script), so the corner stands over the
+                 Activity rail, and the board of who is where runs the full width under them. With
+                 tracking off, the card that says how to turn it on takes the Visitors panel's
                  place. --}}
             <div class="realtime-top grid grid-cols-1 gap-4" @if (config('app.hosted')) data-corner @endif>
                 @include('admin.realtime._off')
@@ -215,9 +245,19 @@
                 @if (config('app.hosted'))
                     @include('admin.realtime._revenue')
                 @endif
+
+                <template v-if="p.state === 'ok' || p.state === 'waiting'">
+                    @include('admin.realtime._signups-panel')
+                </template>
+
+                @if (config('app.hosted'))
+                    @include('admin.realtime._active')
+                @endif
             </div>
 
             <template v-if="p.state === 'ok' || p.state === 'waiting'">
+                @include('admin.realtime._so-far')
+
                 @include('admin.realtime._board')
 
                 {{-- Activity first in the single column below xl; at xl Sign-ups takes two columns

@@ -304,10 +304,12 @@ echo '<?xml version="1.0" encoding="UTF-8"?>'; ?>
         <loc>{{ url('/google-calendar') }}</loc>
         {!! $lastmodTag('/google-calendar') !!}
     </url>
+    @if (outlook_sync_enabled())
     <url>
         <loc>{{ url('/outlook-calendar') }}</loc>
         {!! $lastmodTag('/outlook-calendar') !!}
     </url>
+    @endif
     <url>
         <loc>{{ url('/caldav') }}</loc>
         {!! $lastmodTag('/caldav') !!}
@@ -323,6 +325,10 @@ echo '<?xml version="1.0" encoding="UTF-8"?>'; ?>
     <url>
         <loc>{{ url('/invoiceninja') }}</loc>
         {!! $lastmodTag('/invoiceninja') !!}
+    </url>
+    <url>
+        <loc>{{ url('/stackapella') }}</loc>
+        {!! $lastmodTag('/stackapella') !!}
     </url>
     <url>
         <loc>{{ url('/features/analytics') }}</loc>
@@ -689,6 +695,10 @@ echo '<?xml version="1.0" encoding="UTF-8"?>'; ?>
         {!! $lastmodTag('/docs/selfhost/installation') !!}
     </url>
     <url>
+        <loc>{{ url('/docs/selfhost/docker') }}</loc>
+        {!! $lastmodTag('/docs/selfhost/docker') !!}
+    </url>
+    <url>
         <loc>{{ url('/docs/selfhost/stripe') }}</loc>
         {!! $lastmodTag('/docs/selfhost/stripe') !!}
     </url>
@@ -699,6 +709,10 @@ echo '<?xml version="1.0" encoding="UTF-8"?>'; ?>
     <url>
         <loc>{{ url('/docs/selfhost/google-wallet') }}</loc>
         {!! $lastmodTag('/docs/selfhost/google-wallet') !!}
+    </url>
+    <url>
+        <loc>{{ url('/docs/selfhost/apple-wallet') }}</loc>
+        {!! $lastmodTag('/docs/selfhost/apple-wallet') !!}
     </url>
     <url>
         <loc>{{ url('/docs/selfhost/microsoft-calendar') }}</loc>

@@ -2,6 +2,7 @@
 
 namespace App\Mail;
 
+use App\Mail\Concerns\RepliesToEventSupport;
 use App\Models\Event;
 use App\Models\Role;
 use App\Models\Sale;
@@ -22,7 +23,7 @@ use Illuminate\Queue\SerializesModels;
  */
 class PassBookingConfirmation extends Mailable
 {
-    use Queueable, SerializesModels;
+    use Queueable, RepliesToEventSupport, SerializesModels;
 
     public function __construct(
         protected Sale $sale,
@@ -47,8 +48,9 @@ class PassBookingConfirmation extends Mailable
         }
 
         return new Envelope(
-            subject: __('messages.pass_booking_confirmation').' - '.$this->bookedEvent->name,
+            subject: __('messages.pass_booking_confirmation').' - '.$this->sale->eventAsRead($this->bookedEvent)->name,
             from: new Address($fromAddress, $fromName),
+            replyTo: $this->eventSupportReplyTo($this->bookedEvent->user?->email),
         );
     }
 
@@ -75,7 +77,8 @@ class PassBookingConfirmation extends Mailable
             text: 'emails.pass_booking_confirmation_text',
             with: [
                 'sale' => $this->sale,
-                'bookedEvent' => $this->bookedEvent,
+                // In the language the pass was bought in, as its confirmation was.
+                'bookedEvent' => $this->sale->eventAsRead($this->bookedEvent),
                 'date' => $this->date,
                 'role' => $this->role,
                 'dateLabel' => $this->bookedEvent->localStartsAt(true, $this->date),

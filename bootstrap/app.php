@@ -102,11 +102,18 @@ return Application::configure(basePath: dirname(__DIR__))
             'api/whatsapp/webhook',
         ]);
 
+        // A selfhost install's chosen schedule at its root: "/" is read as "/{subdomain}" before
+        // routing (App\Support\HomeSchedule). Selfhost only, so it never meets a custom domain.
+        $middleware->prepend(\App\Http\Middleware\ServeHomeSchedule::class);
+
         // Resolve custom domains before routing (must be first)
         $middleware->prepend(ResolveCustomDomain::class);
 
         // Sanitize user agent before session middleware processes it
         $middleware->prepend(SanitizeUserAgent::class);
+
+        // ?lang=pt-pt or ?lang=pt_PT is read as ?lang=pt-PT by everything after it
+        $middleware->prepend(\App\Http\Middleware\NormalizeLanguageQuery::class);
 
         // Detect trailing slash in URL before Laravel normalizes it
         $middleware->prepend(DetectTrailingSlash::class);

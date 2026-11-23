@@ -92,7 +92,8 @@ class RecurringRevenueTest extends TestCase
         $this->subscribeMultiPrice($this->schedule(), 'price_ent_m');             // 180: priced from its item
 
         // Not counted.
-        $this->subscribe($this->schedule(), 'price_pro_m', 'trialing', ['trial_ends_at' => now()->addDays(7)]);
+        // A checkout trial: a card on file (Cashier's pm_type) and seven days to run.
+        $this->subscribe($this->schedule(['pm_type' => 'card']), 'price_pro_m', 'trialing', ['trial_ends_at' => now()->addDays(7)]);
         $this->subscribe($this->schedule(), 'price_pro_m', 'trialing', [         // a cancelled trial: not pipeline either
             'trial_ends_at' => now()->addDays(7), 'ends_at' => now()->addDays(7),
         ]);
@@ -256,6 +257,8 @@ class RecurringRevenueTest extends TestCase
         $this->assertSame([5.0, 0.0, 0.0, 0.0], array_column($breakdown['plans'], 'trial_mrr'));
         $this->assertSame(1, $breakdown['totals']['trialing_count']);
         $this->assertSame(5.0, $breakdown['totals']['trial_mrr']);
+        // A year of it, from the same cents: the dashboard's "ARR" beside "if they all convert".
+        $this->assertSame(60.0, $breakdown['totals']['trial_arr']);
         // And the revenue is what it was without them.
         $this->assertSame(46.67, $breakdown['totals']['mrr']);
     }
@@ -332,5 +335,128 @@ class RecurringRevenueTest extends TestCase
         $this->assertSame(0.0, $breakdown['plans']['pro_month']['mrr']);
         $this->assertSame(1, $breakdown['totals']['billing_count']);
         $this->assertSame(240.0, $breakdown['totals']['arr']);
+    }
+
+    /**
+     * The MRR chart (RecurringRevenue::history()): each month-end rebuilt from the subscriptions'
+     * own dates at today's prices, and now, which is the live figure. Mutation: drop the trial
+     * from a subscription's start, or count a cancelled one past its end, or let a deleted
+     * schedule's live subscription in.
+     */
+    public function test_history_is_rebuilt_from_each_subscriptions_dates(): void
+    {
+        $this->travelTo('2026-11-18 12:00:00');
+        $dated = fn (int $id, array $dates) => DB::table('subscriptions')->where('id', $id)->update($dates);
+
+        // Pro monthly since June, still paying: 5 a month from the end of June.
+        $dated($this->subscribe($this->schedule(), 'price_pro_m'), ['created_at' => '2026-06-10 00:00:00']);
+        // Enterprise monthly from March, cancelled in September: 15 a month for March to August.
+        $dated($this->subscribe($this->schedule(), 'price_ent_m', 'canceled'), ['created_at' => '2026-03-02 00:00:00', 'ends_at' => '2026-09-15 00:00:00']);
+        // Pro yearly with a trial that ended in October: 50 / 12 from the end of October.
+        $dated($this->subscribe($this->schedule(), 'price_pro_y'), ['created_at' => '2026-09-20 00:00:00', 'trial_ends_at' => '2026-10-04 00:00:00']);
+        // A trial cancelled before it ended never billed.
+        $dated($this->subscribe($this->schedule(), 'price_ent_m', 'canceled'), ['created_at' => '2026-04-01 00:00:00', 'trial_ends_at' => '2026-04-15 00:00:00', 'ends_at' => '2026-04-15 00:00:00']);
+        // A schedule since deleted, cancelled: counted for the weeks it billed (August).
+        $dated($this->subscribe($this->schedule(['is_deleted' => true]), 'price_pro_m', 'canceled'), ['created_at' => '2026-08-01 00:00:00', 'ends_at' => '2026-08-30 00:00:00']);
+        // A deleted schedule with a live subscription is an orphan, never revenue.
+        $dated($this->subscribe($this->schedule(['is_deleted' => true]), 'price_ent_m'), ['created_at' => '2026-01-05 00:00:00']);
+
+        $history = RecurringRevenue::history();
+
+        // A week apart over 13 weeks (three months), and now.
+        $this->assertCount(14, $history);
+        $this->assertSame(
+            ['2026-08-19', '2026-08-26', '2026-09-02', '2026-09-09', '2026-09-16', '2026-09-23', '2026-09-30', '2026-10-07', '2026-10-14', '2026-10-21', '2026-10-28', '2026-11-04', '2026-11-11', '2026-11-18'],
+            array_map(fn ($point) => $point['at']->toDateString(), $history)
+        );
+        $this->assertSame(
+            [25.0, 25.0, 20.0, 20.0, 5.0, 5.0, 5.0, 9.17, 9.17, 9.17, 9.17, 9.17, 9.17, 9.17],
+            array_column($history, 'mrr')
+        );
+        // It ends on the live figure.
+        $this->assertSame(RecurringRevenue::summary()['mrr'], $history[13]['mrr']);
+    }
+
+    /**
+     * What the trials would add counts only a trial that turns into a charge on its own: a card on
+     * file and an end within PIPELINE_TRIAL_DAYS. A trial an admin set for a year, or one with no
+     * card, is still a trial (trialing_count) and is said beside the figure (trials_set_aside).
+     * Mutation: drop either condition of $pipeline, or add a set-aside trial's cents anyway.
+     */
+    public function test_a_trial_set_by_hand_or_with_no_card_is_not_pipeline(): void
+    {
+        $this->subscribe($this->schedule(['pm_type' => 'card']), 'price_ent_m', 'trialing', ['trial_ends_at' => now()->addDays(7)]);
+        $this->subscribe($this->schedule(['pm_type' => 'card']), 'price_ent_m', 'trialing', ['trial_ends_at' => now()->addYear()]);
+        $this->subscribe($this->schedule(), 'price_ent_m', 'trialing', ['trial_ends_at' => now()->addDays(7)]);
+
+        $totals = RecurringRevenue::breakdown()['totals'];
+
+        $this->assertSame(3, $totals['trialing_count']);
+        $this->assertSame(2, $totals['trials_set_aside']);
+        $this->assertSame(15.0, $totals['trial_mrr']);
+        $this->assertSame(180.0, $totals['trial_arr']);
+        // The growth export's count is every trial, as it always was.
+        $this->assertSame(3, RecurringRevenue::summary()['trialing_count']);
+
+        $admin = $this->createOwner(true);
+        $this->withSession(['admin_password_confirmed_at' => now()->timestamp])->actingAs($admin)->getJson(route('admin.dashboard.revenue'))
+            ->assertOk()
+            ->assertJsonPath('trialing_count', 3)
+            ->assertJsonPath('trial_pipeline_count', 1)
+            ->assertJsonPath('trials_set_aside', 2);
+    }
+
+    /**
+     * A day recorded in mrr_snapshots is read as it was counted, not rebuilt, and the chart says
+     * "rebuilt" only while some week still is. recordSnapshot() keeps one row a day, the last
+     * count. Mutation: ignore the snapshot, or insert instead of overwrite.
+     */
+    public function test_a_recorded_day_is_read_as_it_was_counted(): void
+    {
+        $this->travelTo('2026-11-18 12:00:00');
+        $id = $this->subscribe($this->schedule(), 'price_pro_m');
+        DB::table('subscriptions')->where('id', $id)->update(['created_at' => '2026-06-10 00:00:00']);
+
+        // A week the rebuild would put at 5, recorded at 12 (a price since changed, say).
+        DB::table('mrr_snapshots')->insert(['day' => '2026-11-11', 'mrr' => 12, 'arr' => 144, 'billing_count' => 2, 'trialing_count' => 0, 'trial_mrr' => 0, 'recorded_at' => '2026-11-11 23:00:00']);
+
+        $history = RecurringRevenue::history();
+        $this->assertSame(12.0, $history[12]['mrr']);
+        $this->assertTrue($history[12]['exact']);
+        $this->assertSame(5.0, $history[11]['mrr']);
+        $this->assertFalse($history[11]['exact']);
+
+        RecurringRevenue::recordSnapshot();
+        $this->travelTo('2026-11-18 18:00:00');
+        $this->subscribe($this->schedule(), 'price_ent_m');
+        RecurringRevenue::recordSnapshot();
+
+        $today = DB::table('mrr_snapshots')->where('day', '2026-11-18')->get();
+        $this->assertCount(1, $today);
+        $this->assertEquals(20, $today[0]->mrr);
+        $this->assertSame(2, (int) $today[0]->billing_count);
+
+        $admin = $this->createOwner(true);
+        $this->withSession(['admin_password_confirmed_at' => now()->timestamp])->actingAs($admin)->getJson(route('admin.dashboard.revenue'))->assertJsonPath('mrr_history.rebuilt', true);
+
+        // Every week recorded: nothing to say under the chart.
+        for ($back = 1; $back <= 13; $back++) {
+            DB::table('mrr_snapshots')->updateOrInsert(['day' => now()->subWeeks($back)->toDateString()], ['mrr' => 5, 'arr' => 60, 'billing_count' => 1, 'trialing_count' => 0, 'trial_mrr' => 0, 'recorded_at' => now()]);
+        }
+        $this->withSession(['admin_password_confirmed_at' => now()->timestamp])->actingAs($admin)->getJson(route('admin.dashboard.revenue'))->assertJsonPath('mrr_history.rebuilt', false);
+    }
+
+    /** Hosted only, on both rails (CronRailSyncTest holds the rails). */
+    public function test_the_command_records_today_on_hosted_only(): void
+    {
+        $this->subscribe($this->schedule(), 'price_pro_m');
+
+        config(['app.hosted' => false]);
+        $this->artisan('app:record-mrr')->assertSuccessful();
+        $this->assertSame(0, DB::table('mrr_snapshots')->count());
+
+        config(['app.hosted' => true]);
+        $this->artisan('app:record-mrr')->assertSuccessful();
+        $this->assertEquals(5, DB::table('mrr_snapshots')->where('day', now()->toDateString())->value('mrr'));
     }
 }

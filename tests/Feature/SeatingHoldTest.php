@@ -4,6 +4,7 @@ namespace Tests\Feature;
 
 use App\Exceptions\BusinessException;
 use App\Models\Event;
+use App\Models\EventSeatingMap;
 use App\Models\Role;
 use App\Models\SeatingLevel;
 use App\Models\SeatingPlan;
@@ -12,11 +13,13 @@ use App\Models\SeatingSection;
 use App\Models\Ticket;
 use App\Repos\EventRepo;
 use App\Services\BestAvailableService;
+use App\Services\OrphanSeatRule;
 use App\Services\SeatHoldService;
 use App\Services\SeatingMapService;
 use App\Utils\UrlUtils;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Http\Request;
+use Illuminate\Support\Facades\Route;
 use Tests\Feature\Concerns\CreatesScheduleData;
 use Tests\TestCase;
 
@@ -423,7 +426,7 @@ class SeatingHoldTest extends TestCase
         $event = $this->seatedEvent($role, $this->makePlan($role));
         $map = $this->maps()->materialize($event);
         $row = $this->seatsIn($map, 'Stalls', 'A');
-        $rule = app(\App\Services\OrphanSeatRule::class);
+        $rule = app(OrphanSeatRule::class);
 
         foreach ([5, 6, 7, 8] as $take) {
             $ids = $row->take($take)->pluck('id')->all();
@@ -817,7 +820,7 @@ class SeatingHoldTest extends TestCase
             'date' => $event->saleEventDateFromStartsAt(),
         ]))->assertStatus(422);
 
-        $this->assertSame(0, \App\Models\EventSeatingMap::where('event_id', $event->id)->count(),
+        $this->assertSame(0, EventSeatingMap::where('event_id', $event->id)->count(),
             'a GET must not create rows');
     }
 
@@ -843,7 +846,7 @@ class SeatingHoldTest extends TestCase
     {
         // acquire([]) already frees everything the token holds, so a separate unauthenticated
         // write route earned nothing. Holding zero seats is the release.
-        $this->assertFalse(\Illuminate\Support\Facades\Route::has('seating.release'));
+        $this->assertFalse(Route::has('seating.release'));
 
         $role = $this->createRole($this->createOwner(), 'venue');
         $event = $this->seatedEvent($role, $this->makePlan($role));
@@ -862,7 +865,12 @@ class SeatingHoldTest extends TestCase
 
     // ------------------------------------------------ review finding 6: the embed
 
-    public function test_the_embed_renders_the_picker(): void
+    /**
+     * The widget used to render the picker and post the hold from the frame, which has no session
+     * in a cross-site frame (SESSION_SAME_SITE=lax). It now lists the tickets and opens the event's
+     * page in a new tab with the form open, where the picker and its hold work as on the page.
+     */
+    public function test_the_embed_sends_seat_picking_to_the_event_page(): void
     {
         $role = $this->createRole($this->createOwner(), 'venue');
         $event = $this->seatedEvent($role, $this->makePlan($role));
@@ -874,14 +882,14 @@ class SeatingHoldTest extends TestCase
             'embed' => 'true', 'tickets' => 'true',
         ]))->assertOk()->getContent();
 
-        $this->assertStringContainsString('seatingPicker:', $html);
-        $this->assertStringContainsString('"is_allocated":true', $html);
+        $this->assertStringNotContainsString('seatingPicker:', $html);
+        $this->assertSame(1, preg_match('/<a href="([^"]+)" target="_blank" rel="noopener"\s+data-embed-checkout="tickets"/', $html, $buy));
+        $this->assertStringContainsString('tickets=true', html_entity_decode($buy[1]));
 
-        // The hold token lives in the session, which in a cross-site iframe depends on
-        // SESSION_SAME_SITE. That is NOT a new constraint: event.checkout is already on
-        // SecurityHeaders' embeddable list and posts a session CSRF token, so embedded checkout has
-        // always had the same dependency. If one works in a deployment, so does the other.
-        $this->assertStringContainsString('csrfToken', $html);
+        // And the page it opens has the picker.
+        $page = $this->get(html_entity_decode($buy[1]))->assertOk()->getContent();
+        $this->assertStringContainsString('seatingPicker:', $page);
+        $this->assertStringContainsString('"is_allocated":true', $page);
     }
 
     public function test_a_seat_id_from_another_event_is_ignored(): void

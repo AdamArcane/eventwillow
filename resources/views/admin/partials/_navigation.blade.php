@@ -47,10 +47,15 @@
             'blocked' => ['label' => __('messages.blocked'), 'href' => route('admin.blocked')],
             // Beside Blocked: the other way a schedule ends up publishing what it should not.
             'private-calendars' => ['label' => __('messages.private_calendars'), 'href' => route('admin.private_calendars')],
+            // Nexus only: sites that may be serving a copy of the marketing pages.
+            'copies' => config('app.is_nexus') ? ['label' => __('messages.copies'), 'href' => route('admin.copies')] : null,
             'feeds' => ['label' => __('messages.feeds_tab'), 'href' => route('admin.feeds')],
             'domains' => config('app.hosted') ? ['label' => __('messages.domains'), 'href' => route('admin.domains')] : null,
             'referrals' => config('app.hosted') ? ['label' => __('messages.referrals'), 'href' => route('admin.referrals')] : null,
             'newsletters' => ['label' => __('messages.newsletters'), 'href' => route('admin.newsletters.index')],
+            // Hosted only: schedules' newsletters held for review and accounts with email paused
+            // (AudienceMailGuard), which only the platform's own sender has.
+            'mail-review' => config('app.hosted') ? ['label' => __('messages.mail_review'), 'href' => route('admin.mail_review')] : null,
             'blog' => config('app.is_nexus') ? ['label' => __('messages.blog'), 'href' => route('blog.admin.index')] : null,
         ])],
         'system' => ['label' => __('messages.system'), 'pages' => array_filter([

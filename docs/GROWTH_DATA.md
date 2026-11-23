@@ -71,6 +71,8 @@ identifier, subdomain, custom domain or token appears in it.
 - **Dates** on the schedule rows leave only as buckets of days (`*_ends_in`, `last_event_created`).
   Residual risk: `hero_test.daily` counts signups per day and variant, so a variant with a single
   signup in a month dates that signup row (`hero_variant`, `created_month`) to the day.
+  `signup_sources` has the same residual risk: a cell of 1 dates the one signup row that carries
+  those values in that month. Its values are the already-anonymized ones, never a raw string.
 - **Country** (`schedules.country`): a country shared by fewer than 5 schedules reads `(other)`.
   The threshold is higher than attribution's 3 because a schedule row carries more beside it.
 - **Registration links** (`schedules.external_tickets_90d`): the link is organizer-typed, so only
@@ -99,6 +101,7 @@ any two numbers.
 | `claims` | OWNERLESS placeholder schedules, which every other section excludes | Monthly, last 6 months |
 | `churn` | `subscription_cancellations` rows | All time, since 2026-09-28 |
 | `daily` | Mixed: organizer and other signups, real schedules and events, sellers, subscriptions | Last 180 UTC days |
+| `signup_sources` | The `signups` rows (verified, non-demo, not blocked; within the row cap) | Last 90 days |
 | `nudge_outcomes` | Schedules sent an activation nudge | All time; outcomes 14 days after each nudge |
 | `onboarding_nudges` | Organizer cohort signed up since 2026-08-10 | Since 2026-08-10 |
 | `buyers` | Everyone with a paid sale on a non-demo event (money, or free RSVP) | Last 12 months |
@@ -191,6 +194,11 @@ credits, legacy `plan_expires` rows and trials, which is most paid-tier schedule
   - `visitors`, `page_views`, `docs_visitors`, `docs_page_views`, `commercial_visitors`,
     `pricing_visitors`, `pricing_views`;
   - `signup_views`, `signup_code_requests`, `signup_code_verified`, `signup_code_invalid`;
+  - `signup_google_starts` (schema 27): visitors who pressed "Continue with Google" on the sign-up
+    page (not on /login), one per day, with the code counters' bot filters. Beside the code
+    counters, not below them: Google skips the code. `signup_views` minus this and
+    `signup_code_requests` is roughly the people who left the page without trying either way
+    (roughly, because one person can do both). Null before 2026-11-12;
   - `guest_submit_views`, `guest_submit_code_requests`, `guest_submit_submissions`: the public
     "Submit your event" page (`event.guest_submit`, the request form of venue and curator
     schedules). One visitor per day each, with the sign-up counters' bot filters.
@@ -209,7 +217,9 @@ credits, legacy `plan_expires` rows and trials, which is most paid-tier schedule
     schedules, and embeds. What each one is:
     - `gp_event_visitors`: was shown an event page. Past the password prompt, and not somebody a
       direct-registration link sent straight elsewhere. Every event page counts, with or without
-      anything to buy on it.
+      anything to buy on it. From 2026-11-18 that includes an event opened inside a calendar
+      embedded on the organizer's own website (the Embed dialog's "Show it on your website"), the
+      one embed counted: before, the same click opened the event's page in a new tab, which counted.
     - `gp_list_taps`: went from a schedule's list, its month grid or its video carousel into an
       event, in the same tab or a new one.
     - `gp_form_opens`: opened a ticket or sign-up form that could lead to an order. Not a waitlist,
@@ -313,6 +323,13 @@ credits, legacy `plan_expires` rows and trials, which is most paid-tier schedule
   - `paid_orders`, `stripe_connected` (Stripe Connect onboarding completed), `paywall_views`
     (first view per user), `trial_starts`;
   - `subscriptions_started` (not declined), `subscriptions_ended`, `cancellations`.
+- `signup_sources` (columnar, schema 26): signups per day and per source, so a rise in `daily`
+  can be traced to what caused it. Columns `date`, `signup_intent`, `referrer_channel`,
+  `referrer_domain`, `utm_source`, `landing_path`, `signups`: one row per day and combination,
+  biggest first within a day. The values are exactly those of the `signups` rows after
+  anonymization (`(other)`, `(redacted)` and the rest), and the date is the account's
+  `created_at` day, the same clock as `daily`.
+  - A day with no row had no signups in the rows; a row-capped pull can miss the oldest days.
 - `nudge_outcomes`: per activation-nudge key, `{sent, matured, acted_event, acted_ticket_type,
   acted_stripe_connected, acted_paid_sale, acted_subscribed}`. `acted_subscribed` is from schema 25.
   - `acted_*` counts matured nudges (14+ days old) whose schedule did that within 14 days.
@@ -347,6 +364,35 @@ credits, legacy `plan_expires` rows and trials, which is most paid-tier schedule
     fetch counted, so an older post's total is mostly crawls. Compare posts by views gained since,
     not by the total.
   - Join a post to the sign-ups it brought through `signups.landing_path` = `path`.
+- `marketing_pages` (schema 28): which marketing pages lose visitors, and whether they leave before
+  the end or after reading, from the per-page beacon (`MarketingPageDaily`,
+  `partials/marketing-page-stats`). Nexus only (empty elsewhere). Counted from `tracked_from`
+  (2026-11-12); nothing before it was measured.
+  - `since`: the first day of the 90-day window `rows` covers (today included, UTC days).
+  - `columns`/`rows`: one row per page and device over those 90 days, most visitors first.
+    - `page` is the marketing ROUTE NAME (`marketing.index`, `marketing.pricing`,
+      `marketing.for_venues`, `marketing.docs.tickets`, ...), never a path. The blog is three
+      rows at most: `blog.index`, `blog.category` and `blog.show`, which is every post together
+      (per post, see `blog`).
+    - `group` is the page's family, read from its path: `home`, `pricing`, `features`, `for` (the
+      for-* pages), `compare` (alternatives, replacements, `/compare`, switch-from), `examples`,
+      `docs` (the user guide), `docs_selfhost` (selfhost, SaaS-operator and developer docs),
+      `selfhost` (`/selfhost`, `/open-source`, `/saas`), `blog`, `other`.
+    - `device`: `phone` when the viewport was under 640 CSS pixels wide when the page opened,
+      `desktop` otherwise (tablets in landscape and laptops alike).
+    - `visitors`: visitors who opened the page; `reached_end`: visitors whose screen reached the
+      page's last section (the `#claim` finale where the page has one, the footer otherwise; on a
+      page shorter than the screen that is on arrival); `signup_clicks`: visitors who clicked any
+      link to `/sign_up` on the page (header, hero, finale, anywhere).
+    - Each is one per visitor (daily IP+UA hash) per page per UTC day, with the visit beacon's
+      filters (bots, signed-in users, requests that do not look like a browser), so
+      `reached_end / visitors` and `signup_clicks / visitors` are per-visitor rates. A visitor who
+      returns another day counts again. Someone who reads three pages counts on each, so summing
+      `visitors` over pages is NOT the site's visitor count (that is `traffic[].visitors`).
+    - The three are sent separately, so a blocked or lost beacon can leave a click without a
+      view; read a rate over enough visitors, not a single row.
+  - `monthly`: the same counts per `month` (UTC `YYYY-MM`, the `meta.recent_months`), `group` and
+    `device`, as `{columns, rows}`. The month in progress is month-to-date.
 - `geography[]`: `{country, schedules, with_event, with_paid_sale, billing}`, over the
   k-anonymised `schedules.country`.
 - `boost`:
@@ -368,9 +414,23 @@ credits, legacy `plan_expires` rows and trials, which is most paid-tier schedule
     - `clicks`: learning, the traffic split still follows sign-up clicks;
     - `signups`: enough signups have come in to decide on them alone;
     - `candidate`: one variant is leading and waiting out its hold;
-    - `winner`: locked, and every visitor now sees it.
-  - `rows` has one entry per CURRENT variant, largest `share` first:
+    - `winner`: locked, and every visitor now sees it;
+    - `fixed` (schema 29): a page round is running. Two homepages under one headline, split
+      evenly, and nothing in the code ends it;
+    - `ended` (schema 29): a person ended a page round on one page. Every visitor gets that page,
+      the other is no longer printed, and the page kept is still counted.
+  - `split` (schema 29): `even` for a page round, `adaptive` for a round of headlines, whose
+    split moves toward the leader.
+  - `rows` has one entry per CURRENT variant, largest `share` first (a page round keeps the order
+    the variants are written in, the control first):
     - `key`, `headline`, `subtitle`, and `is_default` for the control;
+    - `page` (schema 29): `full` for today's homepage, `new` for the new one. A round of
+      headlines is `full` throughout;
+    - `saved_schedule`, `saved_event` (schema 29): of the accounts counted in `signups`, how many
+      own a schedule (deleted ones included) and how many made an event. Counted over exactly
+      the accounts `signups` counts, so each sits inside it; these are not the verified,
+      non-demo users of the `signups` rows;
+    - `schedule_rate` (schema 29): `saved_schedule` per visitor, null with no visitors;
     - `share`: the fraction of new visitors being given it now. Every variant keeps at least 0.05
       until a winner is locked, and one with under 300 visitors gets at least an even share;
     - `visitors`: people given that headline, counted once per visitor per day per variant, bots
@@ -389,6 +449,29 @@ credits, legacy `plan_expires` rows and trials, which is most paid-tier schedule
     lead.
   - `winner` (`{key, date}`): the locked variant and the day it locked.
   - `reset_at`: the day the counts were last started over from `/admin/growth`, or null.
+  - A page round's own fields (schema 29), null or empty for a round of headlines:
+    - `p_new_better`: the chance the new page brings more signups per visitor than today's.
+      Drawn from a seed made of the counts, so the same counts always read the same figure;
+    - `started_at`: the first day a current variant was counted since `reset_at`;
+    - `looks`: the three dates, 4, 7 and 10 weeks after `started_at`, on which the round is meant
+      to be read, and `next_look`, the first of them not yet past. At the first two, 97% either
+      way with 400 visitors a page ends it; the last ends it whatever it says, and under 95% the
+      answer is "no difference large enough to see". Empty once the round has ended;
+    - `ended`: the key of the variant a person ended the round on, or null while it runs.
+  - Reading a page round:
+    - **Decide on `signups` per visitor at a look date, not on a day between.** Read every day,
+      a 95% line is crossed by chance far more often than one time in twenty.
+    - **`clicks` are not comparable between the two pages:** they have different numbers of
+      sign-up buttons.
+    - **A visitor is one browser on one day,** and a visitor without analytics consent is given
+      a page afresh on each view and in each new tab, so some people count in both arms. That
+      pulls the two arms toward each other.
+    - **A page that sends more visitors on to other pages has its `signups` understated more,**
+      because a signup made from another page is credited only with marketing consent. The new
+      page links out less than today's (no feature tour), so today's arm is the one understated.
+    - **`marketing_pages` is not split by arm.** Its `reached_end` and `signup_clicks` for the
+      homepage move while a page round runs, because half the visitors get a page a quarter the
+      length.
   - `daily` (schema 21): `[{date, variant, visitors, clicks, signups}]` since `reset_at`, one entry
     per day and current variant that had anything. The same rows and cut as `rows`, so a variant's
     days sum to its totals, give or take what arrived in the up to 10 minutes `rows` may be cached.
@@ -458,6 +541,7 @@ Both are columnar: read `columns[]`, then `rows[][]`. They are newest first and 
 | `event_edits_90d` | Events they created or edited in the last 90 days, bucketed; system edits (imports, syncs) excluded |
 | `setup_guide` | How far through the setup guide they got (schema 13): `started`, `live` (their schedule went live with the guide watching), `shared` (copied the schedule's address), `embedded` (copied the embed code), `finished`. The furthest one reached. Null for anyone who never had a guide: everyone who signed up before it shipped, and anyone whose first schedule was not saved through the wizard (guest-submit, a claim, the API, a restore, a transfer) |
 | `setup_guide_hidden` | They hid the guide and have not brought it back. False when `setup_guide` is null |
+| `arrival_intent` | Why they came to sign up, from the link they pressed (schema 27, from 2026-11-12): `sell` (a ticketing or selling page: /features/ticketing, /compare and the alternative pages, the payment, fee and import pages, the homepage's Tickets beat, the fee calculator), `pro` / `enterprise` (that plan's button on /pricing), `guest_page` (the "Create your own" card on a schedule's public page), `example` (the "This is an example schedule" bar on a demo schedule's own pages, `?ref=example`, from 2026-11-12). Null for every other door and for everyone who signed up before it. Rides the link, so it needs no consent and is not lost to the edge cache |
 | `suggestions_off` | They turned suggestions off for the whole account (schema 13) and have not turned them back on: no setup guide, no next steps on the dashboard, no "List on the network" prompt. It says nothing about email: from 2026-10-06 the reminder emails follow "Email updates" alone (for the one day before that, this switch held them too). Independent of `setup_guide_hidden`, and possible for an account that never had a guide |
 
 ### `schedules` (one row per owned, non-deleted, non-demo schedule)
@@ -616,6 +700,32 @@ created over the API or WhatsApp cannot carry a price.
 
 ## Changelog (`meta.schema_version`)
 
+- **29** (2026-11-18)
+  - **`hero_test` can hold a page round:** two homepages, each a variant with its `page`
+    (`full`, today's, or `new`). New on the section: `split`, `ended`, `p_new_better`,
+    `started_at`, `looks`, `next_look`, and the phases `fixed` and `ended`. New on each row:
+    `page`, `saved_schedule`, `saved_event`, `schedule_rate`. A page round's rows are not sorted
+    by share.
+  - **The variant keys changed.** From 2026-11-18 the round is `home_today` (today's page, the
+    words `promote_sell` had) against `home_new` (the new homepage, "Fill the room. Keep the
+    money."), new keys, so that nobody is carried into either arm. `promote_sell` is retired and
+    stays in `signups.hero_variant` for the accounts that carry it.
+
+- **28** (2026-11-12)
+  - **New section `marketing_pages`:** per marketing page and device (phone or desktop), the
+    visitors who opened it, reached its end and clicked a sign-up link, over the last 90 days,
+    and per page family by month. Counted from 2026-11-12.
+  - **`signups.arrival_intent` gains `example`:** the "This is an example schedule" bar on a demo
+    schedule's own pages (`?ref=example`). Same column, one more value.
+- **27** (2026-11-12)
+  - **`signups.arrival_intent`:** why an organizer came to sign up, from the link they pressed
+    (`sell`, `pro`, `enterprise`, `guest_page`, or null). Appended as the last column.
+  - **`traffic[].signup_google_starts`:** visitors who pressed "Continue with Google" on the
+    sign-up page. Null before 2026-11-12.
+- **26** (2026-11-07)
+  - **New section `signup_sources`:** signups per day by intent, referrer channel, referrer
+    domain, utm source and landing path, for the last 90 days. The signup rows still carry only
+    a month.
 - **25** (2026-10-31)
   - **Two selling nudges and one outcome.** `nudges` and `nudge_outcomes` can carry `paid_blocked`
     (a free schedule with an upcoming paid event its plan cannot sell) and `no_orders_soon` (a

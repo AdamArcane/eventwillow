@@ -64,8 +64,9 @@
     </x-slot>
 
     @php
-        // One view, two addresses: a curator schedule's own duplicates (/{subdomain}/merge-venues)
-        // and the account's (/following/merge-venues). The way back is named after the page it
+        // One view, three addresses: a curator schedule's own duplicate venues
+        // (/{subdomain}/merge-venues), and the account's venues and participants
+        // (/following/merge-venues, /following/merge-participants). The way back is named after the page it
         // leads to, the schedule or Following, where it used to be a button that said "Back".
         $mergeSubdomain = request()->route('subdomain');
         $mergeRole = $mergeSubdomain ? \App\Models\Role::subdomain($mergeSubdomain)->first() : null;
@@ -73,11 +74,16 @@
         // A count after its name, so no language has to agree a noun with it: a pair of
         // duplicates, which is most groups, read "1 venues, 1 events".
         $eventCountLabel = $eventCountKey === 'merge_venues_future_events_count' ? 'merge_venues_upcoming_events_label' : 'merge_venues_events_label';
+
+        // The account-wide page serves participant schedules too, with its own words for them.
+        $titleKey = $titleKey ?? 'merge_venues_title';
+        $summaryKey = $summaryKey ?? 'merge_venues_summary_counts';
+        $previewSummaryKey = $previewSummaryKey ?? 'merge_venues_preview_summary';
     @endphp
 
     <div class="page-shell">
         <x-page-header
-            :title="__('messages.merge_venues_title')"
+            :title="__('messages.' . $titleKey)"
             :lead="__('messages.' . $introKey)"
             :back="$backUrl"
             :back-label="$mergeRole ? $mergeRole->getDisplayName(false) : __('messages.following')" />
@@ -158,7 +164,7 @@
                         {{-- What will happen, then the two answers: the one that goes on last. --}}
                         <div class="page-form-actions is-split">
                             <div class="merge-summary" data-merge-summary="{{ $groupHash }}">
-                                {{ __('messages.merge_venues_summary_counts', ['venues' => count($group) - 1, 'events' => collect($group)->where('id', '!=', $defaultTarget->id)->sum('future_event_count')]) }}
+                                {{ __('messages.' . $summaryKey, ['venues' => count($group) - 1, 'events' => collect($group)->where('id', '!=', $defaultTarget->id)->sum('future_event_count')]) }}
                             </div>
                             <div class="page-actions">
                                 <button type="button" class="dismiss-group-btn ap-secondary-btn inline-flex items-center justify-center px-4 py-3 border border-gray-300 dark:border-gray-600 rounded-lg font-semibold text-base text-gray-900 dark:text-gray-100 transition-all duration-200 focus:outline-none focus:ring-2 focus:ring-[var(--brand-blue)] focus:ring-offset-2 dark:focus:ring-offset-gray-800"
@@ -188,8 +194,8 @@
 
     <script {!! nonce_attr() !!}>
     (function() {
-        var summaryTemplate = @json(__('messages.merge_venues_summary_counts'));
-        var previewSummaryTemplate = @json(__('messages.merge_venues_preview_summary'));
+        var summaryTemplate = @json(__('messages.' . $summaryKey));
+        var previewSummaryTemplate = @json(__('messages.' . $previewSummaryKey));
         var reviveSuffixTemplate = @json(__('messages.merge_venues_preview_revive_suffix'));
         var errorMsg = @json(__('messages.an_error_occurred'));
         var dismissConfirmMsg = @json(__('messages.merge_venues_not_duplicates_confirm'));
@@ -273,9 +279,10 @@
                             .replace(':sources', result.body.source_count)
                             .replace(':events', result.body.total_events)
                             .replace(':overlap', result.body.overlap_events)
-                            .replace(/:target/g, result.body.target_name);
+                            // A function, so a name holding "$&" or "$1" is printed as written.
+                            .replace(/:target/g, function () { return result.body.target_name; });
                         if (result.body.target_is_deleted) {
-                            msg += ' ' + reviveSuffixTemplate.replace(/:target/g, result.body.target_name);
+                            msg += ' ' + reviveSuffixTemplate.replace(/:target/g, function () { return result.body.target_name; });
                         }
                         if (confirm(msg)) {
                             form.submit();

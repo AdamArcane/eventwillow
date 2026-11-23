@@ -14,7 +14,7 @@
         Overview
     </h2>
     <p>
-        Federation is an optional network that shares your public events with the listings on
+        The Event Schedule network is an optional way to share your public events with the listings on
         <a href="https://eventschedule.com/browse" target="_blank" rel="noopener noreferrer" class="doc-link">eventschedule.com</a>.
         Every listing links straight back to the event on your own site, so the discovery traffic
         comes to you rather than staying somewhere else.
@@ -75,11 +75,26 @@
         tick.</li>
         <li>Click <strong>Save</strong>.</li>
     </ol>
+    <h3 id="invitation" class="doc-subheading">The invitation on the dashboard</h3>
     <p>
-        An administrator who has not switched it on is also offered it: once the install has a
-        public upcoming event that would be shared, a suggestion appears on the dashboard and on a
-        schedule's page, and its <strong>Open settings</strong> button goes straight to the card.
-        <strong>Dismiss</strong> hides the suggestion for that administrator for good.
+        An administrator who has not switched it on is invited to, now and then. Once the install has
+        a public upcoming event with a picture that would be shared, the dashboard opens a short
+        window, <strong>Put your events on eventschedule.com</strong>, showing your own next event the
+        way it would look on the listings, with your site's name on it. <strong>See what's on it</strong>
+        opens the events other sites already share, and <strong>Choose what to share</strong> opens
+        this card, after your admin password, with a line saying what happens next.
+    </p>
+    <p>
+        It is asked at most three times, at least 30 days apart, and each administrator has their own
+        count. It waits while your account is less than a week old, while you are partway through
+        the setup guide and while anything is listed under <strong>Needs attention</strong>, and on
+        that visit the dashboard's other suggestions wait for the next one. <strong>Not now</strong>,
+        or closing the window, counts as one of the three; <strong>Don't ask again</strong> ends it
+        for you. An install that has switched sharing on, or ever did, is never asked again.
+    </p>
+    <p>
+        A schedule's page shows the same invitation as a line above the calendar, on the same count:
+        its <strong>Not now</strong> is one of the three as well.
     </p>
 
     <h3 id="review" class="doc-subheading">What saving does</h3>
@@ -105,7 +120,7 @@
                 </tr>
                 <tr>
                     <td>Approved</td>
-                    <td>Your events are being listed. The card says how many have been sent, with a link to <strong>See your listings on eventschedule.com</strong></td>
+                    <td>Your events are being listed. The card says how many have been sent, with a link to <strong>See your listings on eventschedule.com</strong> and how many visits the network sent to your pages in the last 30 days</td>
                 </tr>
                 <tr>
                     <td>Suspended</td>
@@ -122,6 +137,11 @@
         The same status, the last sync, the number of events shared and the number of schedules
         still not decided are on the <strong>Federation</strong> card of
         <strong>Admin &rarr; Dashboard</strong>.
+    </p>
+    <p>
+        The first sync after approval that has events on the network shows each administrator a
+        one-time card on their dashboard, <strong>You're on the Event Schedule network</strong>,
+        with the number of events that are live and a <strong>See them</strong> link to your listings.
     </p>
 
     <h3 id="preview" class="doc-subheading">The preview on the card</h3>
@@ -288,8 +308,11 @@
 
     <h3 id="browse-page" class="doc-subheading">On the browse page</h3>
     <p>
-        Listings appear in their own section on the eventschedule.com browse page, badged with your
-        site's address and filterable by country and language. Clicking one goes straight to the
+        Listings stand among eventschedule.com's own events on its browse page, each marked with a
+        globe and your site's address, and at most four from other sites at a time. Visitors can also
+        switch the page to <strong>From other sites</strong>, which lists every one of them and
+        filters by country and language; the link under <strong>See your listings</strong> opens it
+        on yours alone. Clicking one goes straight to the
         event on your site: there is no copy of the event page on eventschedule.com, and the link is
         a normal followable link rather than a tracking redirect. It points at the event's address on
         your install itself, never at a custom domain a schedule may have. eventschedule.com counts
@@ -381,14 +404,22 @@
             </tbody>
         </table>
     </div>
+    <h3 id="moving" class="doc-subheading">Moving to a new address</h3>
     <p>
-        If your install's address (<code class="doc-inline-code">APP_URL</code>) changes, the network
-        does not take the new address on trust. A listing's link has to be on the address the
-        install registered with, so events sent from the new one are refused, and show as
-        <em>Not accepted</em>, until the team at eventschedule.com has confirmed the change.
-        Registering again from the new address, with
-        <code class="doc-inline-code">php artisan federation:push --register</code>, puts an
-        approved install back into review first.
+        If your install's address (<code class="doc-inline-code">APP_URL</code>) changes, there is
+        nothing to re-register. The next hourly sync tells the network the new address, and your
+        install stays approved, with its listings live at the old address, while the change is
+        confirmed:
+    </p>
+    <ul class="doc-list">
+        <li><strong>The same address</strong> (only <code class="doc-inline-code">www.</code> or <code class="doc-inline-code">https</code> changed): accepted on the spot.</li>
+        <li><strong>Anything else</strong> (a new domain, or a new path): accepted within a couple of hours if the old address redirects to the new one. Otherwise the team at eventschedule.com confirms it. Either way you get an email once it is accepted.</li>
+    </ul>
+    <p>
+        Until then new and changed events wait, and the network card in
+        <strong>Admin &gt; Settings</strong> says so. Once the change is confirmed, every event is
+        sent again with links to the new address, so your listings are up to date within a couple
+        of hours.
     </p>
 </section>
 
