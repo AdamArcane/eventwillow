@@ -331,7 +331,7 @@ class GuestBrandingTest extends TestCase
 
         $content = $this->get('/'.$role->subdomain.'/'.$event->slug)->assertOk()->getContent();
 
-        $this->assertStringNotContainsString(self::CARD, $content);
+        $this->assertStringNotContainsString(__('messages.create_your_own_event_schedule'), $content);
     }
 
     public function test_selfhost_never_shows_the_event_card(): void
@@ -343,7 +343,7 @@ class GuestBrandingTest extends TestCase
 
         $content = $this->get('/'.$role->subdomain.'/'.$event->slug)->assertOk()->getContent();
 
-        $this->assertStringNotContainsString(self::CARD, $content);
+        $this->assertStringNotContainsString(__('messages.create_your_own_event_schedule'), $content);
         $this->assertStringContainsString(self::CHIP_SELFHOST, $content);
     }
 

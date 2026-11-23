@@ -344,7 +344,7 @@ class EnvironmentProbeWorkflow extends Workflow
     public function probe(array &$state): string
     {
         $this->save($state);
-        parent::checkCommand($state, 'focused PHP tests', [PHP_BINARY, '-d', 'pcre.jit=0', '-r', 'echo getenv("APP_ENV")."|".getenv("APP_TESTING");']);
+        parent::checkCommand($state, 'focused PHP tests', [PHP_BINARY, '-d', 'opcache.jit=0', '-r', 'echo getenv("APP_ENV")."|".getenv("APP_TESTING");']);
 
         return File::get(dirname($this->statePath()).'/focused-PHP-tests.log');
     }

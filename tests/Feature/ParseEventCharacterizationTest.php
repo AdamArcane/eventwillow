@@ -164,7 +164,7 @@ class ParseEventCharacterizationTest extends TestCase
         $events = $this->parse($role, [
             $this->row(['event_date_time' => '2026-10-20 18:00', 'category_name' => 'concerts']),
             $this->row(['event_date_time' => '2026-10-20 19:00', 'category_name' => 'Food']),
-            $this->row(['event_date_time' => '2026-10-20 20:00', 'category_name' => 'Sprituality']),
+            $this->row(['event_date_time' => '2026-10-20 20:00', 'category_name' => 'Spiritual Gatherngs']),
             $this->row(['event_date_time' => '2026-10-20 21:00', 'category_name' => 'Zzzzzz']),
         ]);
 

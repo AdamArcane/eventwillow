@@ -236,7 +236,7 @@ class GoogleWalletPassTest extends TestCase
         $this->assertSame('google', $decoded['claims']['aud']);
         $this->assertSame('savetowallet', $decoded['claims']['typ']);
         $this->assertSame('wallet@example-project.iam.gserviceaccount.com', $decoded['claims']['iss']);
-        $this->assertContains('https://eventwillow.ddev.site', $decoded['claims']['origins']);
+        $this->assertContains(rtrim(config('app.url'), '/'), $decoded['claims']['origins']);
     }
 
     public function test_the_barcode_matches_the_on_page_qr_exactly(): void

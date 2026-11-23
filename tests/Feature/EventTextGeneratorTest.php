@@ -94,7 +94,7 @@ class EventTextGeneratorTest extends TestCase
     {
         // Selfhost via a raw IP: the URL line is left completely clean (no RLM, no
         // isolate) so it stays link-detectable in WhatsApp.
-        URL::forceRootUrl('http://192.168.0.10');
+        $this->pinAppUrl('http://192.168.0.10');
 
         $owner = $this->createOwner();
         $role = $this->createRole($owner, 'venue', ['language_code' => 'he']);

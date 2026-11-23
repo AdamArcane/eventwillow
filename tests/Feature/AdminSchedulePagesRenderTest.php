@@ -85,12 +85,15 @@ class AdminSchedulePagesRenderTest extends TestCase
         $deleted = $this->createRole($owner, 'venue', ['subdomain' => 'gone-deleted-9']);
         Role::whereKey($deleted->id)->update(['is_deleted' => true, 'subdomain_before_delete' => 'gone']);
         $admin->get(route('admin.schedules.edit', ['role' => $deleted->encodeId()]))->assertOk()
-            ->assertSee('Restore Schedule');
+            ->assertSee(__('messages.restore_schedule'));
 
         // The expected outcome of a release that did its job: somebody else has the old name.
         $this->createRole($owner, 'venue', ['subdomain' => 'gone']);
         $admin->get(route('admin.schedules.edit', ['role' => $deleted->encodeId()]))->assertOk()
-            ->assertSee('now used by another schedule');
+            ->assertSee(__('messages.restore_keeps_subdomain', [
+                'original' => 'gone',
+                'subdomain' => 'gone-deleted-9',
+            ]));
 
         // The backlog the API, unfollow and merge paths left: deleted, but still holding a name.
         $backlog = $this->createRole($owner, 'venue', ['subdomain' => 'backlog-one']);
