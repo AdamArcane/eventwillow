@@ -1132,7 +1132,7 @@ class EventFormJourneyTest extends DuskTestCase
             $this->assertSame(['polls', 'fan_content', 'feedback'], $state['rows']);
             $this->assertSame('', $state['open'], 'every row closed until one is asked for');
             // What is in force, then that it is the schedule's doing: a new schedule takes all three.
-            $this->assertSame("Comments, Photos, Videos \u{00B7} Same as schedule", $state['fan']);
+            $this->assertSame("Comments, Photos, Videos \u{00B7} ".__('messages.same_as_schedule'), $state['fan']);
 
             // The row says the setting as it is chosen.
             $this->press($browser, '.event-subrow[data-tab=fan_content]');
